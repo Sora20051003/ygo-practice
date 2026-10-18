@@ -300,25 +300,12 @@ async function openImageImport(file) {
     const thumb = document.createElement('canvas');
     thumb.width = 60; thumb.height = Math.round(60 * c.rect.h / c.rect.w);
     thumb.getContext('2d').drawImage(res.canvas, c.rect.x, c.rect.y, c.rect.w, c.rect.h, 0, 0, thumb.width, thumb.height);
-    const sel = el('select', null,
-      c.candidates.map(k => el('option', { value: k.id, text: (DB.byId.get(k.id) || {}).name })),
-      el('option', { value: 0, text: '（このカードは入れない）' }),
-      el('option', { value: -1, text: '🔍 候補にない：名前で探す…' }));
-    // 候補にないときは名前で探す（同じイラストを次から正しく読めるよう、選んだカードは覚える）
-    sel.addEventListener('change', () => {
-      if (+sel.value !== -1) { choice[i] = +sel.value; return; }
-      sel.value = String(choice[i]);
-      promptText('カード名で探す（一部でも、ひらがなでも可）', '', q => {
-        const exact = findCardByName(q);
-        const hits = exact ? [{ c: exact }] : fuzzyCandidates(q, 8);
-        const allowed = hits.map(h => h.c).filter(x => x && !isToken(x) && (isExtraType(x) === (c.section === 'extra')));
-        if (!allowed.length) { toast('見つかりませんでした'); return; }
-        for (const x of allowed.slice().reverse()) {
-          if (![...sel.options].some(o => +o.value === x.id)) sel.insertBefore(el('option', { value: x.id, text: x.name }), sel.firstChild);
-        }
-        sel.value = String(allowed[0].id); choice[i] = allowed[0].id;
-        if (allowed.length > 1) toast(`「${allowed[0].name}」にしました。違うときは一覧から選んでください`);
-      });
+    // カード名の入力欄：押すと候補が出る。文字を入れると、名前・読み・英語名から予測して出す
+    const sel = cardCombo({
+      candidates: c.candidates.map(k => k.id),
+      extra: c.section === 'extra',
+      value: choice[i],
+      onChange: id => { choice[i] = id; },
     });
     // 一番目と二番目の候補の差が小さいものは「要確認」
     const sure = c.candidates.length < 2 || c.candidates[1].dist - c.candidates[0].dist > c.candidates[0].dist * 0.15;
@@ -385,4 +372,70 @@ function preferConsistent(cards) {
       c.adjusted = true;
     }
   });
+}
+
+// ---------- カード名の入力欄（手入力＋予測） ----------
+// 文字を入れると、カード名・読み（ひらがな可）・英語名に含まれるものを予測して出す。見つからないときは似た名前で探す
+function suggestCards(q, extra, limit = 10) {
+  const key = normalizeText(q);
+  if (!key) return [];
+  const ok = c => !isToken(c) && isExtraType(c) === extra;
+  const hits = [];
+  for (const c of DB.cards) {
+    if (!ok(c) || c.key.indexOf(key) < 0) continue;
+    // 名前・読み・英語名のどれかの先頭に一致 → 途中に一致、の順（英語名は少し後ろ）。同じなら名前が短い順
+    const [n, r, e] = c.key.split('|');
+    let rank = 9;
+    [[n, 0], [r, 0], [e, 1]].forEach(([s, w]) => {
+      const at = s ? s.indexOf(key) : -1;
+      if (at >= 0) rank = Math.min(rank, (at === 0 ? 0 : 2) + w);
+    });
+    hits.push({ c, rank: rank * 1000 + n.length });
+  }
+  hits.sort((a, b) => a.rank - b.rank);
+  let out = hits.slice(0, limit).map(h => h.c);
+  if (out.length < 3 && key.length >= 2) {
+    for (const h of fuzzyCandidates(q, limit)) if (ok(h.c) && !out.includes(h.c)) out.push(h.c);
+    out = out.slice(0, limit);
+  }
+  return out;
+}
+
+function cardCombo({ candidates, extra, value, onChange }) {
+  const nameOf = id => (id ? (DB.byId.get(id) || {}).name || '' : '');
+  const box = el('div', { class: 'card-combo' });
+  const input = el('input', { type: 'text', value: nameOf(value), placeholder: '（入れない）カード名を入力', autocomplete: 'off', spellcheck: 'false' });
+  const list = el('div', { class: 'cc-list', hidden: true });
+  let cur = value, items = [], active = -1;
+  const pick = id => {
+    cur = id; input.value = nameOf(id); list.hidden = true; onChange(id);
+    box.classList.toggle('none', !id);
+  };
+  const draw = q => {
+    list.innerHTML = '';
+    const typed = q && q !== nameOf(cur);
+    const ids = typed ? suggestCards(q, extra).map(c => c.id) : candidates;
+    items = [...ids.map(id => ({ id, label: nameOf(id) })), { id: 0, label: '（このカードは入れない）' }];
+    if (typed && !ids.length) list.append(el('div', { class: 'cc-empty', text: '見つかりません' }));
+    items.forEach((it, k) => list.append(el('div', {
+      class: 'cc-item' + (it.id === cur ? ' cur' : '') + (k === active ? ' on' : '') + (it.id ? '' : ' none'),
+      text: it.label,
+      onmousedown: e => { e.preventDefault(); pick(it.id); },
+    })));
+    list.hidden = false;
+  };
+  input.addEventListener('focus', () => { active = -1; input.select(); draw(''); });
+  input.addEventListener('input', () => { active = 0; draw(input.value.trim()); });
+  input.addEventListener('keydown', e => {
+    if (list.hidden) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(items.length - 1, active + 1); draw(input.value.trim() === nameOf(cur) ? '' : input.value.trim()); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); draw(input.value.trim() === nameOf(cur) ? '' : input.value.trim()); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (items[Math.max(0, active)]) pick(items[Math.max(0, active)].id); input.blur(); }
+    else if (e.key === 'Escape') { e.stopPropagation(); input.value = nameOf(cur); list.hidden = true; input.blur(); }
+  });
+  // 欄から離れたら、選んだカードの名前に戻す（途中まで入れた文字は捨てる）
+  input.addEventListener('blur', () => { setTimeout(() => { list.hidden = true; input.value = nameOf(cur); }, 150); });
+  box.append(input, list);
+  box.classList.toggle('none', !cur);
+  return box;
 }
