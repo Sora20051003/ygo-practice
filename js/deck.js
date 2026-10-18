@@ -68,10 +68,10 @@ const regLoading = new Set();
 function ensureRegLoaded(deck) {
   const ctx = regContext(deck);
   if (!ctx.loading) return;
-  const key = ctx.fmt + ':' + ctx.reg;
+  const key = ctx.src.join(':');
   if (regLoading.has(key)) return;
   regLoading.add(key);
-  Promise.all([loadRegulation(ctx.fmt, ctx.reg), loadReleaseDates()])
+  Promise.all([loadRegulation(...ctx.src), loadReleaseDates()])
     .then(() => { renderDeck(); renderResults(); })
     .catch(e => toast('過去のリストを読み込めませんでした：' + e.message))
     .finally(() => regLoading.delete(key));
@@ -104,7 +104,13 @@ function renderRegSelect(deck) {
     for (const d of ds) g.append(el('option', { value: d, text: `${fmtDate(d)}〜` }));
     sel.append(g);
   }
-  if (cur !== 'latest' && cur !== 'none' && !dates.includes(cur)) sel.append(el('option', { value: cur, text: `${fmtDate(cur)}〜` }));
+  if (cur !== 'latest' && cur !== 'none' && !cur.startsWith('custom:') && !dates.includes(cur)) sel.append(el('option', { value: cur, text: `${fmtDate(cur)}〜` }));
+  // オリジナルのレギュレーション
+  const og = el('optgroup', { label: 'オリジナル' });
+  for (const r of customRegs()) og.append(el('option', { value: 'custom:' + r.id, text: `★ ${r.name}` }));
+  if (cur.startsWith('custom:') && customReg(cur.slice(7))) og.append(el('option', { value: '__edit', text: `✎ 「${customReg(cur.slice(7)).name}」を編集…` }));
+  og.append(el('option', { value: '__new', text: '＋ オリジナルを作る…' }));
+  sel.append(og);
   sel.append(el('option', { value: 'none', text: '制限なし（禁止・制限・発売日を気にしない）' }));
   sel.value = cur;
 }
@@ -382,7 +388,8 @@ function renderDeck() {
   const ctx = regContext(deck);
   renderRegSelect(deck);
   ensureRegLoaded(deck);
-  $('#deck-banlist').textContent = ctx.none ? '禁止・制限なし'
+  $('#deck-banlist').textContent = ctx.custom ? customRegNote(ctx.custom)
+    : ctx.none ? '禁止・制限なし'
     : ctx.loading ? '読み込み中…'
     : ctx.date ? `${ctx.reg.replace(/-/g, '/')} 時点の未発売カードは禁止扱い`
     : (ctx.vector ? '' : '（リスト未取得）');
@@ -496,7 +503,8 @@ function encodeDeckCode(deck) {
   }
   // 最後に禁止・制限リストの指定（0=最新、1=制限なし、それ以外=2000/1/1からの日数＋2）。古いコードには無いので省略可
   const reg = deck.reg || 'latest';
-  pushVarint(bytes, reg === 'latest' ? 0 : reg === 'none' ? 1 : Math.round((Date.parse(reg) - Date.UTC(2000, 0, 1)) / 86400000) + 2);
+  // オリジナルはコードに入れられないので最新として書く
+  pushVarint(bytes, reg === 'latest' || reg.startsWith('custom:') ? 0 : reg === 'none' ? 1 : Math.round((Date.parse(reg) - Date.UTC(2000, 0, 1)) / 86400000) + 2);
   return DECK_CODE_PREFIX + b64url(bytes);
 }
 
@@ -944,6 +952,14 @@ function setupDeckView() {
   $('#deck-backup').onclick = backupAll;
   // 禁止・制限リストの切り替え（最新・過去・制限なし）
   $('#deck-reg').addEventListener('change', e => {
+    // オリジナルを作る・編集する
+    if (e.target.value === '__new' || e.target.value === '__edit') {
+      const deck = Decks.current();
+      const cur = deck.reg || 'latest';
+      openRegEditor(e.target.value === '__edit' ? cur.slice(7) : null);
+      e.target.value = cur;
+      return;
+    }
     const deck = Decks.current();
     deck.reg = e.target.value;
     Decks.save();
@@ -958,7 +974,7 @@ function setupDeckView() {
     if (deckFormat(deck) === b.dataset.format) return;
     deck.format = b.dataset.format;
     // 過去のリストの日付はルールごとに違うので、切り替えたら「最新」に戻す（制限なしはそのまま）
-    if (deck.reg && deck.reg !== 'none') deck.reg = 'latest';
+    if (deck.reg && deck.reg !== 'none' && !deck.reg.startsWith('custom:')) deck.reg = 'latest';
     Decks.save();
     renderDeck();
     renderResults();
@@ -985,4 +1001,103 @@ function setupDeckView() {
     $('#b-deck').value = Decks.currentId;
     startGame();
   };
+}
+
+// ---------- オリジナルのレギュレーションを作る・編集する ----------
+// 完全オリジナル（制限なしから）か、既存のリスト（OCG／MD の最新・過去）を元にして、カードごとに枚数を決める
+function openRegEditor(id) {
+  const old = id ? customReg(id) : null;
+  const deck = Decks.current();
+  const r = old ? JSON.parse(JSON.stringify(old))
+    : { id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), name: 'オリジナル', base: { fmt: deckFormat(deck), reg: 'latest' }, overrides: {} };
+  const LBL = ['禁止', '制限', '準制限', '無制限'];
+  const name = el('input', { type: 'text', class: 'full', value: r.name, maxlength: 40 });
+  // 元にするリスト
+  const baseSel = el('select', { class: 'full' });
+  const fillBase = () => {
+    baseSel.innerHTML = '';
+    baseSel.append(el('option', { value: '', text: '完全オリジナル（何も制限がない状態から作る）' }));
+    for (const [fmt, f] of Object.entries(FORMATS)) {
+      const g = el('optgroup', { label: `${f.label}のリストを元にする` });
+      g.append(el('option', { value: fmt + '|latest', text: `${f.label}・最新` }));
+      for (const d of DB.regDates[fmt] || []) g.append(el('option', { value: `${fmt}|${d}`, text: `${f.label}・${d.replace(/-/g, '/')}〜` }));
+      baseSel.append(g);
+    }
+    baseSel.value = r.base ? `${r.base.fmt}|${r.base.reg}` : '';
+  };
+  fillBase();
+  const ctxOf = () => {
+    const c = r.base ? baseContext(r.base.fmt, r.base.reg, deckFormat(deck)) : { fmt: deckFormat(deck), reg: 'custom' };
+    return { ...c, custom: r };
+  };
+  const baseLimit = c => { const ctx = ctxOf(); return limitIn(c, { ...ctx, custom: null }); };
+  const nowLimit = c => limitIn(c, ctxOf());
+  baseSel.addEventListener('change', async () => {
+    const v = baseSel.value;
+    r.base = v ? { fmt: v.split('|')[0], reg: v.split('|')[1] } : null;
+    const ctx = ctxOf();
+    if (ctx.loading && ctx.src) { try { await Promise.all([loadRegulation(...ctx.src), loadReleaseDates()]); } catch (e) { toast('リストを読み込めませんでした：' + e.message); } }
+    drawAll();
+  });
+  // カードを探して枚数を決める
+  const q = el('input', { type: 'text', class: 'full', placeholder: 'カード名で探す（例：うらら）' });
+  const results = el('div', { class: 'pile-list reg-results' });
+  const changed = el('div', { class: 'pile-list reg-changed' });
+  const changedHead = el('b');
+  const limitButtons = c => el('div', { class: 'reg-btns' }, LBL.map((t, n) => el('button', {
+    class: 'btn small' + (nowLimit(c) === n ? ' primary' : ''), text: t,
+    onclick: () => { if (baseLimit(c) === n) delete r.overrides[c.cid]; else r.overrides[c.cid] = n; drawAll(); },
+  })));
+  const row = (c, extra) => el('div', { class: 'pile-row' }, rowMark(c),
+    el('div', { class: 'r-main' }, el('div', { class: 'r-name', text: c.name }), el('div', { class: 'r-info', text: extra || typeLine(c) })), limitButtons(c));
+  const drawResults = () => {
+    results.innerHTML = '';
+    const text = q.value.trim();
+    if (!text) { results.append(el('p', { class: 'muted', text: 'カード名を入れると、ここに出ます。' })); return; }
+    for (const c of searchCards({ q: text }).filter(c => c.cid).slice(0, 30)) results.append(row(c, `元のリスト：${LBL[baseLimit(c)]}`));
+  };
+  const drawChanged = () => {
+    changed.innerHTML = '';
+    const ids = Object.keys(r.overrides);
+    changedHead.textContent = `変えたカード（${ids.length}枚）`;
+    if (!ids.length) changed.append(el('p', { class: 'muted', text: 'まだありません。上で探したカードの「禁止」などを押すと、ここに並びます。' }));
+    for (const cid of ids) {
+      const c = DB.cards.find(x => x.cid === +cid);
+      if (!c) continue;
+      changed.append(row(c, `元のリスト：${LBL[baseLimit(c)]} → ${LBL[r.overrides[cid]]}`));
+    }
+  };
+  const drawAll = () => { drawResults(); drawChanged(); };
+  q.addEventListener('input', drawResults);
+  drawAll();
+  const body = el('div', { class: 'stack' },
+    el('label', { class: 'muted', text: '名前' }), name,
+    el('label', { class: 'muted', text: '元にするリスト' }), baseSel,
+    el('p', { class: 'muted small-note', text: '元にしたリストの禁止・制限に、下で変えたカードの枚数を上書きします。完全オリジナルでは、変えたカード以外はすべて無制限（3枚）です。過去のリストを元にすると、その時に未発売のカードは禁止扱いになります。' }),
+    el('label', { class: 'muted', text: 'カードの枚数を決める' }), q, results,
+    changedHead, changed);
+  const buttons = [{ label: '保存してこのデッキに使う', primary: true, onClick: () => {
+    r.name = name.value.trim() || 'オリジナル';
+    saveCustomReg(r);
+    deck.reg = 'custom:' + r.id;
+    Decks.save();
+    renderDeck(); renderResults();
+    if (typeof renderRegInfo === 'function') renderRegInfo();
+    toast(`オリジナル「${r.name}」を保存しました`);
+  } }];
+  if (old) buttons.push({ label: '削除', onClick: () => {
+    if (!confirm(`オリジナル「${old.name}」を削除しますか？`)) return false;
+    deleteCustomReg(old.id);
+    for (const d of Decks.list) if (d.reg === 'custom:' + old.id) d.reg = 'latest';
+    Decks.save();
+    renderDeck(); renderResults();
+    toast('削除しました（使っていたデッキは最新のリストに戻しました）');
+  } });
+  showModal({ title: old ? `オリジナルを編集：${old.name}` : 'オリジナルの禁止・制限を作る', body, wide: true, buttons });
+}
+
+function customRegNote(cr) {
+  const n = Object.keys(cr.overrides || {}).length;
+  const base = cr.base ? `${FORMATS[cr.base.fmt].label}・${cr.base.reg === 'latest' ? '最新' : cr.base.reg.replace(/-/g, '/')}を元に` : '完全オリジナル';
+  return `オリジナル（${base}、${n}枚を変更）`;
 }

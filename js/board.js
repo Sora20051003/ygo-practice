@@ -885,6 +885,7 @@ function redo() {
 // ---------- デッキのルール（OCG／マスターデュエル）の確認 ----------
 function regText(deck) {
   const fmt = deckFormat(deck), reg = deck.reg || 'latest';
+  if (reg.startsWith('custom:')) { const cr = customReg(reg.slice(7)); return `ルール：${FORMATS[fmt].label}・オリジナル「${cr ? cr.name : '（削除済み）'}」`; }
   const list = DB.banlists[fmt];
   const when = reg === 'none' ? '禁止・制限なし' : reg === 'latest' ? `最新の禁止・制限${list && list.date ? `（${list.date.replace(/-/g, '/')}〜）` : ''}` : `${reg.replace(/-/g, '/')} の禁止・制限`;
   return `ルール：${FORMATS[fmt].label}・${when}`;
@@ -900,7 +901,7 @@ async function confirmDeckRules(deck, go) {
   const ctx = regContext(deck);
   if (ctx.loading) {
     showLoading('禁止・制限リストを読み込み中…');
-    try { await Promise.all([loadRegulation(ctx.fmt, ctx.reg), loadReleaseDates()]); } catch { /* 読めなくても続ける */ }
+    try { await Promise.all([loadRegulation(...ctx.src), loadReleaseDates()]); } catch { /* 読めなくても続ける */ }
     showLoading(null);
   }
   const { notAllowed, over } = deckProblems(deck);

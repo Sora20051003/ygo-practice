@@ -320,17 +320,43 @@ function releaseDate(c, fmt) {
 }
 
 // デッキに合わせた判定の材料
+// reg：'latest'（最新）／'none'（制限なし）／'YYYY-MM-DD'（過去のリスト）／'custom:ID'（オリジナル）
+// src：読み込みが必要なリスト [ルール, 日付]（過去のリストのとき）
 function regContext(deck) {
   const fmt = deckFormat(deck);
   const reg = deck.reg || 'latest';
-  if (reg === 'none') return { fmt, reg, none: true };
-  if (reg === 'latest') return { fmt, reg, vector: DB.banlists[fmt] };
-  return { fmt, reg, vector: DB.regCache[fmt + ':' + reg] || null, date: +reg.replace(/-/g, ''), loading: !DB.regCache[fmt + ':' + reg] || (typeof RELEASE_DATES === 'undefined' && !DB.releaseFailed) };
+  if (reg.startsWith('custom:')) {
+    const cr = customReg(reg.slice(7));
+    if (!cr) return baseContext(fmt, 'latest', fmt);   // 消されたオリジナルは最新扱い
+    if (!cr.base) return { fmt, reg, custom: cr };     // 完全オリジナル：何も制限がない状態から
+    return { ...baseContext(cr.base.fmt, cr.base.reg, fmt), reg, custom: cr };
+  }
+  return baseContext(fmt, reg, fmt);
 }
+// listFmt のリスト（日付 reg）を、cardFmt のカードの発売日で使う
+function baseContext(listFmt, reg, cardFmt) {
+  if (reg === 'none') return { fmt: cardFmt, reg, none: true };
+  if (reg === 'latest') return { fmt: cardFmt, reg, vector: DB.banlists[listFmt] };
+  const key = listFmt + ':' + reg;
+  return { fmt: cardFmt, reg, src: [listFmt, reg], vector: DB.regCache[key] || null, date: +reg.replace(/-/g, ''), loading: !DB.regCache[key] || (typeof RELEASE_DATES === 'undefined' && !DB.releaseFailed) };
+}
+
+// ---------- オリジナルのレギュレーション ----------
+// { id, name, base: null（完全オリジナル）| { fmt, reg }（元にしたリスト）, overrides: { cid: 0〜3 } }
+const customRegs = () => store.get('ygo.customRegs', []);
+const customReg = id => customRegs().find(r => r.id === id) || null;
+function saveCustomReg(r) {
+  const list = customRegs().filter(x => x.id !== r.id);
+  list.push(r);
+  store.set('ygo.customRegs', list);
+}
+function deleteCustomReg(id) { store.set('ygo.customRegs', customRegs().filter(x => x.id !== id)); }
 const isUnreleased = (c, ctx) => !!ctx.date && typeof RELEASE_DATES !== 'undefined' && releaseDate(c, ctx.fmt) > ctx.date;
 
 // 入れられる枚数（禁止0・制限1・準制限2・無制限3）
 function limitIn(c, ctx) {
+  // オリジナルで決めた枚数がいちばん優先
+  if (ctx.custom && ctx.custom.overrides && ctx.custom.overrides[c.cid] !== undefined) return ctx.custom.overrides[c.cid];
   if (ctx.none) return 3;
   if (isUnreleased(c, ctx)) return 0;
   const v = ctx.vector && ctx.vector.regulation ? ctx.vector.regulation[c.cid] : undefined;
