@@ -543,7 +543,7 @@ function findDeckCode(text) {
 }
 
 function parseDeckText(text) {
-  const result = { main: [], extra: [], side: [] }, unknown = [];
+  const result = { main: [], extra: [], side: [] }, unknown = [], review = [];   // review：似ている候補から選んでもらう行
 
   // このアプリのデッキコード
   const code = findDeckCode(text);
@@ -659,10 +659,15 @@ function parseDeckText(text) {
     if ((m = line.match(/^(.*?)\s*[×xX＊*]\s*(\d+)\s*枚?$/)) || (m = line.match(/^(.*?)\s+(\d+)\s*枚?$/))) { name = m[1]; n = +m[2]; explicit = true; }
     else if ((m = line.match(/^(\d+)\s*[×xX枚]?\s+(.*)$/))) { name = m[2]; n = +m[1]; explicit = true; }
     const c = findCardByName(name);
-    if (!c) { unknown.push(line); continue; }
+    if (!c) {
+      // 完全には一致しない：似ている名前のカードを探して、確認画面で選んでもらう
+      const cands = fuzzyCandidates(name.replace(/\s*[（(][^)）]*[)）]\s*$/, ''));
+      if (cands.length && cands[0].score >= 0.5) { review.push({ line, n: Math.min(n, MAX_COPIES), sec, cands: cands.map(x => ({ id: x.c.id, score: x.score })) }); continue; }
+      unknown.push(line); continue;
+    }
     add(c, n, explicit);
   }
-  return { result, unknown };
+  return { result, unknown, review };
 }
 
 // ---------- PDF から文字を取り出す（PDF.js を使う。使うときだけ読み込む） ----------
@@ -764,9 +769,18 @@ function openImport() {
       el('label', { class: 'check' }, asNew, '新しいデッキとして追加する（オフにすると今のデッキを上書き）')),
     buttons: [{
       label: '読み込む', primary: true, onClick: () => {
-        const { result, unknown, name, format, reg } = parseDeckText(ta.value);
+        const { result, unknown, name, format, reg, review = [] } = parseDeckText(ta.value);
+        const total0 = result.main.length + result.extra.length + result.side.length;
+        if (!total0 && !review.length) { toast(unknown[0] && unknown[0].startsWith('デッキコード') ? unknown[0] : 'カードを読み取れませんでした'); return false; }
+        // 名前が完全には一致しなかった行は、候補から選んでもらってから読み込む
+        if (review.length) { closeImport(); openReviewNames(review, result, () => applyImport(result, unknown, name, format, reg)); return false; }
+        applyImport(result, unknown, name, format, reg);
+      },
+    }],
+  });
+  function applyImport(result, unknown, name, format, reg) {
         const total = result.main.length + result.extra.length + result.side.length;
-        if (!total) { toast(unknown[0] && unknown[0].startsWith('デッキコード') ? unknown[0] : 'カードを読み取れませんでした'); return false; }
+        if (!total) { toast('カードを読み取れませんでした'); return; }
         let deck;
         if (asNew.checked) {
           deck = Decks.blank(name || (file.files[0] ? file.files[0].name.replace(/\.\w+$/, '') : '読み込んだデッキ'), format);
@@ -786,8 +800,37 @@ function openImport() {
           return;
         }
         toast(`${total}枚を読み込みました`);
-      },
-    }],
+  }
+}
+
+// 名前が完全には一致しなかった行の確認：似ているカードの候補から選ぶ（「入れない」も選べる）
+function openReviewNames(review, result, done) {
+  const rows = review.map(r => {
+    const sel = el('select', { class: 'full' },
+      r.cands.map(k => el('option', { value: k.id, text: `${DB.byId.get(k.id).name}（似ている度 ${Math.round(k.score * 100)}%）` })),
+      el('option', { value: 0, text: '（このカードは入れない）' }));
+    // 似ている度が低いものは、最初は「入れない」にしておく
+    sel.value = r.cands[0].score >= 0.6 ? r.cands[0].id : 0;
+    const num = el('input', { type: 'number', min: 1, max: 3, value: r.n, class: 'num-input' });
+    return { r, sel, num, node: el('div', { class: 'review-row' + (r.cands[0].score >= 0.8 ? '' : ' unsure') },
+      el('div', { class: 'review-line', text: `読み取った文字：${r.line}` }),
+      el('div', { class: 'row' }, sel, num, el('span', { class: 'muted', text: '枚' }))) };
+  });
+  showModal({
+    title: `名前を確認してください（${review.length}行）`, wide: true,
+    body: el('div', { class: 'stack' },
+      el('p', { class: 'muted', text: '次の行は、カード名が完全には一致しませんでした。いちばん似ているカードを選んであります。違っていたら選び直してください（黄色は自信がないもの）。' }),
+      el('div', { class: 'review-list' }, rows.map(x => x.node))),
+    buttons: [{ label: 'この内容で読み込む', primary: true, onClick: () => {
+      for (const { r, sel, num } of rows) {
+        const c = DB.byId.get(+sel.value);
+        if (!c) continue;
+        const n = Math.max(1, Math.min(MAX_COPIES, +num.value || 1));
+        const target = isExtraType(c) && r.sec === 'main' ? 'extra' : (!isExtraType(c) && r.sec === 'extra' ? 'main' : r.sec);
+        for (let i = 0; i < n; i++) result[target].push(c.id);
+      }
+      done();
+    } }],
   });
 }
 

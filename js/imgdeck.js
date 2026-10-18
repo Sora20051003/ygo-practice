@@ -190,7 +190,7 @@ function loadCardFeatures() {
 }
 
 // 特徴が一番近いカード（候補つき）。section が extra ならEXデッキのカードだけ、それ以外はメインデッキのカードだけで探す
-function matchCard(feat, section) {
+function matchCard(feat, section, keep = 5) {
   const { ids, bytes } = CARD_FEATURES;
   const step = FEAT_LEN + 3;
   // EXデッキ用・メインデッキ用の候補の番号を、最初の1回だけ作っておく
@@ -208,10 +208,10 @@ function matchCard(feat, section) {
     for (let i = 0; i < FEAT_LEN; i++) { const t = feat[i] - bytes[o + i]; dist += t * t; }
     // 枠の色の違い（カードの種類の違い）も足す
     for (let i = 0; i < 3; i++) { const t = feat[FEAT_LEN + i] - bytes[o + FEAT_LEN + i]; dist += t * t * 12; }
-    if (best.length < 5 || dist < best[best.length - 1].dist) {
+    if (best.length < keep || dist < best[best.length - 1].dist) {
       best.push({ id: ids[k], dist });
       best.sort((a, b) => a.dist - b.dist);
-      if (best.length > 5) best.pop();
+      if (best.length > keep) best.pop();
     }
   }
   return best;
@@ -227,7 +227,9 @@ async function readDeckImage(file) {
   canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
   canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
   const rects = detectDeckCards(canvas);
-  return { canvas, cards: rects.map(r => ({ rect: r, section: r.section, candidates: matchCard(cardFeature(canvas, r), r.section) })) };
+  const cards = rects.map(r => ({ rect: r, section: r.section, candidates: matchShifted(canvas, r) }));
+  preferConsistent(cards);
+  return { canvas, cards };
 }
 
 // カード1枚を切り抜いて画像にする（表示用。小さい画像は少し大きめにして文字のつぶれを防ぐ）
@@ -288,5 +290,38 @@ async function openImageImport(file) {
         toast(`「${deck.name}」を追加しました（メイン${deck.main.length}・EX${deck.extra.length}・サイド${deck.side.length}）`);
       },
     }],
+  });
+}
+
+// 切り抜き位置を少しずつずらして何回か照合し、カードごとに一番よく合った距離を使う（位置のずれに強くする）
+function matchShifted(canvas, r) {
+  const best = new Map();
+  const dx = r.w * 0.03, dy = r.h * 0.03;
+  for (const [ox, oy] of [[0, 0], [-dx, 0], [dx, 0], [0, -dy], [0, dy]]) {
+    const rr = { ...r, x: Math.max(0, r.x + ox), y: Math.max(0, r.y + oy) };
+    for (const c of matchCard(cardFeature(canvas, rr), r.section, 8)) {
+      const b = best.get(c.id);
+      if (!b || c.dist < b.dist) best.set(c.id, c);
+    }
+  }
+  return [...best.values()].sort((a, b) => a.dist - b.dist).slice(0, 6);
+}
+
+// デッキ全体のつじつまで選び直す：自信がないカードは、隣のカードや同じデッキの自信があるカードと同じ候補が
+// 近い距離にあれば、そちらを選ぶ（同じカードは並んで置かれることが多いため）
+function preferConsistent(cards) {
+  const sure = c => c.candidates.length < 2 || c.candidates[1].dist - c.candidates[0].dist > c.candidates[0].dist * 0.15;
+  const confident = new Map();
+  cards.forEach(c => { if (c.candidates[0] && sure(c)) confident.set(c.section + ':' + c.candidates[0].id, true); });
+  cards.forEach((c, i) => {
+    if (!c.candidates.length || sure(c)) return;
+    const top = c.candidates[0].dist;
+    const near = c.candidates.filter(k => k.dist <= top * 1.25);
+    const neighbor = [cards[i - 1], cards[i + 1]].filter(n => n && n.section === c.section && n.candidates[0]).map(n => n.candidates[0].id);
+    const pick = near.find(k => neighbor.includes(k.id)) || near.find(k => confident.has(c.section + ':' + k.id));
+    if (pick && pick !== c.candidates[0]) {
+      c.candidates = [pick, ...c.candidates.filter(k => k !== pick)];
+      c.adjusted = true;
+    }
   });
 }

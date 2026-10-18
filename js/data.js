@@ -112,6 +112,7 @@ function indexCards(cards) {
   for (const c of cards) {
     c.key = normalizeText(c.name) + '|' + normalizeText(c.ruby) + '|' + normalizeText(c.en);
     c.nkey = normalizeText(c.name);
+    DB.fuzzIndex = null;
     DB.byId.set(c.id, c);
     if (c.cid && !DB.byCid.has(c.cid)) DB.byCid.set(c.cid, c);
   }
@@ -522,4 +523,43 @@ function findCardByName(name) {
     if (c.key.includes(n)) partial.push(c);
   }
   return partial.length === 1 ? partial[0] : null;
+}
+
+// ---------- 名前のあいまい検索（デッキリストの読み込み用） ----------
+// 読み取りで間違えやすい文字（ロ／口、カ／力 など）をそろえ、2文字ずつの組み合わせの重なりで似ている度合いを測る
+const CONFUSABLE = { '口': 'ロ', '力': 'カ', '工': 'エ', '一': 'ー', '二': 'ニ', '八': 'ハ', '卜': 'ト', '夕': 'タ', '才': 'オ', '千': 'チ', 'へ': 'ヘ', 'ぺ': 'ペ', 'べ': 'ベ', '0': 'o', 'ｏ': 'o' };
+const fuzzKey = s => normalizeText(s).replace(/./g, ch => CONFUSABLE[ch] || ch);
+function bigrams(s) {
+  const out = new Map();
+  for (let i = 0; i < s.length - 1; i++) { const b = s.slice(i, i + 2); out.set(b, (out.get(b) || 0) + 1); }
+  if (s.length === 1) out.set(s, 1);
+  return out;
+}
+function dice(a, b) {
+  if (!a.size || !b.size) return 0;
+  let inter = 0, na = 0, nb = 0;
+  for (const v of a.values()) na += v;
+  for (const v of b.values()) nb += v;
+  for (const [k, v] of a) if (b.has(k)) inter += Math.min(v, b.get(k));
+  return (2 * inter) / (na + nb);
+}
+// 似ているカードを点数（0〜1）の高い順に返す。日本語名・読み・英語名のいちばん近いもので比べる
+function fuzzyCandidates(name, k = 5) {
+  const q = fuzzKey(name);
+  if (q.length < 2) return [];
+  const qb = bigrams(q);
+  if (!DB.fuzzIndex) {
+    DB.fuzzIndex = DB.cards.filter(c => !isToken(c)).map(c => ({ c, keys: [fuzzKey(c.name), fuzzKey(c.ruby), fuzzKey(c.en)].filter(x => x.length >= 2).map(x => ({ x, b: bigrams(x) })) }));
+  }
+  const out = [];
+  for (const { c, keys } of DB.fuzzIndex) {
+    let s = 0;
+    for (const { x, b } of keys) {
+      let v = dice(qb, b);
+      if (x.includes(q) || q.includes(x)) v = Math.max(v, 0.75 * Math.min(q.length, x.length) / Math.max(q.length, x.length) + 0.2);
+      if (v > s) s = v;
+    }
+    if (s >= 0.35) out.push({ c, score: s });
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, k);
 }
