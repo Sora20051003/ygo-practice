@@ -7,7 +7,7 @@ function switchView(name) {
   store.set('ygo.view', name);
   document.body.dataset.view = name;   // スマホ横向きのとき、一人回しだけ横画面の配置にする
   if (name !== 'board') unlockLandscape();
-  if (typeof updateLandscape === 'function') updateLandscape();
+  if (typeof updateLandscape === 'function') { updateLandscape(); if (name === 'board') tryLandscapeLock(); }
   if (name === 'board') { refreshBoardDeckSelect(); renderBoard(); }
   if (name === 'duel') renderDuelLobby();
 }

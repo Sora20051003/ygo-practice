@@ -1047,15 +1047,23 @@ function setupRotateHint() {
   addEventListener('resize', updateLandscape);
   addEventListener('orientationchange', () => setTimeout(updateLandscape, 200));
   updateLandscape();
-  // Android など：一人回しで縦のまま触ったら、全画面にして横向きに固定する（ボタンなどを押したときだけ許可される）
-  const canLock = !!(document.documentElement.requestFullscreen && screen.orientation && screen.orientation.lock);
-  if (!canLock) return;
-  document.addEventListener('pointerdown', () => {
-    if (!document.body.classList.contains('rotated') || document.fullscreenElement) return;
-    document.documentElement.requestFullscreen({ navigationUI: 'hide' })
-      .then(() => screen.orientation.lock('landscape'))
-      .catch(() => { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); });   // 固定できなければ回した表示のまま使う
-  }, true);
+  // Android など：一人回しで縦のまま触ったら、全画面にして横向きに固定する。
+  // 全画面はタップ（click・touchend）のときだけ許される。指を置いた瞬間（pointerdown）では許されない
+  for (const ev of ['click', 'touchend']) document.addEventListener(ev, tryLandscapeLock, true);
+}
+let lockTried = 0, lockFailed = false;
+function tryLandscapeLock() {
+  if (!(document.documentElement.requestFullscreen && screen.orientation && screen.orientation.lock)) return;
+  if (lockFailed || !document.body.classList.contains('rotated') || document.fullscreenElement) return;
+  if (Date.now() - lockTried < 1500) return;   // touchend と click で2回呼ばれないように
+  lockTried = Date.now();
+  document.documentElement.requestFullscreen({ navigationUI: 'hide' })
+    .then(() => screen.orientation.lock('landscape').catch(() => {
+      // 全画面にはなったが向きを固定できない端末：回した表示のまま使う（何度も全画面を出し入れしないよう、以後は試さない）
+      lockFailed = true;
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    }))
+    .catch(() => { lockTried = 0; });   // タップ以外から呼ばれたなど。次にタップしたときにまた試す
 }
 function unlockLandscape() {
   try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch { /* 固定していなければ何もしない */ }
