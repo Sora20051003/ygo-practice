@@ -546,7 +546,7 @@ function openPickHand() {
 function drawCard() {
   const S = Board.S;
   if (S.auto) return;
-  if (!S.deck.length) { toast('デッキがありません'); return; }
+  if (!S.deck.length) { commit(); deckOutLose(); return; }   // デッキ切れで負け
   moveCard(S.deck[0].uid, { zone: 'hand', noShuffle: true }, '（ドロー）');
 }
 
@@ -1136,9 +1136,33 @@ function endTurn() {
   if (S.deck.length) {
     const inst = S.deck.shift(); inst.faceUp = true; S.hand.push(inst);
     log(`ドローフェイズ：${cardOf(inst).name} をドロー`, 'ドローフェイズ：1枚ドロー');
-  } else log('ドローフェイズ：デッキがないのでドローできません');
+  } else { deckOutLose(); return; }   // ドローフェイズに引けなければデッキ切れで負け
   finishChange();
 }
 
 // 先攻1ターン目のドロー（今のルールはしない。昔のルールなどで「する」にできる）
 const firstTurnDraw = () => store.get('ygo.firstDraw', false);
+
+// ---------- 勝ち負け（一人回し） ----------
+// 手動：デッキが0枚のときにドローしようとしたら負け。自動処理：エンジンの判定（デッキ切れ・ライフ0など）
+function gameOver(result, reason) {
+  Timer.running = false; renderTimer();
+  const lose = result !== 'win';
+  showModal({
+    title: lose ? '💀 負け' : '🏆 勝ち',
+    body: el('p', { text: `${reason}で${lose ? '負け' : '勝ち'}です。` }),
+    buttons: [
+      { label: '同じ初手でやり直す', primary: true, onClick: () => restartSame() },
+      { label: 'シャッフルして開始', onClick: () => startGame() },
+      { label: lose ? '1手戻す' : '閉じる', onClick: () => { if (lose) undo(); } },
+    ],
+  });
+}
+// 手動でデッキからドローする。引けなければ負け（効果で2枚以上引く途中で0枚になった場合も、その時点で負け）
+function deckOutLose() {
+  const S = Board.S;
+  log('デッキが0枚なのでドローできない → デッキ切れで負け');
+  S.lost = 'デッキ切れ';
+  finishChange();
+  gameOver('lose', 'デッキ切れ（デッキが0枚の状態でドロー）');
+}

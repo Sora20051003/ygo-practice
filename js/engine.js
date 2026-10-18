@@ -252,7 +252,7 @@ class AutoDuel {
         if (m.type === MSG.RETRY) { this.retry = true; if (++this.retries > 20) throw new Error('処理が先に進めなくなりました'); continue; }
         if (isSelectMsg(m)) ask = m; else this.onInfo(m);
       }
-      if (status === 0) { this.pending = null; return; }   // 対戦終了
+      if (status === 0 || this.ended) { this.pending = null; return; }   // 対戦終了（勝ち負けが決まったら、それ以上は進めない）
       if (status === 2) continue;
       if (!ask) continue;
       // 自分が次の行動を選ぶ時点で、召喚したばかりのカードの記録は消す（誘発の機会は終わっている）
@@ -365,7 +365,12 @@ class AutoDuel {
       case MSG.CONFIRM_CARDS: if (m.cards.length) this.addLog(`確認：${m.cards.map(c => cardName(c.code)).join('、')}`); break;
       case MSG.TOSS_COIN: this.addLog(`コイン：${m.results.map(r => (r ? '表' : '裏')).join('・')}`); break;
       case MSG.TOSS_DICE: this.addLog(`サイコロ：${m.results.join('・')}`); break;
-      case MSG.WIN: this.ended = m.player === this.me ? '自分の勝ち' : '相手の勝ち'; this.addLog(`対戦終了（${this.ended}）`); break;
+      case MSG.WIN: {
+        const why = { 1: 'ライフが0', 2: 'デッキ切れ（ドローできない）', 3: '時間切れ' }[m.reason] || '';
+        this.endReason = why;
+        this.ended = (m.player === this.me ? '自分の勝ち' : '相手の勝ち') + (why ? '・' + why : '');
+        this.addLog(`対戦終了（${this.ended}）`); break;
+      }
       default: break;
     }
     if (m.type === MSG.DAMAGE || m.type === MSG.RECOVER || m.type === MSG.PAY_LPCOST) {
