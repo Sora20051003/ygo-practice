@@ -144,7 +144,10 @@ function addToDeck(card, section) {
     toast(limit < MAX_COPIES ? `${card.name}は${LIMIT_LABEL[limit]}カードなので${limit}枚までです` : `同じカードは${MAX_COPIES}枚までです`);
     return;
   }
-  deck[section].push(card.id);
+  // 同じ名前のカードがすでにあれば、その隣（最後の1枚の後ろ）に入れる
+  let at = -1;
+  deck[section].forEach((id, i) => { const x = DB.byId.get(id); if (x && x.name === card.name) at = i; });
+  if (at >= 0) deck[section].splice(at + 1, 0, card.id); else deck[section].push(card.id);
   Decks.save();
   renderDeck();
   // スマホは検索中にデッキが見えないので、追加したことを知らせる
