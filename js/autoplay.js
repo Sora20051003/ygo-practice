@@ -578,39 +578,68 @@ function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note
   const grid = el('div', { class: 'ap-grid' });
   const info = el('p', { class: 'muted' });
   const ok = el('button', { class: 'btn primary', text: '決定' });
+  // 同じ名前のカードをまとめる。デッキ・手札・墓地・除外・EXデッキの同名カードは1つの札（×枚数）にし、
+  // フィールドのカードはどれを選ぶかで違うので別の札のまま、同じ名前どうしを隣に並べる
+  const PILE = LOC.DECK | LOC.HAND | LOC.GRAVE | LOC.REMOVED | LOC.EXTRA;
+  const groups = [];
+  const byKey = new Map();
+  cards.forEach((c, i) => {
+    const pile = (c.location & PILE) && !(c.location & LOC.OVERLAY);
+    const key = pile ? `${c.code}|${c.controller}|${c.location}|${extra ? extra(c, i) : ''}` : `field|${i}`;
+    let g = byKey.get(key);
+    if (!g) { g = { key, code: c.code, idx: [] }; byKey.set(key, g); groups.push(g); }
+    g.idx.push(i);
+  });
+  // 名前ごとに固める（最初に出てきた順を保つ）
+  const firstOf = new Map();
+  groups.forEach((g, k) => { if (!firstOf.has(g.code)) firstOf.set(g.code, k); });
+  groups.sort((a, b) => firstOf.get(a.code) - firstOf.get(b.code));
+  const tileOf = new Map();
   const refresh = () => {
     const names = [...chosen].map(i => cards[i] && cards[i].code ? cardName(cards[i].code) : '裏側のカード');
     info.textContent = (note ? note + '　' : '') + (min === max ? `${min}枚選んでください` : `${min}〜${max}枚選んでください`) + (names.length ? `（選択中：${names.join('、')}）` : '（カードを押して選び、「決定」で確定します）');
     ok.disabled = chosen.size < min || chosen.size > max;
-    [...grid.children].forEach((n, i) => n.classList.toggle('on', chosen.has(i)));
+    for (const g of groups) {
+      const n = tileOf.get(g), k = g.idx.filter(i => chosen.has(i)).length;
+      n.classList.toggle('on', k > 0);
+      const badge = n.querySelector('.ap-count');
+      if (badge) badge.textContent = k ? `${k}／${g.idx.length}枚選択` : `×${g.idx.length}`;
+    }
     if (Auto.selectable) renderBoard();
   };
-  cards.forEach((c, i) => {
-    const n = promptCard(c, extra && extra(c, i));
-    n.addEventListener('click', () => {
-      if (max === 1) { const had = chosen.has(i); chosen.clear(); if (!had) chosen.add(i); refresh(); return; }   // 1枚だけ選ぶときは押し直しで切り替え。決定で確定
-      if (chosen.has(i)) chosen.delete(i); else if (chosen.size < max) chosen.add(i);
-      refresh();
-    });
+  // 札を押したとき：1枚選ぶなら切り替え。まとめた札は押すたびに1枚ずつ増え、全部選んだらもう一度押すと外れる
+  const press = g => {
+    const sel = g.idx.filter(i => chosen.has(i)), free = g.idx.filter(i => !chosen.has(i));
+    if (max === 1) { const had = sel.length > 0; chosen.clear(); if (!had) chosen.add(g.idx[0]); refresh(); return; }
+    if (free.length && chosen.size < max) chosen.add(free[0]);
+    else sel.forEach(i => chosen.delete(i));
+    refresh();
+  };
+  for (const g of groups) {
+    const c = cards[g.idx[0]];
+    const n = promptCard(c, extra && extra(c, g.idx[0]));
+    if (g.idx.length > 1) n.append(el('div', { class: 'ap-count' }));
+    n.addEventListener('click', () => press(g));
+    tileOf.set(g, n);
     grid.append(n);
-  });
-  const answerDone = idx => onDone(idx);
-  ok.onclick = () => answerDone([...chosen]);
+  }
+  ok.onclick = () => onDone([...chosen].sort((a, b) => a - b));
   const foot = el('div', { class: 'row' }, ok, canCancel ? el('button', { class: 'btn', text: 'キャンセル', onclick: onCancel }) : null);
   refresh();
   promptModal(el('div', { class: 'stack' }, info, grid, foot));
-  boardPickable(cards, grid, chosen);
+  // 盤面・手札のカードを直接押したときは、そのカードが入っている札を押したことにする
+  boardPickable(cards, i => press(groups.find(g => g.idx.includes(i))), chosen);
 }
 
 // 選べるカードのうち、盤面・手札にある自分のカードは、盤面をクリックしても選べるようにする
-function boardPickable(cards, grid, chosen) {
+function boardPickable(cards, pick, chosen) {
   const me = Auto.duel.me;
   const map = new Map();
   cards.forEach((c, i) => { if (c.controller === me && (c.location & (LOC.MZONE | LOC.SZONE | LOC.HAND))) map.set(autoKey(me, c.location, c.sequence), i); });
   if (!map.size) return;
   Auto.selectable = map;
   Auto.chosen = chosen || new Set();
-  Auto.pickFromBoard = uid => { const n = grid.children[map.get(uid)]; if (n) n.click(); };
+  Auto.pickFromBoard = uid => { if (map.has(uid)) pick(map.get(uid)); };
   renderBoard();
 }
 
