@@ -10,26 +10,44 @@ function switchView(name) {
 }
 
 // 新しい版が公開されたら知らせる（ネット版のみ。5分ごとと、画面に戻ってきたときに確認）
+// 開いた直後に新しい版が見つかったときは、そのまま新しい版に切り替える（ブラウザに残った古いページを使わないように）
 function startUpdateCheck() {
   if (!location.protocol.startsWith('http')) return;
-  let shown = false;
+  let shown = false, first = true;
   const check = async () => {
     if (shown) return;
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
       const j = await r.json();
-      if (j.version && j.version !== APP_VERSION) { shown = true; showUpdateBanner(); }
-    } catch { /* オフラインなどは無視 */ }
+      if (j.version && j.version !== APP_VERSION) {
+        // 同じ版への自動切り替えは1回だけ（うまく切り替わらないときに繰り返さない）
+        let tried = null;
+        try { tried = sessionStorage.getItem('ygo.autoUpdate'); } catch { /* 使えなくてもよい */ }
+        if (first && tried !== j.version) {
+          try { sessionStorage.setItem('ygo.autoUpdate', j.version); } catch { /* 使えなくてもよい */ }
+          freshReload(j.version);
+          return;
+        }
+        shown = true; showUpdateBanner(j.version);
+      }
+    } catch { /* オフラインなどは無視 */ } finally { first = false; }
   };
   setInterval(check, 5 * 60 * 1000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
   check();
 }
 
-function showUpdateBanner() {
+// ブラウザに残った古いページを使わず、必ず新しいページを読み込む（アドレスに版番号を付ける）
+function freshReload(version) {
+  const u = new URL(location.href);
+  u.searchParams.set('v', version || Date.now());
+  location.replace(u.toString());
+}
+
+function showUpdateBanner(version) {
   document.body.append(el('div', { class: 'update-banner' },
     el('span', { text: '新しいバージョンがあります。' }),
-    el('button', { class: 'btn small primary', text: '更新する', onclick: () => location.reload() })));
+    el('button', { class: 'btn small primary', text: '更新する', onclick: () => freshReload(version) })));
 }
 
 function showLoading(text) {
