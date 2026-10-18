@@ -161,6 +161,7 @@ class AutoDuel {
     this.log = []; this.pending = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set();   // 召喚・特殊召喚したばかりのカードの位置（誘発効果を自動で発動するため）
+    this.justMoved = new Set();      // 直前に動いたカードの行き先（墓地へ送られた場合などの誘発を聞くため）
     this.used = new Map();   // このターンに自分が使った効果（カードid → Stringid の番号の集合。'proc'＝自分の方法での特殊召喚）
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);   // 相手の判断用（やり直しで同じになるように）
     const team = n => ({ drawCountPerTurn: 1, startingDrawCount: n, startingLP: 8000 });
@@ -253,7 +254,7 @@ class AutoDuel {
       if (status === 2) continue;
       if (!ask) continue;
       // 自分が次の行動を選ぶ時点で、召喚したばかりのカードの記録は消す（誘発の機会は終わっている）
-      if (ask.player === this.me && (ask.type === MSG.SELECT_IDLECMD || ask.type === MSG.SELECT_BATTLECMD)) this.justSummoned.clear();
+      if (ask.player === this.me && (ask.type === MSG.SELECT_IDLECMD || ask.type === MSG.SELECT_BATTLECMD)) { this.justSummoned.clear(); this.justMoved.clear(); }
       this.lastAsk = ask;
       if (replay && replay.length) { const r = replay.shift(); this.respond(r.res, !r.user, true); continue; }
       // 試し発動中（probeActivate）：自分の選択は自動で答え、意味のある選択が出たかを数える
@@ -329,6 +330,7 @@ class AutoDuel {
         if (!code || m.from.location === m.to.location && m.from.controller === m.to.controller) break;
         if (m.from.controller !== this.me && m.to.controller !== this.me && !(m.from.location & LOC.ONFIELD_ALL) && !(m.to.location & LOC.ONFIELD_ALL)) break;   // 相手の手札・デッキ・墓地の間の移動（手札調整など）は省く
         if (m.to.location === LOC.HAND && m.from.location === LOC.DECK && m.from.controller === this.me && this.drawing) break;
+        this.justMoved.add(locKey(m.to.controller, m.to.location, m.to.sequence));
         this.events.push({ t: 'move', code, from: { con: m.from.controller, loc: m.from.location, seq: m.from.sequence }, to: { con: m.to.controller, loc: m.to.location, seq: m.to.sequence }, faceUp: !!(m.to.position & 5) });
         const secret = m.to.controller !== this.me && !(m.to.position & 5) && (m.to.location & (LOC.ONFIELD_ALL | LOC.HAND | LOC.DECK));   // 相手が裏向きにしたカードは名前を伏せる
         this.addLog(`${secret ? 'カード' : cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}`);
@@ -405,9 +407,9 @@ const isSelectMsg = m => SELECT_TYPES.has(m.type);
 
 // 自分の入力でも、聞くまでもないもの（発動できるものが無いチェーン確認・並び替え）は自動で返す
 // チェーン確認（マスターデュエルと同じ考え方）
-//   always：発動できるものがあれば毎回聞く
-//   auto  ：発動できるものがあれば聞く。ただし自分のターンの手札誘発（うらら・Gなど、相手の発動へ使うもの）だけは聞かない
-//   off   ：必ず答える場面（強制効果など）だけ聞く
+//   always（オン）：召喚・発動などすべての行動のあと、発動できるものがあれば聞く
+//   auto（自動）：効果が発動したときに、それに対して発動できるものがあれば聞く（召喚・移動したカードの誘発も聞く）
+//   off（オフ）：聞かない（必ず答える場面だけ）
 const locKey = (con, loc, seq) => `${con}-${loc}-${seq}`;
 
 function skippable(m, duel) {
@@ -423,9 +425,10 @@ function skippable(m, duel) {
     const last = duel && duel.chain[duel.chain.length - 1];
     let ask = mode === 'always';
     if (mode === 'auto') {
-      if (last && last.con !== duel.me) ask = true;   // 相手の発動にはチェーンを聞く
-      else if (duel.turnPlayer !== duel.me && !last) ask = true;   // 相手のターン（相手の召喚などに手札誘発を使う機会）
-      else ask = !m.selects.every(c => c.location === LOC.HAND && isHandTrap(c.code));   // 自分のターンで何も起きていないときの手札誘発（うらら・Gなど）は聞かない。手札から発動できる罠などは聞く
+      // 効果が発動したときだけ聞く（相手の発動、または自分の発動に自分で重ねられるとき）
+      if (last) ask = last.con !== duel.me || !m.selects.every(c => c.location === LOC.HAND && isHandTrap(c.code));
+      // チェーンが無いとき：召喚したばかり・動いたばかりのカードの誘発効果だけ聞く（それ以外の空き時間は聞かない）
+      else ask = m.selects.some(c => duel.justSummoned.has(locKey(c.controller, c.location, c.sequence)) || duel.justMoved.has(locKey(c.controller, c.location, c.sequence)));
     }
     if (!ask) return { type: RES.SELECT_CHAIN, index: null };
   }

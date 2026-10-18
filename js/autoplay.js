@@ -290,8 +290,13 @@ function setupAutoPlay() {
   $$('#ap-oppmode button').forEach(b => { b.onclick = () => { store.set('ygo.oppMode', b.dataset.v); renderOppSettings(); toast(b.dataset.v === 'trap' ? '誘発練習：次に開始したときから、相手が手札誘発を使ってきます' : '次に開始したときから、相手は何もしません'); }; });
   $('#ap-trappick').onclick = openOppHandPicker;
   $('#ap-chain').value = store.get('ygo.chainMode', 'auto');
+  const chainNote = { off: 'チェーンの確認をしません（必ず答える場面だけ聞きます）', always: '召喚・発動などのあと、発動できるものがあれば毎回聞きます', auto: '効果が発動したとき、それに対して発動できるものがあるときだけ聞きます' };
+  const paintChain = () => { const v = $('#ap-chain').value; $$('#ap-chainseg button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); $('#ap-chainnote').textContent = chainNote[v] || ''; };
+  $$('#ap-chainseg button').forEach(b => { b.onclick = () => { $('#ap-chain').value = b.dataset.v; $('#ap-chain').onchange({ target: $('#ap-chain') }); }; });
+  paintChain();
   $('#ap-chain').onchange = e => {
     store.set('ygo.chainMode', e.target.value);
+    paintChain();
     if (Auto.duel) { Auto.duel.chainMode = e.target.value; autoSave(); }
   };
   // 任意の効果は聞くのが標準（前に自動にしていた設定は1回だけオフに戻す）
