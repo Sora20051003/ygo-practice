@@ -706,6 +706,8 @@ function renderBoard() {
   if (withOpp) {
     // 対戦中：上に相手の盤面（相手から見た向きなので左右が逆）、真ん中に共有のEXモンスターゾーン
     renderOppRows(field);
+    // 自動処理モード：上の帯に相手（CPU）のライフ
+    if (S.auto && S.opp) $('#opp-bar').append(lpBox(Auto.duel ? Auto.duel.lp[1 - Auto.duel.me] : S.opp.lp, 'opp'));
     field.append(oppPileEl('ban'), blank(), emzSharedEl(0), blank(), emzSharedEl(1), blank(), pileEl('ban'));
   } else {
     // 1段目：EXモンスターゾーン・除外
@@ -724,6 +726,7 @@ function renderBoard() {
   hand.innerHTML = '';
   for (const inst of S.hand) if (!(Board.pick && Board.pick.uid === inst.uid && inst.tokenCard)) hand.append(cardEl(inst, 'hand'));
   $('#hand-count').textContent = S.hand.length;
+  renderMyLp();
 
   const banner = $('#pick-banner');
   banner.hidden = !Board.pick;
@@ -836,3 +839,23 @@ document.addEventListener('pointerdown', e => {
   const n = e.target.closest('[data-cid]');
   if (n) previewCard(DB.byId.get(+n.dataset.cid));
 }, true);
+
+// ライフの表示（減ったら赤、増えたら緑に光らせる）
+const lastLp = {};
+function lpBox(lp, who) {
+  const box = el('div', { class: 'lp-box ' + who }, el('small', { text: who === 'me' ? '自分' : '相手' }), el('b', { text: 'LP ' + lp }));
+  const prev = lastLp[who];
+  if (prev !== undefined && prev !== lp) box.classList.add(lp < prev ? 'lp-down' : 'lp-up');
+  lastLp[who] = lp;
+  return box;
+}
+function renderMyLp() {
+  const slot = $('#my-lp');
+  const S = Board.S;
+  const show = !!(S && S.auto && Auto.duel);
+  slot.hidden = !show;
+  if (!show) return;
+  const box = lpBox(Auto.duel.lp[Auto.duel.me], 'me');
+  slot.className = box.className;
+  slot.replaceChildren(...box.childNodes);
+}

@@ -795,3 +795,14 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
 .ap-item { position: relative; }
 .ap-count { position: absolute; top: 2px; right: 2px; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: rgba(0,0,0,.72); color: #fff; }
 .ap-item.on .ap-count { background: #3fb6ff; }
+/* ライフ */
+.hand-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.lp-box { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 12px; border-radius: 999px; background: #10233f; color: #fff; border: 2px solid #3fb6ff; }
+.lp-box.opp { border-color: #ff5a5a; background: #3a1018; margin-left: auto; }
+.lp-box small { font-size: 11px; opacity: .8; }
+.lp-box b { font-size: 18px; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+.lp-box.lp-down { animation: lpdown 1s ease-out; }
+.lp-box.lp-up { animation: lpup 1s ease-out; }
+@keyframes lpdown { 0% { box-shadow: 0 0 0 0 rgba(255,60,60,.9); background: #a01020; } 100% { box-shadow: 0 0 0 14px rgba(255,60,60,0); } }
+@keyframes lpup { 0% { box-shadow: 0 0 0 0 rgba(60,220,120,.9); background: #12703a; } 100% { box-shadow: 0 0 0 14px rgba(60,220,120,0); } }
+.lp-box[hidden] { display: none; }
