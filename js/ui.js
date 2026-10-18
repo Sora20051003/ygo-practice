@@ -426,7 +426,7 @@ function renderDetail(box, c, extra) {
     if (t && t.ja) {
       if (t.jaP) jaBox.append(el('div', { class: 'text-label', text: 'ペンデュラム効果' }), el('div', { class: 'card-text', text: t.jaP }),
         el('div', { class: 'text-label', text: isMonster(c) && has(c, T.NORMAL) && !has(c, T.EFFECT) ? 'フレーバーテキスト' : 'モンスター効果' }));
-      jaBox.append(el('div', { class: 'card-text', text: t.ja }));
+      if (!(typeof decorateUsed === 'function' && decorateUsed(jaBox, c, t.ja))) jaBox.append(el('div', { class: 'card-text', text: t.ja }));
     } else {
       jaBox.append(el('div', { class: 'card-text muted', text: c.noJp
         ? '日本では未発売のカードのため、日本語の効果文はありません。下の英語の効果を見てください。'

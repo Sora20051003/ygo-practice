@@ -142,6 +142,8 @@ function autoAfter(noAnim) {
 function autoSync() {
   if (!Auto.duel) return;
   Board.S = autoState();
+  // 詳細欄に出しているカードを描き直す（使用済みのチェックを最新にする）
+  if (!isMobile() && Board.detailCard) renderDetail($('#board-detail'), Board.detailCard);
   Board.pick = null;
   renderBoard();
 }
@@ -856,4 +858,63 @@ function findUseless(d) {
     if (!/発動できる|発動時の効果処理|発動時に/.test(text)) return;
     if (!d.probeActivate(i)) Auto.useless.add(i);
   });
+}
+
+// ---------- このターン使った効果のチェック ----------
+// 効果文から「このカード名の〜は1ターンに1度」の効果の番号と、効果の並び（Stringid の番号との対応）を読む
+function optInfo(text) {
+  const t = toHalf(text || '');
+  const parts = t.split(/(?=[①-⑳])/);
+  const order = [];   // 説明（Stringid）を持つ効果の番号を順に：発動する効果と、自分の方法での特殊召喚
+  for (const p of parts) {
+    const n = p[0];
+    if (!/[①-⑳]/.test(n)) continue;
+    if (/発動/.test(p) || /特殊召喚できる/.test(p)) order.push(n);
+  }
+  const named = /このカード名/.test(t);
+  const once = new Set();
+  let all = false, card = false, proc = null;
+  if (named) {
+    for (const m of t.matchAll(/([①-⑳]+)の効果は(?:それぞれ)?1ターンに1度/g)) for (const ch of m[1]) once.add(ch);
+    if (/このカード名の効果は1ターンに1度/.test(t)) all = true;
+    const pm = t.match(/([①-⑳])の方法による特殊召喚は1ターンに1度/);
+    if (pm) { proc = pm[1]; once.add(pm[1]); }
+    if (/このカード名のカードは1ターンに1枚しか発動できない/.test(t)) card = true;
+  }
+  return { order, once, all, card, proc };
+}
+
+// このターンに使ったもの（自動処理モード）。{ nums: 使った効果の番号, card: カードを発動した, any: 何か使った }
+function usedMarks(c, text) {
+  const d = Auto.duel;
+  if (!d || !Board.S || !Board.S.auto || !d.used) return null;
+  const set = d.used.get(c.id) || (c.alias && d.used.get(c.alias));
+  if (!set || !set.size) return null;
+  const info = optInfo(text || c.jaText);
+  const nums = new Set();
+  for (const k of set) {
+    if (k === 'proc') { if (info.proc) nums.add(info.proc); continue; }
+    if (typeof k === 'number' && info.order[k]) nums.add(info.order[k]);
+  }
+  return { nums, info, any: true };
+}
+
+// 詳細欄の効果文に ✅ を付ける（名前指定の1ターンに1度の効果だけ）
+function decorateUsed(box, c, text) {
+  // 手動モード：「効果を使用済みにする」で記録したカード
+  if (Board.S && !Board.S.auto && Board.S.used && Board.S.used.includes(c.name)) { box.append(el('div', { class: 'used-head', text: '✅ このターン効果を使用済み（記録）' }), el('div', { class: 'card-text', text })); return true; }
+  const u = usedMarks(c, text);
+  if (!u) return false;
+  const { nums, info } = u;
+  const shown = [...nums].filter(n => info.all || info.once.has(n));
+  if (!shown.length && !(info.card && u.any) && !(info.all && u.any)) return false;
+  const head = el('div', { class: 'used-head', text: '✅ このターン使用済み：' + (info.card ? 'このカードの発動（同名カードも1ターンに1枚）' : info.all && !shown.length ? 'このカード名の効果' : shown.join('')) });
+  const body = el('div', { class: 'card-text' });
+  for (const line of text.split('\n')) {
+    const n = toHalf(line)[0];
+    const used = (info.all && u.any && /[①-⑳]/.test(n)) || shown.includes(n);
+    body.append(el('div', { class: used ? 'used-line' : '', text: (used ? '✅ ' : '') + line }));
+  }
+  box.append(head, body);
+  return true;
 }

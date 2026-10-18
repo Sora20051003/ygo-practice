@@ -345,6 +345,7 @@ function showBoardDetail(loc) {
       el('div', { class: 'd-stats', text: `${ATTR[c.attr] || ''} ${levelText(c)}　${statText(c)}` }));
     return;
   }
+  Board.detailCard = c;
   showCardDetail(c, '#board-detail', extra);
 }
 
@@ -810,6 +811,7 @@ function setupBoardView() {
 // パソコン：右の詳細欄に、クリックしたカードを出す。スマホ：盤面の上の帯に、最後に触ったカードを出す（押すと詳細）
 function previewCard(c) {
   if (!c) return;
+  Board.detailCard = c;
   if (!isMobile()) {
 
     renderDetail($('#board-detail'), c);
