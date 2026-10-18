@@ -185,6 +185,7 @@ function autoUndo() {
   const d = Auto.duel;
   if (!d || !d.userMarks.length) { toast('これ以上戻せません'); return; }
   closePromptModal();
+  Auto.selQueue = null;
   try { d.undo(); } catch (e) { toast('戻せませんでした：' + e.message); }
   autoAfter(true);
 }
@@ -574,7 +575,8 @@ function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note
   const info = el('p', { class: 'muted' });
   const ok = el('button', { class: 'btn primary', text: '決定' });
   const refresh = () => {
-    info.textContent = (note ? note + '　' : '') + (min === max ? `${min}枚選んでください` : `${min}〜${max}枚選んでください`) + `（${chosen.size}枚選択中）`;
+    const names = [...chosen].map(i => cards[i] && cards[i].code ? cardName(cards[i].code) : '裏側のカード');
+    info.textContent = (note ? note + '　' : '') + (min === max ? `${min}枚選んでください` : `${min}〜${max}枚選んでください`) + (names.length ? `（選択中：${names.join('、')}）` : '（カードを押して選び、「決定」で確定します）');
     ok.disabled = chosen.size < min || chosen.size > max;
     [...grid.children].forEach((n, i) => n.classList.toggle('on', chosen.has(i)));
     if (Auto.selectable) renderBoard();
@@ -582,7 +584,7 @@ function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note
   cards.forEach((c, i) => {
     const n = promptCard(c, extra && extra(c, i));
     n.addEventListener('click', () => {
-      if (min === 1 && max === 1) { answerDone([i]); return; }
+      if (max === 1) { const had = chosen.has(i); chosen.clear(); if (!had) chosen.add(i); refresh(); return; }   // 1枚だけ選ぶときは押し直しで切り替え。決定で確定
       if (chosen.has(i)) chosen.delete(i); else if (chosen.size < max) chosen.add(i);
       refresh();
     });
@@ -617,7 +619,8 @@ function yesNo(text, onAnswer, card, labels = ['はい', 'いいえ'], note) {
 
 function openPrompt() {
   const d = Auto.duel, p = d && d.pending;
-  if (!isPrompt(p)) return;
+  if (!isPrompt(p)) { Auto.selQueue = null; return; }
+  if (p.type !== MSG.SELECT_UNSELECT_CARD) Auto.selQueue = null;
   const me = d.me;
   switch (p.type) {
     case MSG.SELECT_CARD:
@@ -637,21 +640,45 @@ function openPrompt() {
       break;
     }
     case MSG.SELECT_UNSELECT_CARD: {
-      const grid = el('div', { class: 'ap-grid' });
-      p.select_cards.forEach((c, i) => { const n = promptCard(c); n.onclick = () => answer({ type: RES.SELECT_UNSELECT_CARD, index: i }); grid.append(n); });
-      p.unselect_cards.forEach((c, i) => { const n = promptCard(c, '選択中（クリックで外す）'); n.classList.add('on'); n.onclick = () => answer({ type: RES.SELECT_UNSELECT_CARD, index: p.select_cards.length + i }); grid.append(n); });
-      const btns = [];
-      if (p.can_finish) btns.push({ label: '決定', primary: true, onClick: () => { answer({ type: RES.SELECT_UNSELECT_CARD, index: null }); return false; } });
-      if (p.can_cancel && !p.can_finish) btns.push({ label: 'キャンセル', onClick: () => { answer({ type: RES.SELECT_UNSELECT_CARD, index: null }); return false; } });
-      promptModal(el('div', { class: 'stack' }, el('p', { class: 'muted', text: `1枚ずつクリックして選びます（${p.min}〜${p.max}枚）` }), grid), btns);
-      boardPickable([...p.select_cards, ...p.unselect_cards], grid, new Set(p.unselect_cards.map((c, i) => p.select_cards.length + i)));
+      // エンジンは1枚ずつ聞いてくるので、画面ではまとめて選んでもらい、「決定」のあとで1枚ずつ送る
+      const q = Auto.selQueue;
+      if (q) {
+        const same = (a, b) => a.controller === b.controller && a.location === b.location && a.sequence === b.sequence;
+        if (q.length) {
+          const i = p.select_cards.findIndex(c => same(c, q[0]));
+          if (i >= 0) { q.shift(); autoRespond({ type: RES.SELECT_UNSELECT_CARD, index: i }); break; }
+        } else if (p.can_finish) { Auto.selQueue = null; autoRespond({ type: RES.SELECT_UNSELECT_CARD, index: null }); break; }
+        Auto.selQueue = null;   // 選んだ組み合わせでは足りない・選べない：残りを画面で選んでもらう
+      }
+      const done = p.unselect_cards.length;
+      const hintNo = Number(BigInt(d.hint || 0) & 0xfffffn), hintCard = Number(BigInt(d.hint || 0) >> 20n);
+      const multi = !hintCard && [511, 512, 513, 533].includes(hintNo);   // 511融合 512シンクロ 513エクシーズ 533リンク素材
+      const note = done ? `選んだカード：${p.unselect_cards.map(c => cardName(c.code)).join('、')}。続けて選んでください` : '';
+      chooseCards(p.select_cards, {
+        // 素材を選ぶとき（リンク・シンクロ・エクシーズ・融合）は、エンジンが1枚ずつ聞いてきても画面ではまとめて選べるようにする
+        min: p.can_finish ? 0 : 1, max: multi ? p.select_cards.length : Math.max(p.max - done, 1), canCancel: p.can_cancel || p.can_finish, note: note || (multi ? '素材にするカードをすべて選んで「決定」を押してください' : ''),
+        onDone: idx => {
+          closePromptModal();
+          if (!idx.length) { autoRespond({ type: RES.SELECT_UNSELECT_CARD, index: null }); return; }
+          Auto.selQueue = idx.map(i => p.select_cards[i]);
+          openPrompt();
+        },
+        onCancel: () => { closePromptModal(); Auto.selQueue = null; autoRespond({ type: RES.SELECT_UNSELECT_CARD, index: null }); },
+      });
       break;
     }
     case MSG.SELECT_CHAIN: {
+      // 発動する効果を選んでから「発動する」で確定
+      let pick = -1;
       const grid = el('div', { class: 'ap-grid' });
-      p.selects.forEach((c, i) => { const n = promptCard(c, descText(c.description)); n.onclick = () => answer({ type: RES.SELECT_CHAIN, index: i }); grid.append(n); });
-      promptModal(el('div', { class: 'stack' }, el('p', { class: 'muted', text: '発動する効果をクリックしてください' }), grid),
-        p.forced ? [] : [{ label: '発動しない', onClick: () => { answer({ type: RES.SELECT_CHAIN, index: null }); return false; } }]);
+      const go = el('button', { class: 'btn primary', text: '発動する', disabled: true, onclick: () => answer({ type: RES.SELECT_CHAIN, index: pick }) });
+      p.selects.forEach((c, i) => {
+        const n = promptCard(c, descText(c.description));
+        n.onclick = () => { pick = pick === i ? -1 : i; [...grid.children].forEach((x, k) => x.classList.toggle('on', k === pick)); go.disabled = pick < 0; };
+        grid.append(n);
+      });
+      promptModal(el('div', { class: 'stack' }, el('p', { class: 'muted', text: '発動する効果を選んで「発動する」を押してください' }), grid,
+        el('div', { class: 'row' }, go, p.forced ? null : el('button', { class: 'btn', text: '発動しない', onclick: () => answer({ type: RES.SELECT_CHAIN, index: null }) }))));
       break;
     }
     case MSG.SELECT_EFFECTYN:
