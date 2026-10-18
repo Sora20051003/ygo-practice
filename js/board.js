@@ -771,6 +771,7 @@ function setupBoardView() {
   $('#b-draw').onclick = () => { if (Board.S) drawCard(); };
   $('#b-shuffle').onclick = () => { if (Board.S) shuffleDeck(); };
   $('#b-undo').onclick = () => { if (Board.S) undo(); };
+  $('#b-rewind').onclick = () => { if (Board.S) openRewind(); };
   $('#b-token').onclick = () => { if (Board.S) openToken(); };
   setupAutoPlay();
   $('#b-glow').checked = Glow.on;
@@ -858,4 +859,32 @@ function renderMyLp() {
   const box = lpBox(Auto.duel.lp[Auto.duel.me], 'me');
   slot.className = box.className;
   slot.replaceChildren(...box.childNodes);
+}
+
+// ---------- 巻き戻し（一人回しだけ） ----------
+// これまでの行動を一覧にして、選んだ行動の直前まで戻す
+function openRewind() {
+  if (typeof Duel !== 'undefined' && Duel.active) return;   // 対戦では使えない
+  const auto = Board.S && Board.S.auto && Auto.duel;
+  let points;   // { label, go }（新しい順）
+  if (auto) {
+    points = Auto.duel.actions().reverse().map(a => ({ label: a.label, go: () => { closePromptModal(); Auto.selQueue = null; Auto.duel.rewindTo(a.at); autoAfter(true); } }));
+  } else {
+    const h = Board.history;
+    points = [];
+    for (let k = h.length - 1; k >= 0; k--) {
+      const s = JSON.parse(h[k]);
+      const next = k + 1 < h.length ? JSON.parse(h[k + 1]).log : Board.S.log;
+      const label = (next[s.log.length] || '操作').replace(/^\[T(\d+)\] /, 'T$1 ');
+      points.push({ label, go: () => { Board.S = s; Board.history = h.slice(0, k); Board.pick = null; persist(); renderBoard(); } });
+    }
+  }
+  if (!points.length) { toast('まだ戻せる行動がありません'); return; }
+  const list = el('div', { class: 'pile-list rewind-list' }, points.map((p, i) =>
+    el('div', { class: 'pile-row rewind-row' },
+      el('span', { class: 'muted', text: `${points.length - i}.` }),
+      el('div', { class: 'r-main' }, el('div', { class: 'r-name', text: p.label })),
+      el('button', { class: 'btn small', text: 'この前に戻す', onclick: () => { closeRw(); p.go(); toast('「' + p.label + '」の前まで戻しました'); } }))));
+  const closeRw = showModal({ title: '巻き戻し（行動の前の状態に戻します）', wide: true,
+    body: el('div', { class: 'stack' }, el('p', { class: 'muted', text: '新しい行動が上です。戻したい行動の「この前に戻す」を押してください。' }), list) });
 }

@@ -153,6 +153,7 @@ class AutoDuel {
     this.seed = seed || [...crypto.getRandomValues(new Uint32Array(4))].map(BigInt);
     this.responses = [];     // これまでの返答（元に戻すときは最初からやり直して、ここを途中まで流し直す）
     this.userMarks = [];     // 自分が選んだ返答の位置
+    this.labels = {};        // 自分の行動の説明（巻き戻しの一覧用）。返答の位置 → 文
   }
 
   create() {
@@ -276,6 +277,7 @@ class AutoDuel {
     // 手札などから自分の方法で特殊召喚するとき（「①の方法による特殊召喚は1ターンに1度」の記録用）
     const src = this.pending || this.lastAsk;
     if (!auto && res.type === RES.SELECT_IDLECMD && res.action === IDLE.SPSUMMON && src && src.special_summons) { const c = src.special_summons[res.index]; this.procCode = c && c.location !== LOC.EXTRA ? c.code : 0; }
+    if (!auto && (res.type === RES.SELECT_IDLECMD || res.type === RES.SELECT_BATTLECMD)) this.labels[this.responses.length] = describeAction(res, src, this);
     if (!auto) this.userMarks.push(this.responses.length);
     this.responses.push(res);
     this.retry = false;
@@ -292,17 +294,26 @@ class AutoDuel {
 
   // 自分の操作を1つ戻す（最後に「召喚する」「発動する」などを選ぶ前まで）。最初から返答を流し直す
   undo() {
-    if (!this.userMarks.length) return false;
+    const acts = this.actions();
+    if (!acts.length) return false;
+    return this.rewindTo(acts[acts.length - 1].at);
+  }
+
+  // これまでの自分の行動（召喚・発動・フェイズ移動など）の一覧。at＝その行動の返答の位置
+  actions() {
     const isAction = r => r.type === RES.SELECT_IDLECMD || r.type === RES.SELECT_BATTLECMD;
-    let k = this.userMarks.length - 1;
-    while (k > 0 && !isAction(this.responses[this.userMarks[k]])) k--;
-    const items = this.history(this.userMarks[k]);
-    this.responses = []; this.userMarks = [];
+    return this.userMarks.filter(i => isAction(this.responses[i])).map(i => ({ at: i, label: this.labels[i] || '操作' }));
+  }
+
+  // 巻き戻し：指定した行動の直前の状態に戻す（最初から返答を流し直す）
+  rewindTo(at) {
+    const items = this.history(at);
+    this.responses = []; this.userMarks = []; this.labels = {};
     this.create();
     this.run(items);
     return true;
   }
-  restart() { this.responses = []; this.userMarks = []; this.start(); }
+  restart() { this.responses = []; this.userMarks = []; this.labels = {}; this.start(); }
 
   addLog(text) { this.log.push(`[T${this.turn || 1}] ${text}`); }
   who(con) { return con === this.me ? '' : '相手の'; }
@@ -550,4 +561,30 @@ function probeAnswer(m, me) {
     case MSG.SELECT_PLACE: case MSG.SELECT_DISFIELD: return { type: m.type === MSG.SELECT_PLACE ? RES.SELECT_PLACE : RES.SELECT_DISFIELD, places: freePlaces(m.field_mask, me).slice(0, m.count) };
     default: return autoAnswer(m);
   }
+}
+
+// 行動の説明（巻き戻しの一覧に出す文）
+function describeAction(res, src, duel) {
+  const t = `T${duel.turn || 1}`;
+  const nameOf = list => { const c = src && list && list[res.index]; return c ? cardName(c.code) : ''; };
+  if (res.type === RES.SELECT_IDLECMD) {
+    switch (res.action) {
+      case IDLE.SUMMON: return `${t} ${nameOf(src.summons)} を通常召喚`;
+      case IDLE.SPSUMMON: { const c = src && src.special_summons && src.special_summons[res.index]; return `${t} ${nameOf(src.special_summons)} を${c && typeof summonLabel === 'function' ? summonLabel(c) : '特殊召喚'}`; }
+      case IDLE.MSET: return `${t} ${nameOf(src.monster_sets)} をセット`;
+      case IDLE.SSET: return `${t} ${nameOf(src.spell_sets)} をセット`;
+      case IDLE.REPOS: return `${t} ${nameOf(src.pos_changes)} の表示形式を変更`;
+      case IDLE.ACTIVATE: return `${t} ${nameOf(src.activates)} の効果を発動`;
+      case IDLE.TO_BP: return `${t} バトルフェイズへ`;
+      case IDLE.TO_EP: return `${t} ターン終了`;
+    }
+  } else if (res.type === RES.SELECT_BATTLECMD) {
+    switch (res.action) {
+      case BATTLE.CHAIN: return `${t} ${nameOf(src.chains)} の効果を発動`;
+      case BATTLE.ATTACK: return `${t} ${nameOf(src.attacks)} で攻撃`;
+      case BATTLE.TO_M2: return `${t} メインフェイズ2へ`;
+      case BATTLE.TO_EP: return `${t} ターン終了`;
+    }
+  }
+  return `${t} 操作`;
 }

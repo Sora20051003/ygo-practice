@@ -154,7 +154,7 @@ function autoPanel() {
   const st = $('#ap-status');
   if (!st) return;
   $('#ap-bp').hidden = $('#ap-ep').hidden = false;
-  if (!d) { $('#ap-locks').hidden = true; st.textContent = '「シャッフルして開始」で始めます'; $('#ap-lp').textContent = ''; $('#ap-bp').disabled = $('#ap-ep').disabled = $('#ap-undo').disabled = $('#ap-open').disabled = true; return; }
+  if (!d) { $('#ap-locks').hidden = true; st.textContent = '「シャッフルして開始」で始めます'; $('#ap-lp').textContent = ''; $('#ap-bp').disabled = $('#ap-ep').disabled = $('#ap-undo').disabled = $('#ap-open').disabled = $('#ap-rewind').disabled = true; return; }
   const phase = PHASE_NAME[d.phase] || '';
   let text;
   if (d.ended) text = `対戦終了（${d.ended}）`;
@@ -169,6 +169,7 @@ function autoPanel() {
   if (p && p.type === MSG.SELECT_BATTLECMD) { bp.textContent = 'メインフェイズ2へ'; bp.disabled = !p.to_m2; ep.disabled = !p.to_ep; }
   else { bp.textContent = 'バトルフェイズへ'; bp.disabled = !(p && p.type === MSG.SELECT_IDLECMD && p.to_bp); ep.disabled = !(p && p.type === MSG.SELECT_IDLECMD && p.to_ep); }
   $('#ap-undo').disabled = !d.userMarks.length;
+  $('#ap-rewind').disabled = !d.userMarks.length;
   $('#ap-open').disabled = !isPrompt(p);
   renderChainBox();
   const locks = $('#ap-locks');
@@ -272,6 +273,7 @@ function setupAutoPlay() {
   $('#ap-bp').onclick = () => autoPhase('bp');
   $('#ap-ep').onclick = () => autoPhase('ep');
   $('#ap-undo').onclick = autoUndo;
+  $('#ap-rewind').onclick = openRewind;
   $('#ap-open').onclick = () => { if (Auto.duel && isPrompt(Auto.duel.pending)) openPrompt(); };
   $('#mb-auto').onclick = e => {
     const p = Auto.duel && Auto.duel.pending;
@@ -281,6 +283,7 @@ function setupAutoPlay() {
       { label: '選択画面を開く', disabled: !isPrompt(p), onClick: () => openPrompt() },
       { label: p && p.type === MSG.SELECT_BATTLECMD ? 'メインフェイズ2へ' : 'バトルフェイズへ', disabled: $('#ap-bp').disabled, onClick: () => autoPhase('bp') },
       { label: 'ターン終了', disabled: $('#ap-ep').disabled, onClick: () => autoPhase('ep') },
+      { label: '⏪ 巻き戻し', disabled: $('#ap-rewind').disabled, onClick: () => openRewind() },
     ]);
   };
   // 設定（相手・チェーン確認・演出）
