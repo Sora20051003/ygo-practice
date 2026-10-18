@@ -1,9 +1,9 @@
-// 対戦（ログインした人同士）
+// 対戦（2人のブラウザを直接つなぐ。ログインしていなくてもよい）
 // ・部屋を作る → 6文字の部屋コードを相手に教える → 相手が参加 → お互いデッキを選んで「準備OK」で開始
 // ・自分の盤面は今までどおり手で動かす。変わるたびに「相手に見せてよい情報だけ」を相手に送る
 //   （手札の中身・デッキの順番・裏向きのカードは送らない）
 // ・LP・ターン・フェイズ・チャット・コイン・サイコロ・カードの公開・相手へのダメージは、部屋で共有する
-// 通信は Supabase（データベース＋Realtime）。テスト用に、同じパソコンの2つの画面でやり取りする仕組みもある（?duelTest=A など）
+// 通信は PeerJS（WebRTC。相手を見つけるときだけ公開の仲介サーバーを使う）。Supabase 用の通信も残してある。テスト用に、同じパソコンの2つの画面でやり取りする仕組みもある（?duelTest=A など）
 
 const PHASES = [['DP', 'ドロー'], ['SP', 'スタンバイ'], ['M1', 'メイン1'], ['BP', 'バトル'], ['M2', 'メイン2'], ['EP', 'エンド']];
 const START_LP = 8000;
@@ -70,6 +70,101 @@ class SupabaseDuelTransport {
     if (error) throw error;
   }
   leave() { if (this.channel) this.sb.removeChannel(this.channel); this.channel = null; }
+}
+
+// ---------- 通信（サーバーなし：ブラウザどうしを直接つなぐ WebRTC） ----------
+// 相手を見つけるときだけ、無料で公開されている仲介サーバー（PeerJS）を使う。つながったあとは2人のブラウザが直接やり取りする。
+// 部屋を作った人（ホスト）の画面が部屋の情報を持ち、参加した人に送る。ホストが部屋を閉じると部屋はなくなる
+const PEERJS_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+const PEER_PREFIX = 'ygo-practice-room-';
+class PeerDuelTransport {
+  constructor(me) { this.me = me; this.h = null; this.room = null; this.peer = null; this.conn = null; this.closed = false; }
+  async lib() { if (typeof Peer === 'undefined') await loadScript(PEERJS_URL); }
+  // 仲介サーバーにつなぐ（id を指定すると、その部屋コードの持ち主になる）
+  openPeer(id) {
+    return new Promise((resolve, reject) => {
+      const p = id ? new Peer(id, { debug: 0 }) : new Peer({ debug: 0 });
+      const timer = setTimeout(() => { p.destroy(); reject(new Error('対戦の仲介サーバーにつながりませんでした。インターネット接続を確認してください')); }, 15000);
+      p.on('open', () => { clearTimeout(timer); this.peer = p; resolve(p); });
+      p.on('error', e => {
+        if (!this.peer) { clearTimeout(timer); p.destroy(); reject(e); return; }
+        if (e.type === 'peer-unavailable') return;   // 参加のときに別で扱う
+        if (this.h && !this.closed) this.h.error(new Error('通信が切れました（' + (e.type || e.message) + '）'));
+      });
+      // 仲介サーバーとの接続が切れても、つながっている相手とはそのまま続けられる。部屋を作った人は受付のためにつなぎ直す
+      p.on('disconnected', () => { if (!this.closed && this.isHost) setTimeout(() => { try { p.reconnect(); } catch { /* つなぎ直せなくてもよい */ } }, 2000); });
+    });
+  }
+  emitRoom() { if (this.h && this.room) this.h.room(JSON.parse(JSON.stringify(this.room))); }
+  send(m) { if (this.conn && this.conn.open) this.conn.send(m); }
+  async create(code) {
+    await this.lib();
+    for (let t = 0; t < 5; t++) {
+      const c = code || newRoomCode();
+      try { await this.openPeer(PEER_PREFIX + c); this.code = c; break; } catch (e) {
+        if (e.type === 'unavailable-id' && !code) continue;   // 同じコードの部屋があれば作り直す
+        throw e.type === 'unavailable-id' ? new Error('その部屋コードは今使われています') : e;
+      }
+    }
+    if (!this.code) throw new Error('部屋を作れませんでした。もう一度お試しください');
+    this.isHost = true;
+    this.room = { host: this.me.uid, hostName: this.me.name, guest: null, guestName: null, status: 'waiting', ready: {}, decks: {}, turn: 0, turnPlayer: null, phase: 'DP', winner: null, createdAt: Date.now() };
+    this.peer.on('connection', c => this.accept(c));
+    return this.code;
+  }
+  // 部屋を作った人：参加しに来た相手を受け付ける
+  accept(c) {
+    c.on('data', m => {
+      if (m.kind === 'join') {
+        const r = this.room;
+        if (r.guest && r.guest !== m.me.uid) { c.send({ kind: 'full' }); setTimeout(() => c.close(), 500); return; }
+        const rejoin = r.guest === m.me.uid;
+        if (this.conn && this.conn !== c) { try { this.conn.close(); } catch { /* もう閉じている */ } }
+        this.conn = c;
+        r.guest = m.me.uid; r.guestName = m.me.name;
+        c.send({ kind: 'room', room: r });
+        if (this.lastState) c.send({ kind: 'state', json: this.lastState });   // 入り直しのときは自分の盤面も送り直す
+        this.emitRoom();
+        if (rejoin && this.h) this.h.event({ type: 'sys', from: 'sys', name: '', text: `${m.me.name} が入り直しました`, ts: Date.now() });
+        return;
+      }
+      if (c === this.conn) this.recv(m);
+    });
+    c.on('close', () => { if (c === this.conn && !this.closed && this.h) this.h.error(new Error('相手との接続が切れました（相手が「前回の部屋に戻る」で戻ってこられます）')); });
+  }
+  async join(code) {
+    await this.lib();
+    await this.openPeer(null);
+    this.code = code;
+    const c = this.peer.connect(PEER_PREFIX + code, { reliable: true, serialization: 'json' });
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('部屋に入れませんでした（部屋を作った人がアプリを閉じていないか確認してください）')), 15000);
+      const fail = e => { clearTimeout(timer); reject(e); };
+      this.peer.on('error', e => { if (e.type === 'peer-unavailable') fail(new Error('その部屋コードの部屋はありません（部屋を作った人がアプリを開いている間だけ入れます）')); });
+      c.on('open', () => c.send({ kind: 'join', me: this.me }));
+      c.on('data', m => {
+        if (m.kind === 'full') { fail(new Error('この部屋はもう満員です')); return; }
+        if (m.kind === 'room' && !this.room) { clearTimeout(timer); this.room = m.room; this.conn = c; resolve(); }
+        this.recv(m);
+      });
+      c.on('close', () => { if (this.conn === c && !this.closed && this.h) this.h.error(new Error('部屋を作った人との接続が切れました')); });
+    });
+  }
+  recv(m) {
+    if (m.kind === 'room') { this.room = m.room; this.emitRoom(); }
+    else if (m.kind === 'patch' && this.room) { applyPatch(this.room, m.patch); this.emitRoom(); }
+    else if (m.kind === 'state' && this.h) this.h.opp(JSON.parse(m.json));
+    else if (m.kind === 'event' && this.h) this.h.event(m.ev);
+  }
+  listen(code, h) { this.h = h; this.emitRoom(); }
+  async updateRoom(patch) { applyPatch(this.room, patch); this.send({ kind: 'patch', patch }); this.emitRoom(); }
+  async sendState(json) { this.lastState = json; this.send({ kind: 'state', json }); }
+  async sendEvent(ev) {
+    const e = { ...ev, from: this.me.uid, name: this.me.name, ts: Date.now() };
+    this.send({ kind: 'event', ev: e });
+    if (this.h) this.h.event(e);
+  }
+  leave() { this.closed = true; this.h = null; try { if (this.peer) this.peer.destroy(); } catch { /* もう閉じている */ } }
 }
 
 // ---------- 通信（テスト用：同じパソコンの2つの画面） ----------
@@ -149,9 +244,13 @@ const Duel = {
 
 function duelMe() {
   if (DUEL_TEST) return { uid: 'test-' + DUEL_TEST, name: 'テスト' + DUEL_TEST };
-  if (!Online.user) return null;
   const u = Online.user;
-  return { uid: u.uid, name: u.displayName || (u.email || '').split('@')[0] || 'プレイヤー' };
+  // ログインしていなくても対戦できる。この端末の ID（入り直し用）と、自分で決めた名前を使う
+  let uid = null;
+  try { uid = localStorage.getItem('ygo.duelUid'); if (!uid) { uid = 'g-' + Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('ygo.duelUid', uid); } } catch { uid = 'g-' + Date.now(); }
+  const saved = localStorage.getItem('ygo.duelName');
+  const name = saved || (u && (u.displayName || (u.email || '').split('@')[0])) || 'プレイヤー';
+  return { uid: u ? u.uid : uid, name: name.slice(0, 20) };
 }
 const oppUid = () => Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guest : Duel.room.host);
 const oppName = () => (Board.S && Board.S.auto ? 'CPU' : (Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guestName : Duel.room.hostName) || '相手'));
@@ -166,12 +265,12 @@ function feed(text, cls = '') {
 }
 
 // ---------- 部屋に入る・作る ----------
-async function duelCreate() {
+async function duelCreate(code) {   // code：前回の部屋を作り直すとき
   Duel.me = duelMe();
-  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new SupabaseDuelTransport(Duel.me);
+  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new PeerDuelTransport(Duel.me);
   try {
-    const code = await Duel.t.create();
-    enterRoom(code);
+    const newCode = await Duel.t.create(code);
+    enterRoom(newCode);
   } catch (e) { toast(e.message); }
 }
 
@@ -179,7 +278,7 @@ async function duelJoin(code) {
   code = (code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length !== 6) { toast('部屋コードは6文字です'); return; }
   Duel.me = duelMe();
-  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new SupabaseDuelTransport(Duel.me);
+  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new PeerDuelTransport(Duel.me);
   try {
     await Duel.t.join(code);
     enterRoom(code);
@@ -190,7 +289,7 @@ function enterRoom(code) {
   Duel.code = code;
   Duel.feed = []; Duel.seen = new Set(); Duel.opp = null; Duel.oppLogSeen = 0; Duel.lastSent = ''; Duel.turnKey = '';
   Duel.deckId = Duel.deckId || Decks.currentId;
-  store.set('ygo.duel.current', { code, deckId: Duel.deckId });
+  store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
   Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => toast('通信エラー：' + e.message) });
   renderDuelLobby();
 }
@@ -454,27 +553,24 @@ function renderDuelLobby() {
   if (!box) return;
   box.innerHTML = '';
   const me = duelMe();
-  if (!me) {
-    box.append(el('div', { class: 'panel duel-card' },
-      el('h2', { text: '対戦にはログインが必要です' }),
-      el('p', { text: Online.enabled ? '右上からログインしてください。' : 'ネット版（ログイン機能つき）で使えます。パソコンのファイルとして開いている場合や、ログイン機能の準備がまだの場合は対戦できません。' })));
-    return;
-  }
   if (!Duel.code) {
     const codeInput = el('input', { type: 'text', placeholder: '例：AB3CDE', maxlength: 8, class: 'room-input', autocomplete: 'off' });
+    const nameIn = el('input', { type: 'text', value: me.name, maxlength: 20, class: 'full', autocomplete: 'nickname' });
+    nameIn.addEventListener('change', () => { const v = nameIn.value.trim(); try { if (v) localStorage.setItem('ygo.duelName', v); else localStorage.removeItem('ygo.duelName'); } catch { /* 保存できなくてもよい */ } });
     const deckSel = el('select', { class: 'full' }, Decks.list.map(d => el('option', { value: d.id, text: `${d.name}（${FORMATS[deckFormat(d)].short}・メイン${d.main.length}）`, selected: d.id === (Duel.deckId || Decks.currentId) })));
     deckSel.addEventListener('change', () => { Duel.deckId = deckSel.value; });
     Duel.deckId = deckSel.value;
     const last = store.get('ygo.duel.current', null);
     box.append(el('div', { class: 'panel duel-card' },
       el('h2', { text: '対戦' }),
-      el('p', { class: 'muted', text: `${me.name} としてプレイします。部屋を作って部屋コードを相手に伝えるか、相手から聞いた部屋コードで参加してください。` }),
+      el('p', { class: 'muted', text: '部屋を作って部屋コードを相手に伝えるか、相手から聞いた部屋コードで参加してください。ログインしていなくても対戦できます（2人のブラウザを直接つないで対戦します）。' }),
+      el('label', { class: 'auth-field' }, 'あなたの名前（相手に表示されます）', nameIn),
       el('label', { class: 'auth-field' }, '使うデッキ', deckSel),
       el('div', { class: 'duel-actions' },
         el('div', { class: 'duel-box' }, el('h3', { text: '部屋を作る' }), el('button', { class: 'btn primary', text: '＋ 新しい部屋を作る', onclick: duelCreate })),
         el('div', { class: 'duel-box' }, el('h3', { text: '部屋に入る' }), codeInput,
           el('button', { class: 'btn primary', text: '参加する', onclick: () => duelJoin(codeInput.value) }))),
-      last && last.code ? el('button', { class: 'btn', text: `前回の部屋（${last.code}）に戻る`, onclick: () => { Duel.deckId = last.deckId; duelJoin(last.code); } }) : null));
+      last && last.code ? el('button', { class: 'btn', text: `前回の部屋（${last.code}）に戻る`, onclick: () => { Duel.deckId = last.deckId; if (last.host) duelCreate(last.code); else duelJoin(last.code); } }) : null));
     codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') duelJoin(codeInput.value); });
     return;
   }
