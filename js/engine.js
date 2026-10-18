@@ -361,7 +361,7 @@ const isSelectMsg = m => SELECT_TYPES.has(m.type);
 // 自分の入力でも、聞くまでもないもの（発動できるものが無いチェーン確認・並び替え）は自動で返す
 // チェーン確認（マスターデュエルと同じ考え方）
 //   always：発動できるものがあれば毎回聞く
-//   auto  ：相手が発動したとき・相手のターン・自分のターンの場や墓地の効果だけ聞く（自分の効果に自分でチェーンするかは聞かない）
+//   auto  ：発動できるものがあれば聞く。ただし自分のターンの手札誘発（うらら・Gなど、相手の発動へ使うもの）だけは聞かない
 //   off   ：必ず答える場面（強制効果など）だけ聞く
 const locKey = (con, loc, seq) => `${con}-${loc}-${seq}`;
 
@@ -378,9 +378,9 @@ function skippable(m, duel) {
     const last = duel && duel.chain[duel.chain.length - 1];
     let ask = mode === 'always';
     if (mode === 'auto') {
-      if (last) ask = last.con !== duel.me;   // 相手の発動にはチェーンを聞く。自分の効果に自分でチェーンするかは聞かない
-      else if (duel.turnPlayer !== duel.me) ask = true;   // 相手のターン（相手の召喚などに手札誘発を使う機会）
-      else ask = !m.selects.every(c => c.location === LOC.HAND);   // 自分のターンで何も起きていないときの手札誘発は聞かない（場・墓地の誘発などは聞く）
+      if (last && last.con !== duel.me) ask = true;   // 相手の発動にはチェーンを聞く
+      else if (duel.turnPlayer !== duel.me && !last) ask = true;   // 相手のターン（相手の召喚などに手札誘発を使う機会）
+      else ask = !m.selects.every(c => c.location === LOC.HAND && isHandTrap(c.code));   // 自分のターンで何も起きていないときの手札誘発（うらら・Gなど）は聞かない。手札から発動できる罠などは聞く
     }
     if (!ask) return { type: RES.SELECT_CHAIN, index: null };
   }
@@ -468,4 +468,15 @@ function freePlaces(mask, player) {
     for (let i = 0; i < 8; i++) if (!(mask & (1 << (base + 8 + i)))) out.push({ player: owner, location: LOC.SZONE, sequence: i });
   }
   return out;
+}
+
+// 手札誘発（自分のターンに何も起きていないときは、発動するか聞かない）。autoplay.js の一覧から作る
+let handTrapIds = null;
+function isHandTrap(code) {
+  if (!handTrapIds) {
+    handTrapIds = new Set(typeof HANDTRAP_SET !== 'undefined' ? HANDTRAP_SET.map(([id]) => id) : []);
+    if (typeof HANDTRAP_NAMES !== 'undefined') for (const n of HANDTRAP_NAMES) { const c = DB.cards.find(x => x.name === n); if (c) handTrapIds.add(c.id); }
+  }
+  const c = DB.byId.get(code);
+  return handTrapIds.has(code) || (c && c.alias && handTrapIds.has(c.alias));
 }
