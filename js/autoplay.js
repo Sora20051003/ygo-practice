@@ -616,18 +616,38 @@ function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note
     else sel.forEach(i => chosen.delete(i));
     refresh();
   };
+  // 選べるカードの場所が分かれているときは、場所ごとに見出しを付けて分ける（場・手札・墓地・除外・デッキ…）
+  const me = Auto.duel.me;
+  const AREA = [[LOC.MZONE | LOC.SZONE | LOC.FZONE | LOC.PZONE, 'フィールド'], [LOC.HAND, '手札'], [LOC.GRAVE, '墓地'], [LOC.REMOVED, '除外'], [LOC.DECK, 'デッキ'], [LOC.EXTRA, 'EXデッキ'], [LOC.OVERLAY, 'X素材']];
+  const areaOf = c => {
+    const k = c.location & LOC.OVERLAY ? AREA.length - 1 : AREA.findIndex(([m]) => c.location & m);
+    const i = k < 0 ? AREA.length : k;
+    return { key: (c.controller === me ? 0 : 1) * 100 + i, label: (c.controller === me ? '' : '相手の') + (AREA[i] ? AREA[i][1] : 'その他') };
+  };
+  const sections = new Map();
   for (const g of groups) {
     const c = cards[g.idx[0]];
     const n = promptCard(c, extra && extra(c, g.idx[0]));
     if (g.idx.length > 1) n.append(el('div', { class: 'ap-count' }));
     n.addEventListener('click', () => press(g));
     tileOf.set(g, n);
-    grid.append(n);
+    const a = areaOf(c);
+    if (!sections.has(a.key)) sections.set(a.key, { label: a.label, tiles: [], count: 0 });
+    const s = sections.get(a.key);
+    s.tiles.push(n); s.count += g.idx.length;
+  }
+  let list;
+  if (sections.size > 1) {
+    list = el('div', { class: 'ap-sections' }, [...sections.entries()].sort((a, b) => a[0] - b[0]).map(([, s]) =>
+      el('div', { class: 'ap-section' }, el('div', { class: 'ap-sec-head', text: `${s.label}（${s.count}枚）` }), el('div', { class: 'ap-grid' }, s.tiles))));
+  } else {
+    for (const s of sections.values()) grid.append(...s.tiles);
+    list = grid;
   }
   ok.onclick = () => onDone([...chosen].sort((a, b) => a - b));
   const foot = el('div', { class: 'row' }, ok, canCancel ? el('button', { class: 'btn', text: 'キャンセル', onclick: onCancel }) : null);
   refresh();
-  promptModal(el('div', { class: 'stack' }, info, grid, foot));
+  promptModal(el('div', { class: 'stack' }, info, list, foot));
   // 盤面・手札のカードを直接押したときは、そのカードが入っている札を押したことにする
   boardPickable(cards, i => press(groups.find(g => g.idx.includes(i))), chosen);
 }
