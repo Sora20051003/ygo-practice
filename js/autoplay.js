@@ -865,7 +865,7 @@ function runAction(a) {
   ], a.name ? `「${a.name}」を召喚する` : '召喚する');
 }
 
-// 発動しても何も起きない永続魔法・フィールド魔法・永続罠を調べる（試し発動して確かめる）
+// 発動しても何も起きない永続魔法・永続罠を調べる（試し発動して確かめる）
 function findUseless(d) {
   Auto.useless = new Set();
   const p = d.pending;
@@ -874,7 +874,8 @@ function findUseless(d) {
   p.activates.forEach((a, i) => {
     const c = DB.byId.get(a.code);
     if (!c) return;
-    const lasting = (has(c, T.SPELL) && (has(c, T.CONTINUOUS) || has(c, T.FIELD))) || (has(c, T.TRAP) && has(c, T.CONTINUOUS));
+    // フィールド魔法は効果が使えなくても発動できる（いつでも発動してよい）ので調べない
+    const lasting = (has(c, T.SPELL) && has(c, T.CONTINUOUS)) || (has(c, T.TRAP) && has(c, T.CONTINUOUS));
     if (!lasting) return;   // 通常・速攻魔法、通常・カウンター罠は、発動できるかどうかをエンジンが効果の条件まで見て決めている
     // カード自体の発動か（手札、または裏側でセットされている）
     if (a.location !== LOC.HAND) {
