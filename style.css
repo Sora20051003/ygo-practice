@@ -933,3 +933,6 @@ body.land #view-board .ph-chip b { font-size: 11px; }
 body.land #view-board .ph-end { padding: 2px 8px; font-size: 11px; }
 body.land #view-board .board-center { --cw: min(calc((var(--lh) - 140px) / 4 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
 body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 172px) / 6 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
+.ph-chip b { font-size: 12px; white-space: nowrap; }
+@media (max-width: 720px) { .ph-chip b { font-size: 10px; letter-spacing: -.5px; } }
+body.land #view-board .ph-chip b { font-size: 10px; letter-spacing: -.5px; }

@@ -1089,7 +1089,7 @@ function renderPhaseBar() {
       title: PHASE_FULL[k] + (can[k] ? '　へ進む' : ''),
       disabled: !can[k] || !mine,
       onclick: () => goPhase(k),
-    }, el('b', { text: k }), el('small', { text: label })));
+    }, el('b', { text: label })));
   });
   bar.append(chips, el('button', { class: 'btn small primary ph-end', text: endLabel, disabled: !endOk || !mine, onclick: endTurn }));
 }
