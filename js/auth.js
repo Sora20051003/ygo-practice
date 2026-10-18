@@ -47,10 +47,15 @@ async function initAuth() {
   const user = await new Promise(resolve => {
     const off = auth.onAuthStateChanged(u => {
       showLoading(null);
-      if (u) { off(); resolve(u); } else showLoginScreen();
+      if (u) { off(); resolve(u); return; }
+      // 前に「ログインしないで使う」を選んだ端末は、ログイン画面を出さない
+      if (localStorage.getItem('ygo.guest') === '1') { off(); resolve(null); return; }
+      showLoginScreen(() => { off(); resolve(null); });
     });
   });
   hideLoginScreen();
+  if (!user) { renderUserBox(); return; }   // ログインしないで使う（デッキはこの端末だけに保存）
+  localStorage.removeItem('ygo.guest');
   Online.user = user;
   store.ns = 'u:' + user.uid + ':';   // 同じブラウザで別の人が使っても設定が混ざらないようにする
 
@@ -67,6 +72,8 @@ async function initAuth() {
   }
   showLoading(null);
   renderUserBox();
+  startPresence();   // アカウントの記録（最後に使った日時など。管理ページで見られる）
+  checkAdmin();
 }
 
 const userDoc = () => Online.db.collection('users').doc(Online.user.uid);
@@ -120,7 +127,13 @@ window.addEventListener('beforeunload', e => {
 
 function renderUserBox() {
   const box = $('#user-box');
-  if (!Online.user) { box.hidden = true; return; }
+  if (!Online.user) {
+    // ログインしないで使っている：ログインに切り替えられるようにする
+    box.hidden = !Online.enabled;
+    box.innerHTML = '';
+    if (Online.enabled) box.append(el('button', { class: 'btn small', text: 'ログイン', title: 'ログインすると、デッキがアカウントに保存され、どの端末からでも使えます', onclick: () => { localStorage.removeItem('ygo.guest'); location.reload(); } }));
+    return;
+  }
   const u = Online.user;
   box.hidden = false;
   box.innerHTML = '';
@@ -135,7 +148,7 @@ function renderUserBox() {
 }
 
 // ---------- ログイン画面 ----------
-function showLoginScreen() {
+function showLoginScreen(onGuest) {
   const scr = $('#auth-screen');
   scr.hidden = false;
   if (scr.dataset.ready) return;
@@ -162,5 +175,6 @@ function showLoginScreen() {
     msg.textContent = 'パスワード再設定のメールを送りました。メールのリンクから新しいパスワードを決めてください。';
   });
   pass.addEventListener('keydown', e => { if (e.key === 'Enter') $('#auth-login').click(); });
+  $('#auth-guest').onclick = () => { localStorage.setItem('ygo.guest', '1'); hideLoginScreen(); onGuest && onGuest(); };
 }
 function hideLoginScreen() { $('#auth-screen').hidden = true; }

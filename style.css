@@ -1070,3 +1070,15 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body.land .zone .stat-badge { font-size: 9px; padding: 0 3px; bottom: -6px; }
 body.land .opp-zone .stat-badge { top: -6px; bottom: auto; }
 @media (max-width: 720px) { .zone .stat-badge { font-size: 9px; padding: 0 3px; } }
+/* 管理ページ */
+.adm h4 { display: flex; align-items: center; gap: 10px; margin: 14px 0 6px; }
+.adm-filter { margin-left: auto; font-size: 13px; padding: 4px 8px; width: 220px; max-width: 50%; }
+.adm-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.adm-num { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; color: var(--muted); }
+.adm-num b { display: block; font-size: 22px; color: var(--text); }
+.adm-num.on b { color: #3fbf6f; }
+.adm-table-wrap { overflow-x: auto; max-height: 45vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+.adm-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.adm-table th, .adm-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.adm-table th { position: sticky; top: 0; background: var(--panel-2); font-weight: 700; }
+.adm-table tr.on td { background: rgba(63, 191, 111, .08); }
