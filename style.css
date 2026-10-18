@@ -958,3 +958,10 @@ body.land .pause-nav { display: inline-flex; }
 body.land .topbar { display: none; }
 body.land #view-board .board-center { --cw: min(calc((var(--lh) - 118px) / 4 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
 body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 150px) / 6 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
+/* スマホ横画面：右の詳細は「名前 → 効果の説明」を一番上に。カードの絵はその下に小さく */
+body.land #view-board #board-detail { display: flex; flex-direction: column; gap: 4px; }
+body.land #view-board #board-detail > .detail-head { order: -3; }
+body.land #view-board #board-detail > h4 { order: -2; margin: 4px 0 0; }
+body.land #view-board #board-detail > .ja-text { order: -1; }
+body.land #view-board #board-detail > .ja-text .card-text { font-size: 12.5px; line-height: 1.55; }
+body.land #view-board #board-detail > .d-image { max-width: 110px; align-self: center; }
