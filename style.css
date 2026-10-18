@@ -145,6 +145,29 @@ textarea { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 .qty { min-width: 1.5em; text-align: center; }
 
 .deck-panel { overflow-y: auto; }
+/* ---------- ルール（OCG / マスターデュエル）と禁止・制限 ---------- */
+.deck-format-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 13px; font-weight: 700; }
+.seg.big button { padding: 6px 14px; font-size: 13px; }
+.deck-warn { margin-top: 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); }
+.fmt-tag { display: inline-block; font-size: 10px; font-weight: 800; padding: 0 5px; border-radius: 4px; line-height: 1.6; color: #fff; }
+.fmt-tag.fmt-ocg { background: #c0392b; }
+.fmt-tag.fmt-md { background: #6b4bb8; }
+.lim {
+  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%;
+  font-size: 11px; font-weight: 900; color: #fff; margin-right: 5px; vertical-align: 1px; flex: none;
+}
+.lim-0 { background: #c0392b; } .lim-1 { background: #e67e22; } .lim-2 { background: #d4ac0d; color: #222; } .lim-x { background: #666; }
+.tile-lim { position: absolute; top: 2px; left: 2px; z-index: 2; }
+.tile-lim .lim { margin: 0; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85); }
+.deck-tile.invalid .cardface { outline: 3px solid var(--danger); outline-offset: -1px; }
+.d-formats { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.d-fmt { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); }
+.d-fmt b { margin-right: 6px; }
+.d-fmt.l0, .d-fmt.x { color: var(--danger); border-color: var(--danger); }
+.d-fmt.l1 { color: #e67e22; border-color: #e67e22; }
+.d-fmt.l2 { color: #b7950b; border-color: #d4ac0d; }
+
 /* デッキコード */
 .code-box { font-family: ui-monospace, Consolas, monospace; font-size: 13px; word-break: break-all; resize: vertical; }
 .btn.accent { border-color: var(--accent); color: var(--accent); font-weight: 700; }

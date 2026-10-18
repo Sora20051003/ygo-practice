@@ -11,7 +11,7 @@ const Decks = {
     if (Online.user) {
       // ログイン中：ネットに保存したデッキを使う
       const r = Online.remote || {};
-      this.list = (r.decks || []).map(d => ({ id: d.id, name: d.name, main: d.main || [], extra: d.extra || [], side: d.side || [] }));
+      this.list = (r.decks || []).map(d => ({ id: d.id, name: d.name, format: d.format || 'ocg', main: d.main || [], extra: d.extra || [], side: d.side || [] }));
       this.currentId = r.currentDeck;
     } else {
       this.list = store.get('ygo.decks', []);
@@ -25,10 +25,41 @@ const Decks = {
     store.set('ygo.currentDeck', this.currentId);
     saveDecksOnline(this.list, this.currentId);
   },
-  blank(name) { return { id: 'd' + Date.now() + Math.random().toString(36).slice(2, 6), name, main: [], extra: [], side: [] }; },
+  // 新しいデッキのルールは、今開いているデッキと同じにする
+  blank(name, format) {
+    const fmt = format || (this.current && this.list.length && this.current() ? deckFormat(this.current()) : 'ocg');
+    return { id: 'd' + Date.now() + Math.random().toString(36).slice(2, 6), name, format: fmt, main: [], extra: [], side: [] };
+  },
   get(id) { return this.list.find(d => d.id === id); },
   current() { return this.get(this.currentId); },
 };
+
+// デッキのルール（古いデッキはOCG扱い）
+const deckFormat = d => (d && FORMATS[d.format] ? d.format : 'ocg');
+const curFormat = () => deckFormat(Decks.current());
+
+// デッキの中の、ルール違反（使えないカード・枚数オーバー）を調べる
+function deckProblems(deck) {
+  const fmt = deckFormat(deck);
+  const counts = new Map();
+  for (const sec of ['main', 'extra', 'side']) for (const id of deck[sec]) {
+    const c = DB.byId.get(id);
+    if (c) counts.set(c.name, { c, n: (counts.get(c.name) || { n: 0 }).n + 1 });
+  }
+  const notAllowed = [], over = [];
+  for (const { c, n } of counts.values()) {
+    if (!cardAllowed(c, fmt)) notAllowed.push(c.name);
+    else if (n > limitOf(c, fmt)) over.push(`${c.name}（${LIMIT_LABEL[limitOf(c, fmt)]}：${limitOf(c, fmt)}枚まで）`);
+  }
+  return { notAllowed, over };
+}
+
+// 禁止・制限の小さな印
+function limitBadge(c, fmt) {
+  if (!cardAllowed(c, fmt)) return el('span', { class: 'lim lim-x', title: `${FORMATS[fmt].label}では使えません`, text: '×' });
+  const l = limitOf(c, fmt);
+  return l < 3 ? el('span', { class: 'lim lim-' + l, title: LIMIT_LABEL[l], text: l }) : null;
+}
 
 function countCopies(deck, card) {
   let n = 0;
@@ -47,7 +78,14 @@ function addToDeck(card, section) {
   if (section === 'main' && isExtraType(card)) section = 'extra';
   if (section === 'extra' && !isExtraType(card)) { toast('EXデッキに入れられるのは融合・S・X・リンクだけです'); return; }
   if (deck[section].length >= LIMITS[section]) { toast(`${SECTION_LABEL[section]}は${LIMITS[section]}枚までです`); return; }
-  if (countCopies(deck, card) >= MAX_COPIES) { toast(`同じカードは${MAX_COPIES}枚までです`); return; }
+  const fmt = deckFormat(deck);
+  if (!cardAllowed(card, fmt)) { toast(`このカードは${FORMATS[fmt].label}では使えません`); return; }
+  const limit = Math.min(MAX_COPIES, limitOf(card, fmt));
+  if (limit === 0) { toast(`${card.name}は${FORMATS[fmt].label}の禁止カードです`); return; }
+  if (countCopies(deck, card) >= limit) {
+    toast(limit < MAX_COPIES ? `${card.name}は${LIMIT_LABEL[limit]}カードなので${limit}枚までです` : `同じカードは${MAX_COPIES}枚までです`);
+    return;
+  }
   deck[section].push(card.id);
   Decks.save();
   renderDeck();
@@ -178,8 +216,9 @@ function renderResults() {
   box.innerHTML = '';
   if (!DB.cards.length) return;
   const text = $('#qt').value.trim();
+  const fmt = curFormat();
   const res = searchCards({
-    q: $('#q').value, qMode: segMode('#q-mode'), text, textMode: segMode('#qt-mode'), kind: $('#f-kind').value, sub: getMulti('#f-sub'), subMode: $('#f-sub').dataset.mode,
+    format: fmt, q: $('#q').value, qMode: segMode('#q-mode'), text, textMode: segMode('#qt-mode'), kind: $('#f-kind').value, sub: getMulti('#f-sub'), subMode: $('#f-sub').dataset.mode,
     attr: getMulti('#f-attr'), race: getMulti('#f-race'), level: getMulti('#f-level'), rank: getMulti('#f-rank'), link: getMulti('#f-link'), marker: getMulti('#f-marker'), markerMode: $('#f-marker').dataset.mode, sort: $('#f-sort').value,
   });
   $('#result-count').textContent = res.length > MAX_RESULTS
@@ -193,7 +232,7 @@ function renderResults() {
     const row = el('div', { class: 'result-row', onclick: () => showCardDetail(c, '#deck-detail') },
       rowMark(c),
       el('div', { class: 'r-main' },
-        el('div', { class: 'r-name', text: c.name + (c.noJp ? '（TCG）' : '') }),
+        el('div', { class: 'r-name' }, limitBadge(c, fmt), c.name + (c.noJp ? '（TCG）' : '')),
         el('div', { class: 'r-info', text: info }),
         text ? snippetEl(c.jaText, text) : null),
       el('button', { class: 'btn small', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),
@@ -249,12 +288,14 @@ function renderDeckList() {
     const ok = d.main.length >= 40;
     list.append(el('button', {
       class: 'deck-chip' + (d.id === Decks.currentId ? ' current' : ''), title: d.name,
-      onclick: () => { Decks.currentId = d.id; Decks.save(); renderDeck(); },
+      onclick: () => { Decks.currentId = d.id; Decks.save(); renderDeck(); renderResults(); },
     },
       deckCover(d),
       el('div', { class: 'chip-body' },
         el('div', { class: 'chip-name', text: d.name }),
-        el('div', { class: 'chip-count' + (ok ? '' : ' warn-text'), text: `メイン${d.main.length}・EX${d.extra.length}` }))));
+        el('div', { class: 'chip-count' + (ok ? '' : ' warn-text') },
+          el('span', { class: 'fmt-tag fmt-' + deckFormat(d), text: FORMATS[deckFormat(d)].short }),
+          ` メイン${d.main.length}・EX${d.extra.length}`))));
   }
   list.append(el('button', { class: 'deck-chip new', onclick: newDeck }, el('span', { class: 'plus', text: '＋' }), '新しいデッキ'));
   $('#deck-total').textContent = terms.length ? `${Decks.list.length}個中${shown.length}個` : `${Decks.list.length}個`;
@@ -274,14 +315,29 @@ function renderDeck() {
   $('#deck-sum').textContent = `メイン${deck.main.length}枚・EX${deck.extra.length}枚・サイド${deck.side.length}枚`;
   $('#mt-count').textContent = `（${deck.main.length}）`;
 
+  // ルールの切り替えボタンと、ルール違反の警告
+  const fmt = deckFormat(deck);
+  $$('#deck-format button').forEach(b => b.classList.toggle('on', b.dataset.format === fmt));
+  const { notAllowed, over } = deckProblems(deck);
+  const bad = new Set([...notAllowed, ...over.map(s => s.replace(/（.*$/, ''))]);
+  const warn = $('#deck-warn');
+  warn.innerHTML = '';
+  warn.hidden = !notAllowed.length && !over.length;
+  if (notAllowed.length) warn.append(el('div', { text: `⚠ ${FORMATS[fmt].label}で使えないカード：${notAllowed.join('、')}` }));
+  if (over.length) warn.append(el('div', { text: `⚠ 禁止・制限の枚数オーバー：${over.join('、')}` }));
+  const bl = DB.banlists[fmt];
+  $('#deck-banlist').textContent = bl && bl.date ? `禁止・制限リスト：${bl.date.replace(/-/g, '/')} 適用` : '禁止・制限リスト：未取得';
+
   for (const sec of ['main', 'extra', 'side']) {
     const grid = $('#deck-' + sec);
     grid.innerHTML = '';
     deck[sec].forEach((id, i) => {
       const c = DB.byId.get(id);
       if (!c) { grid.append(el('div', { class: 'deck-tile missing', text: '不明なカード ' + id })); return; }
-      const tile = el('div', { class: 'deck-tile', onclick: () => showCardDetail(c, '#deck-detail') },
+      const badge = limitBadge(c, fmt);
+      const tile = el('div', { class: 'deck-tile' + (bad.has(c.name) ? ' invalid' : ''), onclick: () => showCardDetail(c, '#deck-detail') },
         cardFace(c, { small: true }),
+        badge ? el('div', { class: 'tile-lim' }, badge) : null,
         el('button', { class: 'tile-remove', title: '1枚減らす', text: '−', onclick: e => { e.stopPropagation(); removeFromDeck(sec, i); } }));
       tile.addEventListener('contextmenu', e => { e.preventDefault(); removeFromDeck(sec, i); });
       grid.append(tile);
@@ -363,8 +419,10 @@ function readVarint(bytes, pos) {
 const b64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unb64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), ch => ch.charCodeAt(0));
 
+// 先頭の1バイトでルールを表す（1 = OCG、2 = マスターデュエル）
+const CODE_FORMAT = { ocg: 1, md: 2 };
 function encodeDeckCode(deck) {
-  const bytes = [1];
+  const bytes = [CODE_FORMAT[deckFormat(deck)] || 1];
   const name = new TextEncoder().encode(deck.name).slice(0, 60);
   pushVarint(bytes, name.length); bytes.push(...name);
   for (const sec of ['main', 'extra', 'side']) {
@@ -383,10 +441,12 @@ function encodeDeckCode(deck) {
 function decodeDeckCode(code) {
   const bytes = unb64url(code.replace(DECK_CODE_PREFIX, '').trim());
   const pos = { i: 0 };
-  if (bytes[pos.i++] !== 1) throw new Error('このアプリでは読めない形式のコードです');
+  const head = bytes[pos.i++];
+  const format = Object.keys(CODE_FORMAT).find(k => CODE_FORMAT[k] === head);
+  if (!format) throw new Error('このアプリでは読めない形式のコードです');
   const nameLen = readVarint(bytes, pos);
   const name = new TextDecoder().decode(bytes.slice(pos.i, pos.i + nameLen)); pos.i += nameLen;
-  const deck = { name, main: [], extra: [], side: [] }, unknown = [];
+  const deck = { name, format, main: [], extra: [], side: [] }, unknown = [];
   for (const sec of ['main', 'extra', 'side']) {
     const kinds = readVarint(bytes, pos);
     let prev = 0;
@@ -416,7 +476,7 @@ function parseDeckText(text) {
   if (code) {
     try {
       const d = decodeDeckCode(code);
-      return { result: { main: d.deck.main, extra: d.deck.extra, side: d.deck.side }, unknown: d.unknown, name: d.deck.name };
+      return { result: { main: d.deck.main, extra: d.deck.extra, side: d.deck.side }, unknown: d.unknown, name: d.deck.name, format: d.deck.format };
     } catch (e) {
       return { result, unknown: ['デッキコードを読めませんでした：' + e.message] };
     }
@@ -517,12 +577,12 @@ function openImport() {
       el('label', { class: 'check' }, asNew, '新しいデッキとして追加する（オフにすると今のデッキを上書き）')),
     buttons: [{
       label: '読み込む', primary: true, onClick: () => {
-        const { result, unknown, name } = parseDeckText(ta.value);
+        const { result, unknown, name, format } = parseDeckText(ta.value);
         const total = result.main.length + result.extra.length + result.side.length;
         if (!total) { toast(unknown[0] && unknown[0].startsWith('デッキコード') ? unknown[0] : 'カードを読み取れませんでした'); return false; }
         let deck;
         if (asNew.checked) {
-          deck = Decks.blank(name || (file.files[0] ? file.files[0].name.replace(/\.\w+$/, '') : '読み込んだデッキ'));
+          deck = Decks.blank(name || (file.files[0] ? file.files[0].name.replace(/\.\w+$/, '') : '読み込んだデッキ'), format);
           Decks.list.push(deck);
           Decks.currentId = deck.id;
         } else deck = Decks.current();
@@ -603,7 +663,7 @@ function addDeckFromCode(text) {
   if (!code) { toast('デッキコードが見つかりませんでした'); return false; }
   let d;
   try { d = decodeDeckCode(code); } catch (e) { toast('デッキコードを読めませんでした：' + e.message); return false; }
-  const deck = Decks.blank(d.deck.name || '共有されたデッキ');
+  const deck = Decks.blank(d.deck.name || '共有されたデッキ', d.deck.format);
   deck.main = d.deck.main.slice(0, LIMITS.main);
   deck.extra = d.deck.extra.slice(0, LIMITS.extra);
   deck.side = d.deck.side.slice(0, LIMITS.side);
@@ -653,7 +713,7 @@ function restoreBackup() {
       const onlyBlank = Decks.list.length === 1 && !Decks.list[0].main.length && !Decks.list[0].extra.length;
       if (onlyBlank) Decks.list = [];
       for (const d of decks) {
-        const nd = Decks.blank(String(d.name || '読み込んだデッキ'));
+        const nd = Decks.blank(String(d.name || '読み込んだデッキ'), FORMATS[d.format] ? d.format : 'ocg');
         nd.main = (d.main || []).filter(id => DB.byId.has(id));
         nd.extra = (d.extra || []).filter(id => DB.byId.has(id));
         nd.side = (d.side || []).filter(id => DB.byId.has(id));
@@ -700,6 +760,18 @@ function setupDeckView() {
   $('#deck-import').onclick = openImport;
   $('#deck-export').onclick = openExport;
   $('#deck-backup').onclick = backupAll;
+  // ルール（OCG / マスターデュエル）の切り替え：今のデッキのルールを変え、検索もそのルールのカードにする
+  $('#deck-format').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const deck = Decks.current();
+    if (deckFormat(deck) === b.dataset.format) return;
+    deck.format = b.dataset.format;
+    Decks.save();
+    renderDeck();
+    renderResults();
+    toast(`「${deck.name}」を${FORMATS[deck.format].label}用にしました`);
+  });
   $('#deck-code').onclick = openDeckCode;
   $('#deck-code-import').onclick = openCodeImport;
   $('#deck-restore').onclick = restoreBackup;

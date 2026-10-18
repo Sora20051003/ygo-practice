@@ -81,6 +81,7 @@ async function init() {
   if (!LOCAL_FILES) { delete CARD_STYLES.image; delete CARD_STYLES.art; if (!CARD_STYLES[cardStyle]) cardStyle = 'jp'; }
   try {
     await loadCards(showLoading);
+    await loadBanlists();   // 禁止・制限リスト（取れなくてもアプリは使える）
   } catch (e) {
     console.error(e);
     showLoading('カードデータを取得できませんでした。インターネット接続を確認して再読み込みしてください。\n' + e.message);
@@ -111,6 +112,7 @@ async function init() {
   $('#btn-update-data').onclick = async () => {
     try {
       const updated = await updateCards(showLoading);
+      await loadBanlists(true);
       showLoading(null);
       updateDataInfo();
       toast(updated ? 'カードデータを更新しました' : 'カードデータは最新です');

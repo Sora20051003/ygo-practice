@@ -341,6 +341,17 @@ function showCardDetail(c, panelSel, extra) {
   showModal({ title: c.name, body });
 }
 
+// OCG・マスターデュエルそれぞれで使えるか／禁止・制限か
+function formatInfo(c) {
+  if (typeof FORMATS === 'undefined' || !c.cid) return null;
+  return el('div', { class: 'd-formats' }, Object.entries(FORMATS).map(([fmt, f]) => {
+    let state, cls;
+    if (!cardAllowed(c, fmt)) { state = fmt === 'md' ? '未実装' : '使用不可'; cls = 'x'; }
+    else { const l = limitOf(c, fmt); state = l < 3 ? LIMIT_LABEL[l] : '制限なし'; cls = l < 3 ? 'l' + l : 'ok'; }
+    return el('span', { class: 'd-fmt ' + cls }, el('b', { text: f.short }), state);
+  }));
+}
+
 // カード詳細パネル
 function renderDetail(box, c, extra) {
   box.innerHTML = '';
@@ -366,6 +377,7 @@ function renderDetail(box, c, extra) {
     el('div', { class: 'd-type', text: typeLine(c) }),
     stats.length ? el('div', { class: 'd-stats', text: stats.join('　') }) : null,
     c.noJp ? el('div', { class: 'warn', text: '日本未発売（TCGのみ）のカードです' }) : null,
+    formatInfo(c),
     el('h4', { text: '効果' }), jaBox,
     el('div', { class: 'd-links' },
       c.cid ? el('a', { class: 'btn small', href: OFFICIAL_DB_URL(c.cid), target: '_blank', rel: 'noopener', text: '公式データベースで見る' }) : null,

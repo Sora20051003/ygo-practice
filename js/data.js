@@ -2,7 +2,7 @@
 // 取得元: ygocdb.com の全カードデータ（zip）。ブラウザ内(IndexedDB)に保存して2回目以降はオフラインで使う。
 const DATA_URL = 'https://ygocdb.com/api/v0/cards.zip';
 const DATA_MD5_URL = 'https://ygocdb.com/api/v0/cards.zip.md5';
-const DATA_VERSION = 1; // 変換形式を変えたら上げる
+const DATA_VERSION = 2; // 変換形式を変えたら上げる（2: マスターデュエル実装済みかどうか md を追加）
 
 const DB = {
   cards: [],
@@ -81,6 +81,7 @@ function convertCard(e) {
     cid: e.cid || 0,
     name: e.jp_name || e.en_name || e.cn_name || String(e.id),
     noJp: !e.jp_name,
+    md: !!e.md_name,   // マスターデュエルに実装済み（ygocdb にマスターデュエル版の名前がある）
     ruby: e.jp_ruby || '',
     en: e.en_name || '',
     type: d.type || 0,
@@ -151,6 +152,45 @@ async function updateCards(onStatus) {
   await downloadCards(onStatus);
   return true;
 }
+
+// ---------- ルール（OCG / マスターデュエル）と禁止・制限リスト ----------
+// 禁止・制限リストは DawnbrandBots/yaml-yugi-limit-regulation（KONAMIの発表を毎日自動で取り込んでいる公開データ）から取得。
+// 中身は { date, regulation: { KONAMIカード番号: 0=禁止 / 1=制限 / 2=準制限 } }
+const FORMATS = {
+  ocg: { label: 'OCG', short: 'OCG', list: 'ocg', allowed: c => !c.noJp },
+  md: { label: 'マスターデュエル', short: 'MD', list: 'master-duel', allowed: c => c.md },
+};
+const BANLIST_URL = key => `https://dawnbrandbots.github.io/yaml-yugi-limit-regulation/${key}/current.vector.json`;
+DB.banlists = { ocg: null, md: null };
+
+async function loadBanlists(force = false) {
+  let saved = null;
+  try { saved = await idbGet('banlists'); } catch { /* 無ければ取りに行く */ }
+  const fresh = saved && Date.now() - saved.fetched < 24 * 60 * 60 * 1000;   // 1日1回だけ取り直す
+  if (saved) DB.banlists = saved.lists;
+  if (fresh && !force) return;
+  try {
+    const lists = {};
+    for (const [fmt, f] of Object.entries(FORMATS)) {
+      const r = await fetch(BANLIST_URL(f.list), { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status);
+      lists[fmt] = await r.json();
+    }
+    DB.banlists = lists;
+    await idbSet('banlists', { fetched: Date.now(), lists });
+  } catch (e) {
+    console.warn('禁止・制限リストを取得できませんでした', e);   // 保存済みのものがあればそれを使う
+  }
+}
+
+// そのルールで入れられる枚数（禁止0・制限1・準制限2・無制限3）
+function limitOf(c, fmt) {
+  const list = DB.banlists[fmt];
+  const v = list && list.regulation ? list.regulation[c.cid] : undefined;
+  return v === undefined ? 3 : v;
+}
+const LIMIT_LABEL = { 0: '禁止', 1: '制限', 2: '準制限' };
+const cardAllowed = (c, fmt) => (FORMATS[fmt] || FORMATS.ocg).allowed(c);
 
 // ---------- 日本語の効果文（テキスト検索用） ----------
 // 取得元: mycard/ygopro-database の日本語カードDB（SQLite）。sql.js で読んで id→効果文 の形で保存する。
@@ -246,7 +286,7 @@ const splitTerms = s => (s || '').split(/[\s　]+/).map(normalizeText).filter(Bo
 // and: すべての語を含む / or: どれかの語を含む
 const matchTerms = (hay, terms, mode) => (mode === 'or' ? terms.some(t => hay.includes(t)) : terms.every(t => hay.includes(t)));
 
-function searchCards({ q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new' }) {
+function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new' }) {
   const subs = (Array.isArray(sub) ? sub : (sub ? [sub] : [])).map(s => SUB_FILTERS[s]).filter(Boolean);
   const subOk = c => (subMode === 'and' ? subs.every(f => f(c)) : subs.some(f => f(c)));
   const terms = splitTerms(q);
@@ -265,6 +305,7 @@ function searchCards({ q = '', qMode = 'and', text = '', textMode = 'and', kind 
   const out = [];
   for (const c of DB.cards) {
     if (isToken(c)) continue;
+    if (format && !cardAllowed(c, format)) continue;   // そのルールで使えないカードは出さない
     if (kind && !KIND_FILTERS[kind](c)) continue;
     if (subs.length && !subOk(c)) continue;
     if (attrs.length && !(isMonster(c) && attrs.includes(c.attr))) continue;
