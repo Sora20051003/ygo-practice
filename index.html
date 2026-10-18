@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261019-032128">
+<link rel="stylesheet" href="style.css?v=20261019-032606">
 </head>
 <body>
 <header class="topbar">
@@ -122,7 +122,7 @@
               <button class="btn small" id="deck-image-import" title="ニューロンのデッキ画像などから読み取る">📷 デッキ画像から読み込み</button>
             </span>
             <span class="action-group">
-              <button class="btn small" id="deck-sort">並べ替え</button>
+              <label class="sort-pick" title="全部のデッキで共通。カードを追加したときもこの順に入ります">並び順 <select id="deck-sort"></select></label>
               <button class="btn small" id="deck-import">ファイルから読み込み</button>
               <button class="btn small" id="deck-export">ファイルに書き出し</button>
             </span>
@@ -317,19 +317,19 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261019-032128"></script>
-<script src="js/consts.js?v=20261019-032128"></script>
-<script src="js/ui.js?v=20261019-032128"></script>
-<script src="js/data.js?v=20261019-032128"></script>
-<script src="js/firebase-config.js?v=20261019-032128"></script>
-<script src="js/auth.js?v=20261019-032128"></script>
-<script src="js/deck.js?v=20261019-032128"></script>
-<script src="js/board.js?v=20261019-032128"></script>
-<script src="js/engine.js?v=20261019-032128"></script>
-<script src="js/autoplay.js?v=20261019-032128"></script>
-<script src="js/glow.js?v=20261019-032128"></script>
-<script src="js/duel.js?v=20261019-032128"></script>
-<script src="js/imgdeck.js?v=20261019-032128"></script>
-<script src="js/app.js?v=20261019-032128"></script>
+<script src="js/version.js?v=20261019-032606"></script>
+<script src="js/consts.js?v=20261019-032606"></script>
+<script src="js/ui.js?v=20261019-032606"></script>
+<script src="js/data.js?v=20261019-032606"></script>
+<script src="js/firebase-config.js?v=20261019-032606"></script>
+<script src="js/auth.js?v=20261019-032606"></script>
+<script src="js/deck.js?v=20261019-032606"></script>
+<script src="js/board.js?v=20261019-032606"></script>
+<script src="js/engine.js?v=20261019-032606"></script>
+<script src="js/autoplay.js?v=20261019-032606"></script>
+<script src="js/glow.js?v=20261019-032606"></script>
+<script src="js/duel.js?v=20261019-032606"></script>
+<script src="js/imgdeck.js?v=20261019-032606"></script>
+<script src="js/app.js?v=20261019-032606"></script>
 </body>
 </html>

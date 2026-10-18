@@ -406,6 +406,7 @@ function newDeck() {
 
 function renderDeck() {
   const deck = Decks.current();
+  if (applySort(deck)) Decks.save();   // 選んでいる並び順に合わせる（追加したカードもここで正しい位置に入る）
   renderDeckList();
   $('#deck-name').textContent = deck.name;
   $('#deck-sum').textContent = `メイン${deck.main.length}枚・EX${deck.extra.length}枚・サイド${deck.side.length}枚`;
@@ -452,15 +453,65 @@ function renderDeck() {
   if (typeof refreshBoardDeckSelect === 'function') refreshBoardDeckSelect();
 }
 
-function sortDeck() {
-  const deck = Decks.current();
+// ---------- 並び順（全部のデッキ共通。追加したときもこの順に入る） ----------
+const SORT_MODES = { theme: 'テーマごと', type: '種類ごと', manual: '追加した順' };
+const sortMode = () => store.get('ygo.deckSort', 'theme');
+
+// カードのテーマ（カテゴリ番号）。下位12ビットが同じものは同じテーマ（「〇〇・××」のような派生も含める）
+function cardThemes(c) {
+  const e = typeof EDO_CARDS !== 'undefined' && EDO_CARDS.d[c.id];
+  let list = e && e[1] ? e[1] : null;
+  if (!list) { list = []; for (let s = c.setcode || 0; s > 0; s = Math.floor(s / 65536)) list.push(s % 65536); }
+  return [...new Set(list.map(s => s & 0xfff).filter(Boolean))];
+}
+
+// テーマごと：デッキ全体で多いテーマから順に固め、テーマ内は種類順。2枚以上ないテーマや汎用カードは最後
+function themeSorter(deck) {
+  const all = [...deck.main, ...deck.extra, ...deck.side].map(id => DB.byId.get(id)).filter(Boolean);
+  const freq = new Map();
+  const seen = new Set();
+  for (const c of all) {
+    if (seen.has(c.name)) { for (const t of cardThemes(c)) freq.set(t, freq.get(t) + 0.001); continue; } // 同名は種類数を優先
+    seen.add(c.name);
+    for (const t of cardThemes(c)) freq.set(t, (freq.get(t) || 0) + 1);
+  }
+  const themeOf = c => {
+    let best = 0, bf = 1;
+    for (const t of cardThemes(c)) { const f = freq.get(t) || 0; if (f >= 2 && f > bf) { best = t; bf = f; } }
+    return best;
+  };
+  const keyCache = new Map();
+  const key = c => { if (!keyCache.has(c.id)) keyCache.set(c.id, themeOf(c)); return keyCache.get(c.id); };
+  return (a, b) => {
+    const ta = key(a), tb = key(b);
+    if (ta !== tb) {
+      if (!ta || !tb) return ta ? -1 : 1;
+      return (freq.get(tb) - freq.get(ta)) || ta - tb;
+    }
+    return compareCards(a, b);
+  };
+}
+
+// 並び順に合わせて並べ直す。変わったら true
+function applySort(deck, mode = sortMode()) {
+  if (mode === 'manual') return false;
+  const cmp = mode === 'theme' ? themeSorter(deck) : compareCards;
+  let changed = false;
   for (const sec of ['main', 'extra', 'side']) {
+    const before = deck[sec].join();
     deck[sec].sort((a, b) => {
       const ca = DB.byId.get(a), cb = DB.byId.get(b);
-      if (!ca || !cb) return 0;
-      return compareCards(ca, cb) || a - b;
+      if (!ca || !cb) return (ca ? -1 : 0) + (cb ? 1 : 0);
+      return cmp(ca, cb) || a - b;
     });
+    if (deck[sec].join() !== before) changed = true;
   }
+  return changed;
+}
+
+function sortDeck() {
+  const deck = Decks.current();
+  applySort(deck, sortMode() === 'manual' ? 'theme' : sortMode());
   Decks.save();
   renderDeck();
 }
@@ -1026,7 +1077,9 @@ function setupDeckView() {
       } }],
     });
   };
-  $('#deck-sort').onclick = sortDeck;
+  const sortSel = $('#deck-sort');
+  for (const [v, l] of Object.entries(SORT_MODES)) sortSel.append(el('option', { value: v, text: l, selected: v === sortMode() }));
+  sortSel.onchange = () => { store.set('ygo.deckSort', sortSel.value); if (sortSel.value !== 'manual') sortDeck(); toast('並び順を「' + SORT_MODES[sortSel.value] + '」にしました（全部のデッキ共通）'); };
   $('#deck-import').onclick = openImport;
   $('#deck-export').onclick = openExport;
   $('#deck-backup').onclick = backupAll;

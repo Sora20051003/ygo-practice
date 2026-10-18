@@ -823,3 +823,5 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
 .d-addcount { font-size: 13px; opacity: .85; }
 .d-addbtns { display: flex; flex-wrap: wrap; gap: 6px; }
 .d-addbtns .btn { flex: 1 1 auto; }
+.sort-pick { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.sort-pick select { font-size: 13px; padding: 2px 4px; }
