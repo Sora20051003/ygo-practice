@@ -3,7 +3,7 @@
 // ・自分の盤面は今までどおり手で動かす。変わるたびに「相手に見せてよい情報だけ」を相手に送る
 //   （手札の中身・デッキの順番・裏向きのカードは送らない）
 // ・LP・ターン・フェイズ・チャット・コイン・サイコロ・カードの公開・相手へのダメージは、部屋で共有する
-// 通信は Firebase（Cloud Firestore）。テスト用に、同じパソコンの2つの画面でやり取りする仕組みもある（?duelTest=A など）
+// 通信は Supabase（データベース＋Realtime）。テスト用に、同じパソコンの2つの画面でやり取りする仕組みもある（?duelTest=A など）
 
 const PHASES = [['DP', 'ドロー'], ['SP', 'スタンバイ'], ['M1', 'メイン1'], ['BP', 'バトル'], ['M2', 'メイン2'], ['EP', 'エンド']];
 const START_LP = 8000;
@@ -11,44 +11,65 @@ const ROOM_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 見間違えやす�
 const newRoomCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), b => ROOM_CHARS[b % ROOM_CHARS.length]).join('');
 const DUEL_TEST = new URLSearchParams(location.search).get('duelTest');
 
-// ---------- 通信（Firebase） ----------
-class FirestoreDuelTransport {
-  constructor(me) { this.me = me; this.db = Online.db; this.unsubs = []; }
-  ref(code) { return this.db.collection('rooms').doc(code || this.code); }
+// ---------- 通信（Supabase） ----------
+// 部屋：rooms 表（data に部屋の情報）。盤面：room_players 表。出来事（チャットなど）：room_events 表。
+// 変わったら Supabase の Realtime で知らせてもらう。参加と部屋の書き換えは、同時に書いても壊れないようサーバー側の関数で行う
+class SupabaseDuelTransport {
+  constructor(me) { this.me = me; this.sb = Online.sb; this.channel = null; }
   async create() {
     for (let t = 0; t < 5; t++) {
       const code = newRoomCode();
-      if ((await this.ref(code).get()).exists) continue;
-      await this.ref(code).set({
+      const data = {
         host: this.me.uid, hostName: this.me.name, guest: null, guestName: null, status: 'waiting',
         ready: {}, decks: {}, turn: 0, turnPlayer: null, phase: 'DP', winner: null, createdAt: Date.now(),
-      });
-      return code;
+      };
+      const { error } = await this.sb.from('rooms').insert({ code, host: this.me.uid, data });
+      if (!error) return code;
+      if (!/duplicate|unique/i.test(error.message)) throw error;   // 同じコードの部屋があれば作り直す
     }
     throw new Error('部屋を作れませんでした。もう一度お試しください');
   }
   async join(code) {
-    const ref = this.ref(code);
-    await this.db.runTransaction(async tx => {
-      const s = await tx.get(ref);
-      if (!s.exists) throw new Error('その部屋コードの部屋はありません');
-      const r = s.data();
-      if (r.host === this.me.uid || r.guest === this.me.uid) return;   // 入り直し
-      if (r.guest) throw new Error('この部屋はもう満員です');
-      tx.update(ref, { guest: this.me.uid, guestName: this.me.name });
-    });
+    const { error } = await this.sb.rpc('join_room', { p_code: code, p_name: this.me.name });
+    if (!error) return;
+    if (/NO_ROOM/.test(error.message)) throw new Error('その部屋コードの部屋はありません');
+    if (/FULL/.test(error.message)) throw new Error('この部屋はもう満員です');
+    throw error;
   }
-  listen(code, h) {
+  async listen(code, h) {
     this.code = code;
-    const ref = this.ref(code);
-    this.unsubs.push(ref.onSnapshot(s => { if (s.exists) h.room(s.data()); }, e => h.error(e)));
-    this.unsubs.push(ref.collection('players').onSnapshot(qs => qs.forEach(d => { if (d.id !== this.me.uid) h.opp(JSON.parse(d.data().json)); }), e => h.error(e)));
-    this.unsubs.push(ref.collection('events').orderBy('ts').onSnapshot(qs => qs.docChanges().forEach(ch => { if (ch.type === 'added') h.event(ch.doc.data()); }), e => h.error(e)));
+    const seenEvents = new Set();
+    const onEvent = row => { if (!seenEvents.has(row.id)) { seenEvents.add(row.id); h.event(row.data); } };
+    const filter = 'code=eq.' + code;
+    this.channel = this.sb.channel('room-' + code)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter }, p => { if (p.new && p.new.data) h.room(p.new.data); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players', filter }, p => { if (p.new && p.new.uid !== this.me.uid && p.new.json) h.opp(JSON.parse(p.new.json)); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_events', filter }, p => { if (p.new) onEvent(p.new); })
+      .subscribe(status => { if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') h.error(new Error('対戦の通信がつながりませんでした')); });
+    // 今の状態を一度読む（つながる前に変わった分も取りこぼさないように）
+    const [room, players, events] = await Promise.all([
+      this.sb.from('rooms').select('data').eq('code', code).maybeSingle(),
+      this.sb.from('room_players').select('uid,json').eq('code', code),
+      this.sb.from('room_events').select('id,data').eq('code', code).order('id'),
+    ]);
+    if (room.error || !room.data) { h.error(room.error || new Error('その部屋コードの部屋はありません')); return; }
+    h.room(room.data.data);
+    (players.data || []).forEach(p => { if (p.uid !== this.me.uid && p.json) h.opp(JSON.parse(p.json)); });
+    (events.data || []).forEach(onEvent);
   }
-  updateRoom(patch) { return this.ref().update(patch); }
-  sendState(json) { return this.ref().collection('players').doc(this.me.uid).set({ json, at: Date.now() }); }
-  sendEvent(ev) { return this.ref().collection('events').add({ ...ev, from: this.me.uid, name: this.me.name, ts: Date.now() }); }
-  leave() { this.unsubs.forEach(u => u()); this.unsubs = []; }
+  async updateRoom(patch) {
+    const { error } = await this.sb.rpc('patch_room', { p_code: this.code, p_patch: patch });
+    if (error) throw error;
+  }
+  async sendState(json) {
+    const { error } = await this.sb.from('room_players').upsert({ code: this.code, uid: this.me.uid, json, at: new Date().toISOString() });
+    if (error) throw error;
+  }
+  async sendEvent(ev) {
+    const { error } = await this.sb.from('room_events').insert({ code: this.code, from_uid: this.me.uid, data: { ...ev, from: this.me.uid, name: this.me.name, ts: Date.now() } });
+    if (error) throw error;
+  }
+  leave() { if (this.channel) this.sb.removeChannel(this.channel); this.channel = null; }
 }
 
 // ---------- 通信（テスト用：同じパソコンの2つの画面） ----------
@@ -147,7 +168,7 @@ function feed(text, cls = '') {
 // ---------- 部屋に入る・作る ----------
 async function duelCreate() {
   Duel.me = duelMe();
-  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new FirestoreDuelTransport(Duel.me);
+  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new SupabaseDuelTransport(Duel.me);
   try {
     const code = await Duel.t.create();
     enterRoom(code);
@@ -158,7 +179,7 @@ async function duelJoin(code) {
   code = (code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length !== 6) { toast('部屋コードは6文字です'); return; }
   Duel.me = duelMe();
-  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new FirestoreDuelTransport(Duel.me);
+  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new SupabaseDuelTransport(Duel.me);
   try {
     await Duel.t.join(code);
     enterRoom(code);

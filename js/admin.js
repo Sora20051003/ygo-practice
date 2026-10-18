@@ -1,12 +1,9 @@
-// アカウントの記録と管理ページ（Firebase を使うネット版だけ）
-// ・ログインした人は profiles/<uid> に「名前・メール・最後に使った日時・端末・デッキの数」を記録する（1分ごとに更新）
-// ・管理者（meta/owner に登録した人）だけが、全員の記録と対戦の部屋の一覧を見られる
-// 読み書きできる範囲は firestore.rules で決めている
+// アカウントの記録と管理ページ（Supabase を使うネット版だけ）
+// ・ログインした人は profiles 表に「名前・メール・最後に使った日時・端末・デッキの数」を記録する（1分ごとに更新）
+// ・管理者（app_owner 表に登録した1人）だけが、全員の記録と対戦の部屋の一覧を見られる
+// 読み書きできる範囲は supabase/setup.sql の決まり（RLS）で守っている
 
 const ONLINE_MS = 3 * 60 * 1000;   // 最後に使ってから3分以内なら「オンライン中」
-const fsNow = () => firebase.firestore.FieldValue.serverTimestamp();
-const profileDoc = uid => Online.db.collection('profiles').doc(uid);
-const ownerDoc = () => Online.db.collection('meta').doc('owner');
 
 // 端末の種類（だいたい）
 function deviceName() {
@@ -24,17 +21,15 @@ function startPresence() {
   const u = Online.user;
   const write = async first => {
     if (document.hidden && !first) return;
-    const data = {
-      name: u.displayName || '', email: u.email || '', device: deviceName(),
-      lastSeen: fsNow(), deckCount: typeof Decks !== 'undefined' && Decks.list ? Decks.list.length : 0,
+    const now = new Date().toISOString();
+    const row = {
+      uid: u.uid, name: u.displayName || '', email: u.email || '', device: deviceName(), last_seen: now,
+      deck_count: typeof Decks !== 'undefined' && Decks.list ? Decks.list.length : 0,
       version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '',
     };
-    if (first) {
-      data.lastLogin = fsNow();
-      data.createdAt = u.metadata && u.metadata.creationTime ? new Date(u.metadata.creationTime) : fsNow();
-      data.provider = (u.providerData[0] && u.providerData[0].providerId) || '';
-    }
-    try { await profileDoc(u.uid).set(data, { merge: true }); } catch (e) { console.warn('アカウントの記録を保存できませんでした', e); }
+    if (first) { row.last_login = now; row.created_at = u.createdAt || now; row.provider = u.provider || ''; }
+    const { error } = await Online.sb.from('profiles').upsert(row);
+    if (error) console.warn('アカウントの記録を保存できませんでした', error);
   };
   write(true);
   setInterval(() => write(false), 60 * 1000);
@@ -44,11 +39,10 @@ function startPresence() {
 // ---------- 管理者かどうか ----------
 async function checkAdmin() {
   if (!Online.user) return;
-  try {
-    const snap = await ownerDoc().get();
-    Online.ownerExists = snap.exists;
-    Online.isAdmin = snap.exists && snap.data().uid === Online.user.uid;
-  } catch (e) { console.warn('管理者の確認ができませんでした', e); return; }
+  const { data, error } = await Online.sb.from('app_owner').select('uid').maybeSingle();
+  if (error) { console.warn('管理者の確認ができませんでした', error); return; }
+  Online.ownerExists = !!data;
+  Online.isAdmin = !!data && data.uid === Online.user.uid;
   renderAdminButton();
 }
 function renderAdminButton() {
@@ -60,11 +54,9 @@ function renderAdminButton() {
   else if (Online.ownerExists === false) box.prepend(el('button', { id: 'btn-admin', class: 'btn small', text: '管理者として登録', title: 'まだ管理者がいません。押した人が管理者になります（1人だけ）', onclick: claimOwner }));
 }
 async function claimOwner() {
-  if (!confirm('このアカウントを管理者として登録します。管理者は1人だけで、あとから変えるには Firebase の管理画面での操作が必要です。登録しますか？')) return;
-  try {
-    await ownerDoc().set({ uid: Online.user.uid, email: Online.user.email || '', at: fsNow() });
-    toast('管理者として登録しました');
-  } catch (e) { toast('登録できませんでした（すでに管理者がいるかもしれません）：' + e.message); }
+  if (!confirm('このアカウントを管理者として登録します。管理者は1人だけで、あとから変えるには Supabase の管理画面での操作が必要です。登録しますか？')) return;
+  const { error } = await Online.sb.from('app_owner').insert({ id: 1, uid: Online.user.uid });
+  toast(error ? '登録できませんでした（すでに管理者がいるかもしれません）：' + error.message : '管理者として登録しました');
   checkAdmin();
 }
 
@@ -75,24 +67,25 @@ function openAdmin() {
   const userList = el('div', { class: 'adm-table-wrap' });
   const roomList = el('div', { class: 'adm-table-wrap' });
   const filter = el('input', { type: 'search', placeholder: '名前・メールで絞り込み', class: 'adm-filter' });
+  const updated = el('span', { class: 'muted small-note' });
   let profiles = [], rooms = [];
-  const toDate = t => (t && t.toDate ? t.toDate() : t instanceof Date ? t : typeof t === 'number' ? new Date(t) : null);
+  const toDate = t => (t ? new Date(t) : null);
   const when = t => {
     const d = toDate(t);
-    if (!d) return '—';
+    if (!d || isNaN(d)) return '—';
     const s = (Date.now() - d.getTime()) / 1000;
     if (s < 60) return 'たった今';
     if (s < 3600) return Math.floor(s / 60) + '分前';
     if (s < 86400) return Math.floor(s / 3600) + '時間前';
     return d.toLocaleString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
-  const isOnline = p => { const d = toDate(p.lastSeen); return !!d && Date.now() - d.getTime() < ONLINE_MS; };
+  const isOnline = p => { const d = toDate(p.last_seen); return !!d && Date.now() - d.getTime() < ONLINE_MS; };
   const draw = () => {
     const q = normalizeText(filter.value);
     const list = profiles.filter(p => !q || normalizeText((p.name || '') + ' ' + (p.email || '')).includes(q))
-      .sort((a, b) => (isOnline(b) - isOnline(a)) || ((toDate(b.lastSeen) || 0) - (toDate(a.lastSeen) || 0)));
+      .sort((a, b) => (isOnline(b) - isOnline(a)) || ((toDate(b.last_seen) || 0) - (toDate(a.last_seen) || 0)));
     const online = profiles.filter(isOnline).length;
-    const today = profiles.filter(p => { const d = toDate(p.lastSeen); return d && Date.now() - d.getTime() < 86400000; }).length;
+    const today = profiles.filter(p => { const d = toDate(p.last_seen); return d && Date.now() - d.getTime() < 86400000; }).length;
     summary.innerHTML = '';
     summary.append(
       el('div', { class: 'adm-num' }, el('b', { text: String(profiles.length) }), '登録アカウント'),
@@ -106,41 +99,44 @@ function openAdmin() {
         el('td', { text: isOnline(p) ? '🟢' : '⚪', title: isOnline(p) ? 'オンライン中' : 'オフライン' }),
         el('td', { text: p.name || '（名前なし）' }),
         el('td', { text: p.email || '—' }),
-        el('td', { text: when(p.lastSeen) }),
-        el('td', { text: toDate(p.createdAt) ? toDate(p.createdAt).toLocaleDateString('ja-JP') : '—' }),
+        el('td', { text: when(p.last_seen) }),
+        el('td', { text: toDate(p.created_at) ? toDate(p.created_at).toLocaleDateString('ja-JP') : '—' }),
         el('td', { text: p.device || '—' }),
-        el('td', { text: p.deckCount != null ? String(p.deckCount) : '—' }))))));
+        el('td', { text: p.deck_count != null ? String(p.deck_count) : '—' }))))));
     roomList.innerHTML = '';
     roomList.append(rooms.length ? el('table', { class: 'adm-table' },
-      el('thead', null, el('tr', null, ['部屋', '作った人', '参加した人', '作成'].map(h => el('th', { text: h })))),
+      el('thead', null, el('tr', null, ['部屋', '作った人', '参加した人', '状態', '作成'].map(h => el('th', { text: h })))),
       el('tbody', null, rooms.map(r => el('tr', null,
-        el('td', { text: r.id }),
-        el('td', { text: r.hostName || r.host || '—' }),
-        el('td', { text: r.guestName || (r.guest ? r.guest : '（待ち）') }),
-        el('td', { text: when(r.createdAt) })))))
+        el('td', { text: r.code }),
+        el('td', { text: (r.data && r.data.hostName) || '—' }),
+        el('td', { text: (r.data && r.data.guestName) || '（待ち）' }),
+        el('td', { text: ({ waiting: '待ち', playing: '対戦中', ended: '終了' })[r.data && r.data.status] || '—' }),
+        el('td', { text: when(r.created_at) })))))
       : el('p', { class: 'muted', text: '対戦の部屋はありません' }));
   };
+  // 20秒ごとに読み直す
+  const load = async () => {
+    const [p, r] = await Promise.all([
+      Online.sb.from('profiles').select('*'),
+      Online.sb.from('rooms').select('code,data,created_at').order('created_at', { ascending: false }).limit(30),
+    ]);
+    if (p.error) userList.textContent = '読み込めませんでした：' + p.error.message; else profiles = p.data || [];
+    if (r.error) roomList.textContent = '読み込めませんでした：' + r.error.message; else rooms = r.data || [];
+    updated.textContent = '（' + new Date().toLocaleTimeString('ja-JP') + ' 時点・20秒ごとに更新）';
+    if (!p.error && !r.error) draw();
+  };
   filter.addEventListener('input', draw);
-  const offs = [
-    Online.db.collection('profiles').onSnapshot(s => { profiles = s.docs.map(d => Object.assign({ uid: d.id }, d.data())); draw(); },
-      e => { userList.textContent = '読み込めませんでした：' + e.message; }),
-    Online.db.collection('rooms').onSnapshot(s => {
-      rooms = s.docs.map(d => Object.assign({ id: d.id }, d.data()))
-        .sort((a, b) => (toDate(b.createdAt) || 0) - (toDate(a.createdAt) || 0)).slice(0, 30);
-      draw();
-    }, e => { roomList.textContent = '読み込めませんでした：' + e.message; }),
-  ];
-  const tick = setInterval(draw, 30 * 1000);   // 「〜分前」の表示を更新
+  const tick = setInterval(load, 20 * 1000);
   showModal({
     title: '🛡 管理ページ', wide: true,
     body: el('div', { class: 'adm' },
-      summary,
+      summary, updated,
       el('h4', null, 'アカウント', filter),
       el('p', { class: 'muted small-note', text: '「オンライン中」は最後に使ってから3分以内の人です。「ログインしないで使う」を選んだ人はここには出ません。' }),
       userList,
       el('h4', { text: '対戦の部屋（新しい順に30件）' }),
       roomList),
-    onClose: () => { offs.forEach(f => f()); clearInterval(tick); },
+    onClose: () => clearInterval(tick),
   });
-  draw();
+  load();
 }

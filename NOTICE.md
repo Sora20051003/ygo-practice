@@ -24,6 +24,6 @@
 | 日本語カード名・効果テキスト | [ygocdb.com](https://ygocdb.com/)、[mycard/ygopro-database](https://github.com/mycard/ygopro-database) | 各サイト・リポジトリを参照 |
 | 禁止・制限リスト | [DawnbrandBots/yaml-yugi-limit-regulation](https://github.com/DawnbrandBots/yaml-yugi-limit-regulation) | リポジトリを参照 |
 | 発売日など | [YGOResources](https://db.ygoresources.com/) | サイトを参照 |
-| ログイン・同期・対戦 | [Firebase](https://firebase.google.com/) | Google の利用規約 |
+| ログイン・同期・対戦 | [Supabase](https://supabase.com/) | Supabase の利用規約 |
 
 このアプリ自体のソースコードは https://github.com/Sora20051003/ygo-practice で公開しています。

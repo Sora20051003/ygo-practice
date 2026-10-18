@@ -1,69 +1,83 @@
-// ログイン（Firebase Authentication）とデッキのネット保存（Cloud Firestore）
-// ・ネットに公開したアプリ（http/https）で FIREBASE_CONFIG が設定されているときだけ有効
-// ・パソコンのファイルとして開いたとき（file://）は、今までどおりログインなしで動く
-const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
+// ログインとデッキのネット保存（Supabase）
+// ・ネットに公開したアプリ（http/https）で SUPABASE_CONFIG（js/cloud-config.js）が設定されているときだけ有効
+// ・パソコンのファイルとして開いたとき（file://）や、設定がないときは、今までどおりログインなしで動く
+// ・サーバー側の表（テーブル）と読み書きの決まりは supabase/setup.sql
+const SUPABASE_SDK = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 
 const Online = {
-  enabled: typeof FIREBASE_CONFIG !== 'undefined' && !!FIREBASE_CONFIG && location.protocol.startsWith('http'),
-  user: null,
-  db: null,
+  enabled: typeof SUPABASE_CONFIG !== 'undefined' && !!SUPABASE_CONFIG && !!SUPABASE_CONFIG.url && location.protocol.startsWith('http'),
+  sb: null,         // Supabase のクライアント
+  user: null,       // { uid, email, displayName, createdAt, provider }
   saveTimer: null,
 };
 
 // 画像はパソコン内のフォルダ（pics/）にあるので、ファイルとして開いたときだけ使う
 const LOCAL_FILES = location.protocol === 'file:';
 
-const AUTH_ERRORS = {
-  'auth/invalid-credential': 'メールアドレスかパスワードが違います。',
-  'auth/wrong-password': 'メールアドレスかパスワードが違います。',
-  'auth/user-not-found': 'このメールアドレスのアカウントはありません。「新規登録」から作ってください。',
-  'auth/email-already-in-use': 'このメールアドレスは登録済みです。「ログイン」してください。',
-  'auth/weak-password': 'パスワードは6文字以上にしてください。',
-  'auth/invalid-email': 'メールアドレスの形が正しくありません。',
-  'auth/missing-password': 'パスワードを入力してください。',
-  'auth/popup-closed-by-user': 'ログイン画面が閉じられました。もう一度お試しください。',
-  'auth/popup-blocked': 'ポップアップがブロックされました。ブラウザの設定で許可してください。',
-  'auth/too-many-requests': '試行回数が多すぎます。しばらく待ってからお試しください。',
-  'auth/network-request-failed': 'インターネットに接続できませんでした。',
-  'auth/unauthorized-domain': 'このアドレスからのログインが許可されていません（Firebaseの「承認済みドメイン」の設定が必要です）。',
-  'auth/operation-not-allowed': 'このログイン方法が有効になっていません（Firebaseの設定が必要です）。',
-  'auth/api-key-not-valid.-please-pass-a-valid-api-key.': 'Firebaseの設定（firebase-config.js）が正しくありません。',
-  'auth/invalid-api-key': 'Firebaseの設定（firebase-config.js）が正しくありません。',
-};
-const authMessage = e => AUTH_ERRORS[e && e.code] || ('ログインできませんでした：' + ((e && e.message) || e));
+// Supabase のエラー → 日本語
+function authMessage(e) {
+  const m = (e && (e.message || e.error_description || String(e))) || '';
+  if (/Invalid login credentials/i.test(m)) return 'メールアドレスかパスワードが違います。';
+  if (/Email not confirmed/i.test(m)) return 'メールアドレスの確認がまだです。届いたメールのリンクを押してから、ログインしてください。';
+  if (/already registered|already been registered|User already exists/i.test(m)) return 'このメールアドレスは登録済みです。「ログイン」してください。';
+  if (/Password should be at least|weak/i.test(m)) return 'パスワードは6文字以上にしてください。';
+  if (/valid email|invalid email|Unable to validate email/i.test(m)) return 'メールアドレスの形が正しくありません。';
+  if (/rate limit|too many/i.test(m)) return '試行回数が多すぎます。しばらく待ってからお試しください。';
+  if (/Failed to fetch|NetworkError|network/i.test(m)) return 'インターネットに接続できませんでした。';
+  if (/provider is not enabled|Unsupported provider/i.test(m)) return 'このログイン方法はまだ使えません（サーバーの設定が必要です）。';
+  if (/Invalid API key|apikey/i.test(m)) return 'サーバーの設定（js/cloud-config.js）が正しくありません。';
+  return 'ログインできませんでした：' + m;
+}
+
+// Supabase のユーザー → アプリで使う形
+function toAppUser(u) {
+  if (!u) return null;
+  const meta = u.user_metadata || {};
+  return {
+    uid: u.id, email: u.email || '',
+    displayName: meta.name || meta.full_name || meta.user_name || (u.email || '').split('@')[0] || '',
+    createdAt: u.created_at, provider: (u.app_metadata && u.app_metadata.provider) || 'email',
+  };
+}
 
 // ログインが終わるまで待つ。ログイン不要なら何もしない
 async function initAuth() {
   if (!Online.enabled) return;
   showLoading('準備中…');
-  await loadScript(FIREBASE_SDK + 'firebase-app-compat.js');
-  await Promise.all([loadScript(FIREBASE_SDK + 'firebase-auth-compat.js'), loadScript(FIREBASE_SDK + 'firebase-firestore-compat.js')]);
-  firebase.initializeApp(FIREBASE_CONFIG);
-  const auth = firebase.auth();
-  auth.languageCode = 'ja';
-  Online.db = firebase.firestore();
-  showLoading('ログイン状態を確認中…');
-
-  const user = await new Promise(resolve => {
-    const off = auth.onAuthStateChanged(u => {
-      showLoading(null);
-      if (u) { off(); resolve(u); return; }
-      // 前に「ログインしないで使う」を選んだ端末は、ログイン画面を出さない
-      if (localStorage.getItem('ygo.guest') === '1') { off(); resolve(null); return; }
-      showLoginScreen(() => { off(); resolve(null); });
-    });
+  await loadScript(SUPABASE_SDK);
+  const sb = Online.sb = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
+  // パスワードを忘れた人がメールのリンクから戻ってきたとき：新しいパスワードを決めてもらう
+  sb.auth.onAuthStateChange(event => {
+    if (event === 'PASSWORD_RECOVERY') setTimeout(askNewPassword, 300);
+  });
+  showLoading('ログイン状態を確認中…');
+  const { data } = await sb.auth.getSession();
+  let user = data && data.session ? data.session.user : null;
+  showLoading(null);
+  if (!user && localStorage.getItem('ygo.guest') !== '1') {
+    user = await new Promise(resolve => showLoginScreen(resolve));
+  }
   hideLoginScreen();
   if (!user) { renderUserBox(); return; }   // ログインしないで使う（デッキはこの端末だけに保存）
   localStorage.removeItem('ygo.guest');
-  Online.user = user;
-  store.ns = 'u:' + user.uid + ':';   // 同じブラウザで別の人が使っても設定が混ざらないようにする
+  Online.user = toAppUser(user);
+  // ログインする前にこの端末で作っていたデッキ（アカウントにまだデッキがなければ、引き継ぐ）
+  const localDecks = store.get('ygo.decks', []), localCurrent = store.get('ygo.currentDeck', null);
+  store.ns = 'u:' + Online.user.uid + ':';   // 同じブラウザで別の人が使っても設定が混ざらないようにする
 
   // ネットに保存してあるデッキを読む
   showLoading('デッキを読み込み中…');
   try {
-    const snap = await userDoc().get();
-    Online.remote = snap.exists ? snap.data() : null;
+    const { data: row, error } = await sb.from('user_decks').select('decks,current_deck').eq('uid', Online.user.uid).maybeSingle();
+    if (error) throw error;
+    Online.remote = row ? { decks: row.decks || [], currentDeck: row.current_deck } : null;
+    if ((!Online.remote || !Online.remote.decks.length) && localDecks.length && localDecks.some(d => d.main && d.main.length)) {
+      Online.remote = { decks: localDecks, currentDeck: localCurrent };
+      setTimeout(() => toast('この端末のデッキをアカウントに引き継ぎました'), 1500);
+      Online.migrate = true;
+    }
     Online.lastSeen = JSON.stringify((Online.remote && Online.remote.decks) || []);
   } catch (e) {
     console.error(e);
@@ -76,8 +90,6 @@ async function initAuth() {
   checkAdmin();
 }
 
-const userDoc = () => Online.db.collection('users').doc(Online.user.uid);
-
 // デッキが変わるたびに呼ばれる。少し待ってまとめてネットに保存する
 function saveDecksOnline(list, currentId) {
   if (!Online.user) return;
@@ -88,7 +100,8 @@ function saveDecksOnline(list, currentId) {
     const decks = list.map(d => ({ id: d.id, name: d.name, format: d.format || 'ocg', reg: d.reg || 'latest', main: d.main, extra: d.extra, side: d.side }));
     Online.lastSeen = JSON.stringify(decks);   // 自分が保存した内容は「別の端末の変更」として扱わない
     try {
-      await userDoc().set({ decks, currentDeck: currentId, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      const { error } = await Online.sb.from('user_decks').upsert({ uid: Online.user.uid, decks, current_deck: currentId, updated_at: new Date().toISOString() });
+      if (error) throw error;
       setSaveState('saved');
     } catch (e) {
       console.error(e);
@@ -101,16 +114,19 @@ function saveDecksOnline(list, currentId) {
 // 別の端末でデッキが変わったら、開いているこの画面にもすぐ反映する
 function startRemoteSync(onChange) {
   if (!Online.user) return;
-  userDoc().onSnapshot(snap => {
-    if (snap.metadata.hasPendingWrites || Online.pending) return;   // この端末で保存中のものは無視
-    const data = snap.data();
-    if (!data) return;
-    const json = JSON.stringify(data.decks || []);
-    if (json === Online.lastSeen) return;
-    Online.lastSeen = json;
-    Online.remote = data;
-    onChange();
-  }, e => console.warn('同期を受け取れませんでした', e));
+  if (Online.migrate && typeof Decks !== 'undefined') { Online.migrate = false; saveDecksOnline(Decks.list, Decks.currentId); }
+  Online.sb.channel('decks-' + Online.user.uid)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'user_decks', filter: 'uid=eq.' + Online.user.uid }, payload => {
+      if (Online.pending) return;   // この端末で保存中のものは無視
+      const row = payload.new;
+      if (!row || !row.decks) return;
+      const json = JSON.stringify(row.decks);
+      if (json === Online.lastSeen) return;
+      Online.lastSeen = json;
+      Online.remote = { decks: row.decks, currentDeck: row.current_deck };
+      onChange();
+    })
+    .subscribe();
 }
 
 function setSaveState(s) {
@@ -142,39 +158,65 @@ function renderUserBox() {
     el('span', { class: 'user-name', title: u.email || '', text: u.displayName || u.email || 'ログイン中' }),
     el('button', { class: 'btn small', text: 'ログアウト', onclick: async () => {
       clearTimeout(Online.saveTimer);
-      await firebase.auth().signOut();
+      await Online.sb.auth.signOut();
       location.reload();
     } }));
+  if (typeof renderAdminButton === 'function') renderAdminButton();
 }
 
 // ---------- ログイン画面 ----------
-function showLoginScreen(onGuest) {
+// done(user)：ログインできたら Supabase のユーザー、「ログインしないで使う」なら null
+function showLoginScreen(done) {
   const scr = $('#auth-screen');
   scr.hidden = false;
-  if (scr.dataset.ready) return;
-  scr.dataset.ready = '1';
-  const auth = firebase.auth();
+  const sb = Online.sb;
   const msg = $('#auth-msg');
-  const email = $('#auth-email'), pass = $('#auth-pass');
-  const busy = async (fn) => {
-    msg.className = 'auth-msg'; msg.textContent = '';
+  const email = $('#auth-email'), pass = $('#auth-pass'), nameIn = $('#auth-name');
+  const here = location.origin + location.pathname;
+  // Google ログインはサーバー側で設定したときだけ出す
+  $('#auth-google').hidden = !SUPABASE_CONFIG.google;
+  $('#auth-google-or').hidden = !SUPABASE_CONFIG.google;
+  const say = (text, kind) => { msg.className = 'auth-msg' + (kind ? ' ' + kind : ''); msg.textContent = text; };
+  const busy = async fn => {
+    say('');
     $$('#auth-screen button').forEach(b => { b.disabled = true; });
-    try { await fn(); } catch (e) { msg.className = 'auth-msg error'; msg.textContent = authMessage(e); }
+    try { await fn(); } catch (e) { say(authMessage(e), 'error'); }
     $$('#auth-screen button').forEach(b => { b.disabled = false; });
   };
-  $('#auth-google').onclick = () => busy(() => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()));
-  $('#auth-login').onclick = () => busy(() => auth.signInWithEmailAndPassword(email.value.trim(), pass.value));
+  $('#auth-google').onclick = () => busy(async () => {
+    const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: here } });
+    if (error) throw error;
+  });
+  $('#auth-login').onclick = () => busy(async () => {
+    const { data, error } = await sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value });
+    if (error) throw error;
+    done(data.user);
+  });
   $('#auth-signup').onclick = () => busy(async () => {
-    if (pass.value.length < 6) throw { code: 'auth/weak-password' };
-    await auth.createUserWithEmailAndPassword(email.value.trim(), pass.value);
+    if (pass.value.length < 6) throw new Error('Password should be at least 6 characters');
+    const name = nameIn.value.trim() || email.value.trim().split('@')[0];
+    const { data, error } = await sb.auth.signUp({ email: email.value.trim(), password: pass.value, options: { data: { name }, emailRedirectTo: here } });
+    if (error) throw error;
+    if (data.session) { done(data.user); return; }
+    // メールの確認が必要な設定のとき
+    say('確認のメールを送りました。メールのリンクを押してから、ここでログインしてください。', 'ok');
   });
   $('#auth-reset').onclick = () => busy(async () => {
-    if (!email.value.trim()) throw { message: '先にメールアドレスを入力してください。' };
-    await auth.sendPasswordResetEmail(email.value.trim());
-    msg.className = 'auth-msg ok';
-    msg.textContent = 'パスワード再設定のメールを送りました。メールのリンクから新しいパスワードを決めてください。';
+    if (!email.value.trim()) throw new Error('先にメールアドレスを入力してください。');
+    const { error } = await sb.auth.resetPasswordForEmail(email.value.trim(), { redirectTo: here });
+    if (error) throw error;
+    say('パスワード再設定のメールを送りました。メールのリンクを開くと、新しいパスワードを決められます。', 'ok');
   });
-  pass.addEventListener('keydown', e => { if (e.key === 'Enter') $('#auth-login').click(); });
-  $('#auth-guest').onclick = () => { localStorage.setItem('ygo.guest', '1'); hideLoginScreen(); onGuest && onGuest(); };
+  pass.onkeydown = e => { if (e.key === 'Enter') $('#auth-login').click(); };
+  $('#auth-guest').onclick = () => { localStorage.setItem('ygo.guest', '1'); hideLoginScreen(); done(null); };
 }
 function hideLoginScreen() { $('#auth-screen').hidden = true; }
+
+// メールのリンクから戻ってきたとき：新しいパスワードを決める
+function askNewPassword() {
+  promptText('新しいパスワード（6文字以上）', '', async pw => {
+    if (pw.length < 6) { toast('パスワードは6文字以上にしてください'); return false; }
+    const { error } = await Online.sb.auth.updateUser({ password: pw });
+    toast(error ? '変更できませんでした：' + error.message : 'パスワードを変更しました');
+  });
+}
