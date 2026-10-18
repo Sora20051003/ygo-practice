@@ -392,7 +392,7 @@ function openPile(zone) {
       );
       row.addEventListener('click', e => { openCardMenu(inst.uid, e.clientX, e.clientY); });
       row.addEventListener('contextmenu', e => { e.preventDefault(); row.click(); });
-      row.draggable = true;
+      row.draggable = canDrag();
       row.addEventListener('dragstart', e => { e.dataTransfer.setData('text/uid', String(inst.uid)); });
       list.append(row);
     }
@@ -612,7 +612,7 @@ function cardEl(inst, zone) {
   const c = cardOf(inst);
   const gl = Board.glow && Board.glow.get(inst.uid);
   const tgt = Board.S && Board.S.auto && Auto.selectable && Auto.selectable.has(inst.uid);   // 自動処理の選択中：盤面から選べるカード
-  const node = el('div', { class: 'bcard' + (inst.pos === 'def' ? ' def' : '') + (Board.selected === inst.uid ? ' selected' : '') + (gl ? ' glow-' + gl : '') + (tgt ? ' ap-target' + (Auto.chosen && Auto.chosen.has(Auto.selectable.get(inst.uid)) ? ' ap-chosen' : '') : ''), draggable: 'true', dataset: { uid: inst.uid } },
+  const node = el('div', { class: 'bcard' + (inst.pos === 'def' ? ' def' : '') + (Board.selected === inst.uid ? ' selected' : '') + (gl ? ' glow-' + gl : '') + (tgt ? ' ap-target' + (Auto.chosen && Auto.chosen.has(Auto.selectable.get(inst.uid)) ? ' ap-chosen' : '') : ''), draggable: canDrag() ? 'true' : null, dataset: { uid: inst.uid } },
     cardFace(c, { faceDown: !inst.faceUp }));
   if (inst.mats && inst.mats.length) node.append(el('div', { class: 'badge mats', title: 'X素材', text: '素材' + inst.mats.length }));
   if (inst.ctr) node.append(el('div', { class: 'badge ctr', title: 'カウンター', text: '●' + inst.ctr }));

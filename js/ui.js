@@ -459,3 +459,25 @@ function openFilePicker(input) {
   input.addEventListener('change', () => setTimeout(() => input.remove(), 0), { once: true });
   input.click();
 }
+
+// ドラッグでカードを動かせるのはマウスのときだけ。指で操作する端末（iPhone など）では、ドラッグ用の設定がタップのじゃまになることがあるので付けない
+const canDrag = () => !window.matchMedia('(pointer: coarse)').matches;
+
+// ---------- エラーを画面に出す ----------
+// スマホではエラーが見えないので、画面の上に赤い帯で出す（内容を送ってもらえば原因が分かる）
+function showError(title, err) {
+  const msg = (err && (err.message || String(err))) || '';
+  console.error(title, err);
+  let bar = document.getElementById('error-bar');
+  if (!bar) {
+    bar = el('div', { id: 'error-bar', class: 'error-bar' });
+    document.body.append(bar);
+  }
+  bar.innerHTML = '';
+  bar.append(
+    el('div', { class: 'eb-text', text: `⚠ ${title}${msg ? '：' + msg : ''}` }),
+    el('div', { class: 'eb-note', text: `（版 ${typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?'}・${navigator.userAgent.replace(/^Mozilla\/5\.0 /, '').slice(0, 90)}）この画面を送ってもらえると直せます` }),
+    el('button', { class: 'btn small', text: '閉じる', onclick: () => bar.remove() }));
+}
+window.addEventListener('error', e => { if (e.message && !/ResizeObserver/.test(e.message)) showError('エラーが起きました', e.error || e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno); });
+window.addEventListener('unhandledrejection', e => showError('エラーが起きました', e.reason));

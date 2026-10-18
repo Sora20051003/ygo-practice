@@ -125,7 +125,7 @@ function autoRespond(res) {
   Auto.redoLog = null;   // 新しい手を選んだら「1手進む」はできなくなる
   // EXデッキなどから特殊召喚するカード（リンク素材の数え方を聞くときに使う）
   if (res.type === RES.SELECT_IDLECMD && res.action === IDLE.SPSUMMON && d.pending && d.pending.special_summons) { const c = d.pending.special_summons[res.index]; Auto.spTarget = c ? c.code : 0; }
-  try { d.respond(res); } catch (e) { console.error(e); toast('処理中にエラーが起きました：' + e.message); }
+  try { d.respond(res); } catch (e) { console.error(e); showError('処理中にエラーが起きました', e); }
   autoAfter();
 }
 
@@ -233,16 +233,16 @@ async function autoStart(handIds) {
   const deck = boardDeck();
   if (!deck || !deck.main.length) { toast('メインデッキが空です。先にデッキを作ってください'); return; }
   closeAllModals();
-  try { await autoPrepare(deck); } catch (e) { toast('自動処理を準備できませんでした：' + e.message); return; }
+  try { await autoPrepare(deck); } catch (e) { showError('自動処理を準備できませんでした', e); return; }
   const handSize = +$('#b-handsize').value;
   const opp = oppDeck();
   if (opp) {
-    try { await autoPrepare(opp); } catch (e) { toast('相手のデッキを準備できませんでした：' + e.message); return; }
+    try { await autoPrepare(opp); } catch (e) { showError('相手のデッキを準備できませんでした', e); return; }
   }
   Auto.redoLog = null;
   Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw() });
   Auto.deckId = deck.id;
-  try { Auto.duel.start(); } catch (e) { console.error(e); toast('開始できませんでした：' + e.message); Auto.duel = null; renderBoard(); return; }
+  try { Auto.duel.start(); } catch (e) { console.error(e); showError('開始できませんでした', e); Auto.duel = null; renderBoard(); return; }
   autoAfter();
   timerStart();
 }
