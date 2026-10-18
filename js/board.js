@@ -443,8 +443,10 @@ function openMaterials(hostUid) {
 // handSize：引く枚数（省略時は画面の「先攻5枚／後攻6枚」）
 function buildState(deck, handIds, handSize) {
   const S = emptyState();
-  if (!handSize) S.turn = +$('#b-handsize').value === 6 ? 2 : 1;   // 一人回しで後攻なら、自分の最初のターンは T2
-  S.phase = 'M1';
+  const solo = !handSize;
+  const second = solo && +$('#b-handsize').value === 6;
+  if (solo) S.turn = second ? 2 : 1;   // 一人回しで後攻なら、自分の最初のターンは T2
+  S.phase = solo ? 'DP' : 'M1';        // 一人回しはドローフェイズから始める
   for (const id of deck.main) if (DB.byId.has(id)) S.deck.push(newInst(S, id));
   for (const id of deck.extra) if (DB.byId.has(id)) { const i = newInst(S, id); i.faceUp = false; S.extra.push(i); }
   for (const i of S.deck) i.faceUp = false;
@@ -456,9 +458,17 @@ function buildState(deck, handIds, handSize) {
     }
     S.log.push(`[T${S.turn}] 初手を指定して開始：${S.hand.map(i => cardOf(i).name).join('、')}`);
   } else {
-    const n = handSize || +$('#b-handsize').value;
+    // 初手は5枚。後攻（と、先攻1ターン目もドローするルール）はドローフェイズで1枚引く
+    const n = solo ? 5 : handSize;
     for (let k = 0; k < n && S.deck.length; k++) { const inst = S.deck.shift(); inst.faceUp = true; S.hand.push(inst); }
     S.log.push(`[T${S.turn}] ${n}枚引いて開始：${S.hand.map(i => cardOf(i).name).join('、')}`);
+  }
+  if (solo) {
+    S.log.push(`[T${S.turn}] ---- 自分のターン ----`);
+    // 指定した初手が6枚（後攻のドロー分も選んだ）ときは引かない
+    if ((second || firstTurnDraw()) && !(handIds && S.hand.length >= 6)) {
+      if (S.deck.length) { const inst = S.deck.shift(); inst.faceUp = true; S.hand.push(inst); S.log.push(`[T${S.turn}] ドローフェイズ：${cardOf(inst).name} をドロー`); }
+    } else S.log.push(`[T${S.turn}] ドローフェイズ：${second ? '（ドロー分も初手で選択済み）' : '先攻の最初のターンはドローできません'}`);
   }
   return S;
 }
@@ -788,6 +798,8 @@ function setupBoardView() {
   $('#b-token').onclick = () => { if (Board.S) openToken(); };
   setupAutoPlay();
   setupTimer();
+  $('#b-firstdraw').value = firstTurnDraw() ? '1' : '0';
+  $('#b-firstdraw').onchange = e => { store.set('ygo.firstDraw', e.target.value === '1'); toast('次に開始したときから使われます'); };
   setupRotateHint();
   // ポーズ画面（設定・デッキ選択・やり直し）
   for (const id of ['#b-start', '#b-pickhand', '#b-restart']) $(id).addEventListener('click', closePause, true);
@@ -1077,7 +1089,8 @@ function renderPhaseBar() {
     turn = S.turn; cur = S.phase || 'M1';
     const i = PHASES.findIndex(x => x[0] === cur);
     const noBattle = S.turn === 1;   // 先攻の最初のターンはバトルフェイズに入れない
-    can = { BP: cur === 'M1' && !noBattle, M2: cur === 'BP', EP: i >= 2 && cur !== 'EP' };
+    // 先のフェイズへ進める（戻ることはできない）。メイン2はバトルフェイズからだけ
+    can = { SP: cur === 'DP', M1: i < 2, BP: i < 3 && !noBattle, M2: cur === 'BP', EP: cur !== 'EP' };
     endOk = true;
   }
   const curIdx = PHASES.findIndex(x => x[0] === cur);
@@ -1108,14 +1121,16 @@ function endTurn() {
   const S = Board.S;
   if (!S) return;
   if (S.auto) { autoPhase('ep'); return; }
-  // 手動：相手のターンは飛ばして、自分の次のターンのドローフェイズ → メインフェイズ1 まで進める
+  // 手動：相手のターンは飛ばして、自分の次のターンのドローフェイズへ（1枚ドロー）
   commit();
-  S.turn += 2; S.ns = false; S.used = []; S.phase = 'M1';
+  S.turn += 2; S.ns = false; S.used = []; S.phase = 'DP';
   log('---- 自分のターン（相手のターンは飛ばします） ----');
   if (S.deck.length) {
     const inst = S.deck.shift(); inst.faceUp = true; S.hand.push(inst);
     log(`ドローフェイズ：${cardOf(inst).name} をドロー`, 'ドローフェイズ：1枚ドロー');
   } else log('ドローフェイズ：デッキがないのでドローできません');
-  log('メインフェイズ1へ');
   finishChange();
 }
+
+// 先攻1ターン目のドロー（今のルールはしない。昔のルールなどで「する」にできる）
+const firstTurnDraw = () => store.get('ygo.firstDraw', false);

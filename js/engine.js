@@ -144,7 +144,8 @@ const placeText = (con, loc, seq) => {
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false }) {
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false }) {
+    this.firstDraw = firstDraw;   // 先攻1ターン目もドローする（昔のルールなど）
     this.autoTrigger = autoTrigger;   // オンなら、召喚・特殊召喚したカード自身の任意の効果も聞かずに発動する（強制の効果はいつも自動）
     this.main = main; this.extra = extra; this.handIds = handIds || null; this.handSize = handSize;
     this.opp = opp && opp.main && opp.main.length ? opp : null;
@@ -167,7 +168,7 @@ class AutoDuel {
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);   // 相手の判断用（やり直しで同じになるように）
     const team = n => ({ drawCountPerTurn: 1, startingDrawCount: n, startingLP: 8000 });
     this.h = L.createDuel({
-      flags: O.OcgDuelMode.MODE_MR5,
+      flags: O.OcgDuelMode.MODE_MR5 | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
       seed: this.seed,
       team1: team(this.me === 0 ? (this.handIds ? 0 : this.handSize) : this.oppDraw()),
       team2: team(this.me === 1 ? (this.handIds ? 0 : 5) : this.oppDraw()),
