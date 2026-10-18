@@ -45,12 +45,14 @@ function commit() {
   if (Board.history.length > 300) Board.history.shift();
 }
 function undo() {
+  if (Board.S && Board.S.auto) { autoUndo(); return; }
   if (!Board.history.length) { toast('これ以上戻せません'); return; }
   Board.S = JSON.parse(Board.history.pop());
   Board.pick = null;
   renderBoard();
 }
 function persist() {
+  if (Board.S && Board.S.auto) return;   // 自動処理の盤面は autoplay.js が別に保存する
   // 対戦中は対戦用の盤面として別に保存する（一人回しの盤面を上書きしないように）
   if (typeof Duel !== 'undefined' && Duel.active) { store.set('ygo.duel.board.' + Duel.code, { S: Board.S }); return; }
   store.set('ygo.board', { S: Board.S, initial: Board.initial, deckId: $('#b-deck').value });
@@ -227,6 +229,7 @@ const emzBlocked = i => typeof Duel !== 'undefined' && Duel.active && Duel.opp &
 
 // ---------- カードのメニュー ----------
 function cardMenuItems(uid) {
+  if (Board.S && Board.S.auto) return autoMenuItems(uid);
   const loc = locate(uid);
   if (!loc) return [];
   const inst = loc.inst, c = cardOf(inst);
@@ -382,7 +385,7 @@ function openPile(zone) {
     }
     body.append(list);
   };
-  if (zone === 'deck') {
+  if (zone === 'deck' && !S.auto) {
     body.append(el('div', { class: 'row' },
       el('label', { class: 'check' }, orderToggle, '実際の順番で表示（上から）'),
       el('button', { class: 'btn small', text: '上から1枚墓地へ', onclick: () => { const S2 = Board.S; if (S2.deck[0]) moveCard(S2.deck[0].uid, { zone: 'gy', noShuffle: true }); } }),
@@ -450,6 +453,7 @@ function boardDeck() {
 }
 
 function startGame(handIds) {
+  if (autoActive()) { autoStart(handIds); return; }
   const deck = boardDeck();
   if (!deck || !deck.main.length) { toast('メインデッキが空です。先にデッキを作ってください'); return; }
   closeAllModals();
@@ -462,6 +466,7 @@ function startGame(handIds) {
 }
 
 function restartSame() {
+  if (autoActive()) { autoRestart(); return; }
   if (!Board.initial) { toast('まだ開始していません'); return; }
   closeAllModals();
   Board.S = JSON.parse(Board.initial);
@@ -511,6 +516,7 @@ function openPickHand() {
 
 function drawCard() {
   const S = Board.S;
+  if (S.auto) return;
   if (!S.deck.length) { toast('デッキがありません'); return; }
   moveCard(S.deck[0].uid, { zone: 'hand', noShuffle: true }, '（ドロー）');
 }
@@ -654,6 +660,7 @@ function addDrop(node, onDrop) {
     e.preventDefault();
     node.classList.remove('dragover');
     const uid = +e.dataTransfer.getData('text/uid');
+    if (Board.S && Board.S.auto) { toast('効果を自動処理するモードでは、カードをクリックして操作します'); return; }
     if (uid && locate(uid)) onDrop(uid);
   });
 }
@@ -662,6 +669,14 @@ function renderBoard() {
   const S = Board.S;
   const field = $('#field');
   field.innerHTML = '';
+  $('#view-board').classList.toggle('auto-mode', autoActive());
+  $$('#b-mode button').forEach(b => b.classList.toggle('on', (b.dataset.mode === 'auto') === Auto.on));
+  if (!(typeof Duel !== 'undefined' && Duel.active)) $('#opp-bar').hidden = true;
+  if (autoActive()) {
+    autoPanel();
+    $('#opp-bar').hidden = !(S && S.oppText);
+    if (S && S.oppText) $('#opp-bar').textContent = S.oppText;
+  }
   if (!S) {
     field.append(el('div', { class: 'empty-board' },
       el('p', { text: '左の「シャッフルして開始」でデッキから初手を引きます。' }),
@@ -741,6 +756,7 @@ function setupBoardView() {
   $('#b-shuffle').onclick = () => { if (Board.S) shuffleDeck(); };
   $('#b-undo').onclick = () => { if (Board.S) undo(); };
   $('#b-token').onclick = () => { if (Board.S) openToken(); };
+  setupAutoPlay();
   $('#b-glow').checked = Glow.on;
   $('#b-glow').onchange = e => { Glow.on = e.target.checked; store.set('ygo.glow', Glow.on); renderBoard(); };
   $('#b-ns').onclick = () => { if (!Board.S) return; commit(); Board.S.ns = !Board.S.ns; log(Board.S.ns ? '通常召喚を使用済みに' : '通常召喚を未使用に'); finishChange(); };

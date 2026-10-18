@@ -2,7 +2,7 @@
 // 取得元: ygocdb.com の全カードデータ（zip）。ブラウザ内(IndexedDB)に保存して2回目以降はオフラインで使う。
 const DATA_URL = 'https://ygocdb.com/api/v0/cards.zip';
 const DATA_MD5_URL = 'https://ygocdb.com/api/v0/cards.zip.md5';
-const DATA_VERSION = 2; // 変換形式を変えたら上げる（2: マスターデュエル実装済みかどうか md を追加）
+const DATA_VERSION = 3; // 変換形式を変えたら上げる（2: マスターデュエル実装済みかどうか md を追加、3: 自動処理用に setcode を追加）
 
 const DB = {
   cards: [],
@@ -91,6 +91,7 @@ function convertCard(e) {
     ls: (lv >>> 24) & 0xff,
     rs: (lv >>> 16) & 0xff,
     race: d.race || 0,
+    setcode: d.setcode || 0,   // カテゴリ（自動処理で使う）
     attr: d.attribute || 0,
     desc: (e.text && e.text.desc) || '',
     pdesc: (e.text && e.text.pdesc) || '',
@@ -211,7 +212,7 @@ function startAutoDataUpdate(onChange) {
         idbSet('meta', DB.meta).catch(() => {});
         if (updated) {
           // 新しく取り込んだカードにも日本語の効果文を付け直す
-          try { applyJaTexts(await idbGet('jatexts') || {}); } catch { /* 無くても動く */ }
+          try { applyJaTexts(await idbGet('jatexts') || {}, await idbGet('jastrs')); } catch { /* 無くても動く */ }
           onChange('cards');
         }
       } catch (e) { console.warn('カードデータの確認に失敗しました', e); }
@@ -330,10 +331,11 @@ function setCardText(c, text) {
   c.tkey = normalizeText(text);
 }
 
-function applyJaTexts(texts) {
+function applyJaTexts(texts, strs) {
   for (const c of DB.cards) {
     const t = texts[c.id];
     if (t) setCardText(c, t);
+    if (strs && strs[c.id]) c.jaStrs = strs[c.id];   // 効果ごとの短い説明（自動処理のメニューで使う）
   }
 }
 
@@ -346,24 +348,29 @@ async function downloadJaTexts(onStatus) {
   ]);
   if (!res.ok) throw new Error('ダウンロードに失敗しました（' + res.status + '）');
   const db = new SQL.Database(new Uint8Array(await res.arrayBuffer()));
-  const texts = {};
+  const texts = {}, strs = {};
   try {
-    const r = db.exec('select id, desc from texts');
-    for (const [id, desc] of (r[0] ? r[0].values : [])) if (desc) texts[id] = String(desc).replace(/\r\n/g, '\n');
+    const cols = Array.from({ length: 16 }, (_, i) => 'str' + (i + 1)).join(', ');
+    const r = db.exec('select id, desc, ' + cols + ' from texts');
+    for (const [id, desc, ...ss] of (r[0] ? r[0].values : [])) {
+      if (desc) texts[id] = String(desc).replace(/\r\n/g, '\n');
+      if (ss.some(Boolean)) strs[id] = ss.map(s => s || '');
+    }
   } finally { db.close(); }
-  const meta = { date: new Date().toISOString(), count: Object.keys(texts).length };
+  const meta = { date: new Date().toISOString(), count: Object.keys(texts).length, v: 2 };
   await idbSet('jatexts', texts);
+  await idbSet('jastrs', strs);
   await idbSet('jatextMeta', meta);
   DB.textMeta = meta;
-  applyJaTexts(texts);
+  applyJaTexts(texts, strs);
 }
 
 async function loadJaTexts(onStatus) {
   try {
     const meta = await idbGet('jatextMeta');
-    if (meta) {
+    if (meta && meta.v === 2) {
       const texts = await idbGet('jatexts');
-      if (texts) { DB.textMeta = meta; applyJaTexts(texts); return; }
+      if (texts) { DB.textMeta = meta; applyJaTexts(texts, await idbGet('jastrs')); return; }
     }
   } catch (e) { console.warn('保存済みテキストを読めませんでした', e); }
   await downloadJaTexts(onStatus);

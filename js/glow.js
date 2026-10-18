@@ -53,6 +53,7 @@ function glowInfo(c) {
 function computeGlow(S) {
   const res = new Map();
   if (!Glow.on || !S) return res;
+  if (S.auto) return autoGlow();   // 自動処理モード：エンジンが「できる」と言ったものだけ光らせる
   if (typeof Duel !== 'undefined' && Duel.active && !myTurn()) return res;
   const used = new Set(S.used);
   const fieldMons = [...S.m, ...S.emz].filter(Boolean);

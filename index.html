@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261018-232449">
+<link rel="stylesheet" href="style.css?v=20261018-234521">
 </head>
 <body>
 <header class="topbar">
@@ -172,6 +172,10 @@
           <div class="row chat-row"><input id="dp-chat" type="text" placeholder="チャット" maxlength="200"><button class="btn small" id="dp-send">送信</button></div>
         </div>
         <div class="ctrl-group solo-only">
+          <div class="seg full" id="b-mode">
+            <button data-mode="manual">手動</button>
+            <button data-mode="auto" title="カードの効果をルールどおりに自動で処理します（対象などは自分で選びます）">効果を自動処理</button>
+          </div>
           <label class="muted">デッキ</label>
           <select id="b-deck"></select>
           <div class="row">
@@ -184,7 +188,20 @@
           <button class="btn" id="b-pickhand">初手を選んで開始</button>
           <button class="btn" id="b-restart">同じ初手でやり直す</button>
         </div>
-        <div class="ctrl-group">
+        <div class="ctrl-group auto-only" id="auto-panel">
+          <div id="ap-status" class="ap-status">「シャッフルして開始」で始めます</div>
+          <div id="ap-lp" class="muted"></div>
+          <div class="row">
+            <button class="btn" id="ap-bp">バトルフェイズへ</button>
+            <button class="btn" id="ap-ep">ターン終了</button>
+          </div>
+          <div class="row">
+            <button class="btn" id="ap-undo" title="Ctrl+Z">元に戻す</button>
+            <button class="btn" id="ap-open">選択画面を開く</button>
+          </div>
+          <p class="muted small-note">カードをクリックすると、今できる操作が出ます。効果の処理には EDOPro のカードスクリプトを使っています（まれに未対応のカードがあります）。</p>
+        </div>
+        <div class="ctrl-group manual-only">
           <div class="row">
             <button class="btn" id="b-draw">1枚ドロー</button>
             <button class="btn" id="b-shuffle">シャッフル</button>
@@ -200,7 +217,7 @@
           <label class="check"><input type="checkbox" id="b-autoshuffle" checked> デッキから取ったら自動でシャッフル</label>
           <label class="check" title="効果の処理はしていないので、ルールと効果文から推測した目安です"><input type="checkbox" id="b-glow"> 光らせる：<span class="glow-key y">発動</span><span class="glow-key b">召喚</span></label>
         </div>
-        <div class="ctrl-group">
+        <div class="ctrl-group manual-only">
           <div class="row between"><b>使用済みの効果</b><button class="btn small" id="b-used-clear">クリア</button></div>
           <ul id="b-used" class="used-list"></ul>
         </div>
@@ -226,9 +243,10 @@
     </div>
     <!-- スマホ用：画面下に固定するよく使うボタン -->
     <div class="mobile-bar">
-      <button id="mb-draw">ドロー</button>
+      <button id="mb-draw" class="manual-only">ドロー</button>
+      <button id="mb-auto" class="auto-only">進める ▾</button>
       <button id="mb-undo">元に戻す</button>
-      <button id="mb-shuffle">シャッフル</button>
+      <button id="mb-shuffle" class="manual-only">シャッフル</button>
       <button id="mb-log">ログ</button>
       <button id="mb-ctrl">操作 ▾</button>
     </div>
@@ -265,17 +283,19 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261018-232449"></script>
-<script src="js/consts.js?v=20261018-232449"></script>
-<script src="js/ui.js?v=20261018-232449"></script>
-<script src="js/data.js?v=20261018-232449"></script>
-<script src="js/firebase-config.js?v=20261018-232449"></script>
-<script src="js/auth.js?v=20261018-232449"></script>
-<script src="js/deck.js?v=20261018-232449"></script>
-<script src="js/board.js?v=20261018-232449"></script>
-<script src="js/glow.js?v=20261018-232449"></script>
-<script src="js/duel.js?v=20261018-232449"></script>
-<script src="js/imgdeck.js?v=20261018-232449"></script>
-<script src="js/app.js?v=20261018-232449"></script>
+<script src="js/version.js?v=20261018-234521"></script>
+<script src="js/consts.js?v=20261018-234521"></script>
+<script src="js/ui.js?v=20261018-234521"></script>
+<script src="js/data.js?v=20261018-234521"></script>
+<script src="js/firebase-config.js?v=20261018-234521"></script>
+<script src="js/auth.js?v=20261018-234521"></script>
+<script src="js/deck.js?v=20261018-234521"></script>
+<script src="js/board.js?v=20261018-234521"></script>
+<script src="js/engine.js?v=20261018-234521"></script>
+<script src="js/autoplay.js?v=20261018-234521"></script>
+<script src="js/glow.js?v=20261018-234521"></script>
+<script src="js/duel.js?v=20261018-234521"></script>
+<script src="js/imgdeck.js?v=20261018-234521"></script>
+<script src="js/app.js?v=20261018-234521"></script>
 </body>
 </html>
