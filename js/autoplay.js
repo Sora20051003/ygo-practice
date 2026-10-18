@@ -85,6 +85,8 @@ function autoActions(inst) {
     add(p.chains, actLabel, BATTLE.CHAIN, 'y');
     add(p.attacks, c => (c.can_direct ? '攻撃する（直接攻撃できます）' : '攻撃する'), BATTLE.ATTACK, 'b');
   }
+  // 召喚しかできないモンスターは、「攻撃表示で召喚」「セット」をそのままボタンにする
+  if (out.length === 1 && out[0].choose) return out[0].choose.map(c => ({ label: c.label === '表側攻撃表示で召喚' ? '攻撃表示で召喚' : c.label, kind: 'b', res: c.res }));
   return out;
 }
 
