@@ -116,7 +116,7 @@ const missingImages = new Set();
 
 // 画像の読み込み先の順番。パソコンに保存した画像（tools/download-images.bat で取得）を優先し、無ければネットから読む
 const IMG_SOURCES = {
-  art: id => [`pics/art/${id}.jpg`, IMG_URL.art(id)],
+  art: id => LOCAL_FILES ? [`pics/art/${id}.jpg`, IMG_URL.art(id)] : [IMG_URL.art(id)],
   small: id => [IMG_URL.small(id)],
   full: id => [IMG_URL.full(id)],
 };
@@ -255,7 +255,7 @@ function jpCard(c, big = false) {
   }
 
   const art = el('div', { class: 'jp-art' });
-  if (hasImage(c, 'art')) art.append(cardImg(c.id, 'art', img => img.remove()));
+  if (c.id && cardStyle !== 'text' && !missingImages.has(c.id + 'art')) art.append(cardImg(c.id, 'art', img => img.remove()));   // ネット版でもイラストはネットから読む
   if (has(c, T.LINK)) {
     for (const [bit, ch] of Object.entries(JP_ARROWS)) art.append(el('span', { class: `jp-arrow b${bit}` + ((c.def & bit) ? ' on' : ''), text: ch }));
   }
