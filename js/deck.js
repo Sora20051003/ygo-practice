@@ -11,7 +11,7 @@ const Decks = {
     if (Online.user) {
       // ログイン中：ネットに保存したデッキを使う
       const r = Online.remote || {};
-      this.list = (r.decks || []).map(d => ({ id: d.id, name: d.name, format: d.format || 'ocg', main: d.main || [], extra: d.extra || [], side: d.side || [] }));
+      this.list = (r.decks || []).map(d => ({ id: d.id, name: d.name, format: d.format || 'ocg', reg: d.reg || 'latest', main: d.main || [], extra: d.extra || [], side: d.side || [] }));
       this.currentId = r.currentDeck;
     } else {
       this.list = store.get('ygo.decks', []);
@@ -40,7 +40,7 @@ const curFormat = () => deckFormat(Decks.current());
 
 // デッキの中の、ルール違反（使えないカード・枚数オーバー）を調べる
 function deckProblems(deck) {
-  const fmt = deckFormat(deck);
+  const ctx = regContext(deck);
   const counts = new Map();
   for (const sec of ['main', 'extra', 'side']) for (const id of deck[sec]) {
     const c = DB.byId.get(id);
@@ -48,17 +48,53 @@ function deckProblems(deck) {
   }
   const notAllowed = [], over = [];
   for (const { c, n } of counts.values()) {
-    if (!cardAllowed(c, fmt)) notAllowed.push(c.name);
-    else if (n > limitOf(c, fmt)) over.push(`${c.name}（${LIMIT_LABEL[limitOf(c, fmt)]}：${limitOf(c, fmt)}枚まで）`);
+    const l = limitIn(c, ctx);
+    if (!cardAllowed(c, ctx.fmt)) notAllowed.push(c.name);
+    else if (n > l) over.push(`${c.name}（${limitLabel(c, ctx)}${l ? `：${l}枚まで` : ''}）`);
   }
   return { notAllowed, over };
 }
 
-// 禁止・制限の小さな印
-function limitBadge(c, fmt) {
-  if (!cardAllowed(c, fmt)) return el('span', { class: 'lim lim-x', title: `${FORMATS[fmt].label}では使えません`, text: '×' });
-  const l = limitOf(c, fmt);
+// 禁止・制限の小さな印（未発売は「未」）
+function limitBadge(c, ctx) {
+  if (!cardAllowed(c, ctx.fmt)) return el('span', { class: 'lim lim-x', title: `${FORMATS[ctx.fmt].label}では使えません`, text: '×' });
+  if (isUnreleased(c, ctx)) return el('span', { class: 'lim lim-u', title: '未発売（禁止扱い）', text: '未' });
+  const l = limitIn(c, ctx);
   return l < 3 ? el('span', { class: 'lim lim-' + l, title: LIMIT_LABEL[l], text: l }) : null;
+}
+
+// 過去のリストを選んでいるデッキなら、リストと発売日表を読み込んでから描き直す
+const regLoading = new Set();
+function ensureRegLoaded(deck) {
+  const ctx = regContext(deck);
+  if (!ctx.loading) return;
+  const key = ctx.fmt + ':' + ctx.reg;
+  if (regLoading.has(key)) return;
+  regLoading.add(key);
+  Promise.all([loadRegulation(ctx.fmt, ctx.reg), loadReleaseDates()])
+    .then(() => { renderDeck(); renderResults(); })
+    .catch(e => toast('過去のリストを読み込めませんでした：' + e.message))
+    .finally(() => regLoading.delete(key));
+}
+
+// レギュレーションの選択肢（最新・過去のリスト・制限なし）
+function renderRegSelect(deck) {
+  const sel = $('#deck-reg');
+  const fmt = deckFormat(deck);
+  const cur = deck.reg || 'latest';
+  const fmtDate = d => d.replace(/-/g, '/');
+  sel.innerHTML = '';
+  const latest = DB.banlists[fmt] && DB.banlists[fmt].date;
+  sel.append(el('option', { value: 'latest', text: `最新${latest ? `（${fmtDate(latest)}〜）` : ''}` }));
+  const dates = DB.regDates[fmt] || [];
+  if (dates.length) {
+    const g = el('optgroup', { label: '過去のリスト（その時に未発売のカードは禁止扱い）' });
+    for (const d of dates) if (d !== latest) g.append(el('option', { value: d, text: `${fmtDate(d)}〜` }));
+    sel.append(g);
+  }
+  if (cur !== 'latest' && cur !== 'none' && !dates.includes(cur)) sel.append(el('option', { value: cur, text: `${fmtDate(cur)}〜` }));
+  sel.append(el('option', { value: 'none', text: '制限なし（禁止・制限・発売日を気にしない）' }));
+  sel.value = cur;
 }
 
 function countCopies(deck, card) {
@@ -78,10 +114,14 @@ function addToDeck(card, section) {
   if (section === 'main' && isExtraType(card)) section = 'extra';
   if (section === 'extra' && !isExtraType(card)) { toast('EXデッキに入れられるのは融合・S・X・リンクだけです'); return; }
   if (deck[section].length >= LIMITS[section]) { toast(`${SECTION_LABEL[section]}は${LIMITS[section]}枚までです`); return; }
-  const fmt = deckFormat(deck);
+  const ctx = regContext(deck);
+  const fmt = ctx.fmt;
   if (!cardAllowed(card, fmt)) { toast(`このカードは${FORMATS[fmt].label}では使えません`); return; }
-  const limit = Math.min(MAX_COPIES, limitOf(card, fmt));
-  if (limit === 0) { toast(`${card.name}は${FORMATS[fmt].label}の禁止カードです`); return; }
+  const limit = Math.min(MAX_COPIES, limitIn(card, ctx));
+  if (limit === 0) {
+    toast(isUnreleased(card, ctx) ? `${card.name}は選んでいるリストの時点では未発売です（禁止扱い）` : `${card.name}は${FORMATS[fmt].label}の禁止カードです`);
+    return;
+  }
   if (countCopies(deck, card) >= limit) {
     toast(limit < MAX_COPIES ? `${card.name}は${LIMIT_LABEL[limit]}カードなので${limit}枚までです` : `同じカードは${MAX_COPIES}枚までです`);
     return;
@@ -217,6 +257,7 @@ function renderResults() {
   if (!DB.cards.length) return;
   const text = $('#qt').value.trim();
   const fmt = curFormat();
+  const ctx = regContext(Decks.current());
   const res = searchCards({
     format: fmt, q: $('#q').value, qMode: segMode('#q-mode'), text, textMode: segMode('#qt-mode'), kind: $('#f-kind').value, sub: getMulti('#f-sub'), subMode: $('#f-sub').dataset.mode,
     attr: getMulti('#f-attr'), race: getMulti('#f-race'), level: getMulti('#f-level'), rank: getMulti('#f-rank'), link: getMulti('#f-link'), marker: getMulti('#f-marker'), markerMode: $('#f-marker').dataset.mode, sort: $('#f-sort').value,
@@ -232,7 +273,7 @@ function renderResults() {
     const row = el('div', { class: 'result-row', onclick: () => showCardDetail(c, '#deck-detail') },
       rowMark(c),
       el('div', { class: 'r-main' },
-        el('div', { class: 'r-name' }, limitBadge(c, fmt), c.name + (c.noJp ? '（TCG）' : '')),
+        el('div', { class: 'r-name' }, limitBadge(c, ctx), c.name + (c.noJp ? '（TCG）' : '')),
         el('div', { class: 'r-info', text: info }),
         text ? snippetEl(c.jaText, text) : null),
       el('button', { class: 'btn small', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),
@@ -325,8 +366,14 @@ function renderDeck() {
   warn.hidden = !notAllowed.length && !over.length;
   if (notAllowed.length) warn.append(el('div', { text: `⚠ ${FORMATS[fmt].label}で使えないカード：${notAllowed.join('、')}` }));
   if (over.length) warn.append(el('div', { text: `⚠ 禁止・制限の枚数オーバー：${over.join('、')}` }));
-  const bl = DB.banlists[fmt];
-  $('#deck-banlist').textContent = bl && bl.date ? `禁止・制限リスト：${bl.date.replace(/-/g, '/')} 適用` : '禁止・制限リスト：未取得';
+  // レギュレーション（禁止・制限リスト）の選択
+  const ctx = regContext(deck);
+  renderRegSelect(deck);
+  ensureRegLoaded(deck);
+  $('#deck-banlist').textContent = ctx.none ? '禁止・制限なし'
+    : ctx.loading ? '読み込み中…'
+    : ctx.date ? `${ctx.reg.replace(/-/g, '/')} 時点の未発売カードは禁止扱い`
+    : (ctx.vector ? '' : '（リスト未取得）');
 
   for (const sec of ['main', 'extra', 'side']) {
     const grid = $('#deck-' + sec);
@@ -334,7 +381,7 @@ function renderDeck() {
     deck[sec].forEach((id, i) => {
       const c = DB.byId.get(id);
       if (!c) { grid.append(el('div', { class: 'deck-tile missing', text: '不明なカード ' + id })); return; }
-      const badge = limitBadge(c, fmt);
+      const badge = limitBadge(c, ctx);
       const tile = el('div', { class: 'deck-tile' + (bad.has(c.name) ? ' invalid' : ''), onclick: () => showCardDetail(c, '#deck-detail') },
         cardFace(c, { small: true }),
         badge ? el('div', { class: 'tile-lim' }, badge) : null,
@@ -435,6 +482,9 @@ function encodeDeckCode(deck) {
     let prev = 0;
     for (const [cid, n] of entries) { pushVarint(bytes, (cid - prev) * 4 + Math.min(n, 3)); prev = cid; }
   }
+  // 最後に禁止・制限リストの指定（0=最新、1=制限なし、それ以外=2000/1/1からの日数＋2）。古いコードには無いので省略可
+  const reg = deck.reg || 'latest';
+  pushVarint(bytes, reg === 'latest' ? 0 : reg === 'none' ? 1 : Math.round((Date.parse(reg) - Date.UTC(2000, 0, 1)) / 86400000) + 2);
   return DECK_CODE_PREFIX + b64url(bytes);
 }
 
@@ -459,6 +509,10 @@ function decodeDeckCode(code) {
       for (let i = 0; i < (v % 4); i++) deck[sec].push(c.id);
     }
   }
+  if (pos.i < bytes.length) {
+    const r = readVarint(bytes, pos);
+    deck.reg = r === 0 ? 'latest' : r === 1 ? 'none' : new Date(Date.UTC(2000, 0, 1) + (r - 2) * 86400000).toISOString().slice(0, 10);
+  }
   return { deck, unknown };
 }
 
@@ -476,7 +530,7 @@ function parseDeckText(text) {
   if (code) {
     try {
       const d = decodeDeckCode(code);
-      return { result: { main: d.deck.main, extra: d.deck.extra, side: d.deck.side }, unknown: d.unknown, name: d.deck.name, format: d.deck.format };
+      return { result: { main: d.deck.main, extra: d.deck.extra, side: d.deck.side }, unknown: d.unknown, name: d.deck.name, format: d.deck.format, reg: d.deck.reg };
     } catch (e) {
       return { result, unknown: ['デッキコードを読めませんでした：' + e.message] };
     }
@@ -577,12 +631,13 @@ function openImport() {
       el('label', { class: 'check' }, asNew, '新しいデッキとして追加する（オフにすると今のデッキを上書き）')),
     buttons: [{
       label: '読み込む', primary: true, onClick: () => {
-        const { result, unknown, name, format } = parseDeckText(ta.value);
+        const { result, unknown, name, format, reg } = parseDeckText(ta.value);
         const total = result.main.length + result.extra.length + result.side.length;
         if (!total) { toast(unknown[0] && unknown[0].startsWith('デッキコード') ? unknown[0] : 'カードを読み取れませんでした'); return false; }
         let deck;
         if (asNew.checked) {
           deck = Decks.blank(name || (file.files[0] ? file.files[0].name.replace(/\.\w+$/, '') : '読み込んだデッキ'), format);
+          if (reg) deck.reg = reg;
           Decks.list.push(deck);
           Decks.currentId = deck.id;
         } else deck = Decks.current();
@@ -664,6 +719,7 @@ function addDeckFromCode(text) {
   let d;
   try { d = decodeDeckCode(code); } catch (e) { toast('デッキコードを読めませんでした：' + e.message); return false; }
   const deck = Decks.blank(d.deck.name || '共有されたデッキ', d.deck.format);
+  if (d.deck.reg) deck.reg = d.deck.reg;
   deck.main = d.deck.main.slice(0, LIMITS.main);
   deck.extra = d.deck.extra.slice(0, LIMITS.extra);
   deck.side = d.deck.side.slice(0, LIMITS.side);
@@ -714,6 +770,7 @@ function restoreBackup() {
       if (onlyBlank) Decks.list = [];
       for (const d of decks) {
         const nd = Decks.blank(String(d.name || '読み込んだデッキ'), FORMATS[d.format] ? d.format : 'ocg');
+        if (typeof d.reg === 'string') nd.reg = d.reg;
         nd.main = (d.main || []).filter(id => DB.byId.has(id));
         nd.extra = (d.extra || []).filter(id => DB.byId.has(id));
         nd.side = (d.side || []).filter(id => DB.byId.has(id));
@@ -760,6 +817,14 @@ function setupDeckView() {
   $('#deck-import').onclick = openImport;
   $('#deck-export').onclick = openExport;
   $('#deck-backup').onclick = backupAll;
+  // 禁止・制限リストの切り替え（最新・過去・制限なし）
+  $('#deck-reg').addEventListener('change', e => {
+    const deck = Decks.current();
+    deck.reg = e.target.value;
+    Decks.save();
+    renderDeck();
+    renderResults();
+  });
   // ルール（OCG / マスターデュエル）の切り替え：今のデッキのルールを変え、検索もそのルールのカードにする
   $('#deck-format').addEventListener('click', e => {
     const b = e.target.closest('button');
@@ -767,6 +832,8 @@ function setupDeckView() {
     const deck = Decks.current();
     if (deckFormat(deck) === b.dataset.format) return;
     deck.format = b.dataset.format;
+    // 過去のリストの日付はルールごとに違うので、切り替えたら「最新」に戻す（制限なしはそのまま）
+    if (deck.reg && deck.reg !== 'none') deck.reg = 'latest';
     Decks.save();
     renderDeck();
     renderResults();

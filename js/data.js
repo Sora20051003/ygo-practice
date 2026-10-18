@@ -183,13 +183,93 @@ async function loadBanlists(force = false) {
   }
 }
 
-// そのルールで入れられる枚数（禁止0・制限1・準制限2・無制限3）
-function limitOf(c, fmt) {
-  const list = DB.banlists[fmt];
-  const v = list && list.regulation ? list.regulation[c.cid] : undefined;
+// ---------- レギュレーション（どの時点の禁止・制限リストを使うか） ----------
+// デッキの reg：'latest'（最新）/ 'YYYY-MM-DD'（過去のリスト）/ 'none'（制限なし）
+// 過去のリストでは、その日より後に発売されたカードを「未発売（禁止扱い）」にする
+const REG_REPO_API = key => `https://api.github.com/repos/DawnbrandBots/yaml-yugi-limit-regulation/contents/data/${key}`;
+const REG_URL = (key, date) => `https://dawnbrandbots.github.io/yaml-yugi-limit-regulation/${key}/${date}.vector.json`;
+DB.regDates = { ocg: [], md: [] };   // 選べる過去のリストの日付（新しい順）
+DB.regCache = {};                    // 'ocg:2024-01-01' → リスト
+
+// 選べる日付の一覧（1日1回取り直す）
+async function loadRegDates() {
+  let saved = null;
+  try { saved = await idbGet('regDates'); } catch { /* 無ければ取りに行く */ }
+  if (saved) DB.regDates = saved.dates;
+  if (saved && Date.now() - saved.fetched < 24 * 60 * 60 * 1000) return;
+  try {
+    const dates = {};
+    for (const [fmt, f] of Object.entries(FORMATS)) {
+      const r = await fetch(REG_REPO_API(f.list));
+      if (!r.ok) throw new Error(r.status);
+      dates[fmt] = (await r.json()).map(x => (x.name.match(/^(\d{4}-\d{2}-\d{2})\.vector\.json$/) || [])[1]).filter(Boolean).sort().reverse();
+    }
+    DB.regDates = dates;
+    await idbSet('regDates', { fetched: Date.now(), dates });
+  } catch (e) { console.warn('過去のリストの一覧を取得できませんでした', e); }
+}
+
+// 過去のリスト本体（一度取ったら変わらないので保存しておく）
+async function loadRegulation(fmt, date) {
+  const key = fmt + ':' + date;
+  if (DB.regCache[key]) return DB.regCache[key];
+  try { const saved = await idbGet('reg:' + key); if (saved) return (DB.regCache[key] = saved); } catch { /* 取りに行く */ }
+  const r = await fetch(REG_URL(FORMATS[fmt].list, date));
+  if (!r.ok) throw new Error('リストを取得できませんでした（' + r.status + '）');
+  const v = await r.json();
+  idbSet('reg:' + key, v).catch(() => {});
+  return (DB.regCache[key] = v);
+}
+
+// 発売日の対応表（data/release-dates.js）。過去のリストを選んだときだけ読み込む
+let releasePromise = null;
+function loadReleaseDates() {
+  if (typeof RELEASE_DATES !== 'undefined') return Promise.resolve();
+  if (!releasePromise) {
+    releasePromise = loadScript('data/release-dates.js?v=' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : ''))
+      .catch(() => {})
+      .then(() => {
+        // 読めなかったときは発売日のチェックなしで続ける（「読み込み中」のまま止まらないように）
+        if (typeof RELEASE_DATES === 'undefined') { DB.releaseFailed = true; toast('発売日のデータを読めなかったため、未発売カードの判定はしていません'); }
+      });
+  }
+  return releasePromise;
+}
+
+// 発売日（YYYYMMDD）。表に無いカードは、KONAMIのカード番号が近い（＝登録が近い）カードの日付で推定する
+const releaseIndex = {};
+function releaseDate(c, fmt) {
+  if (typeof RELEASE_DATES === 'undefined' || !c.cid) return 0;
+  const table = RELEASE_DATES[fmt];
+  if (table[c.cid]) return table[c.cid];
+  if (fmt === 'md') return 99999999;   // マスターデュエルは実装順がばらばらなので、不明なら「最近実装」とみなす
+  if (!releaseIndex[fmt]) releaseIndex[fmt] = Object.keys(table).map(Number).sort((a, b) => a - b);
+  const ids = releaseIndex[fmt];
+  let lo = 0, hi = ids.length - 1, best = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (ids[mid] <= c.cid) { best = mid; lo = mid + 1; } else hi = mid - 1; }
+  return best >= 0 ? table[ids[best]] : 0;
+}
+
+// デッキに合わせた判定の材料
+function regContext(deck) {
+  const fmt = deckFormat(deck);
+  const reg = deck.reg || 'latest';
+  if (reg === 'none') return { fmt, reg, none: true };
+  if (reg === 'latest') return { fmt, reg, vector: DB.banlists[fmt] };
+  return { fmt, reg, vector: DB.regCache[fmt + ':' + reg] || null, date: +reg.replace(/-/g, ''), loading: !DB.regCache[fmt + ':' + reg] || (typeof RELEASE_DATES === 'undefined' && !DB.releaseFailed) };
+}
+const isUnreleased = (c, ctx) => !!ctx.date && typeof RELEASE_DATES !== 'undefined' && releaseDate(c, ctx.fmt) > ctx.date;
+
+// 入れられる枚数（禁止0・制限1・準制限2・無制限3）
+function limitIn(c, ctx) {
+  if (ctx.none) return 3;
+  if (isUnreleased(c, ctx)) return 0;
+  const v = ctx.vector && ctx.vector.regulation ? ctx.vector.regulation[c.cid] : undefined;
   return v === undefined ? 3 : v;
 }
+const limitOf = (c, fmt) => limitIn(c, { fmt, vector: DB.banlists[fmt] });   // 最新のリストで
 const LIMIT_LABEL = { 0: '禁止', 1: '制限', 2: '準制限' };
+const limitLabel = (c, ctx) => (isUnreleased(c, ctx) ? '未発売（禁止扱い）' : LIMIT_LABEL[limitIn(c, ctx)]);
 const cardAllowed = (c, fmt) => (FORMATS[fmt] || FORMATS.ocg).allowed(c);
 
 // ---------- 日本語の効果文（テキスト検索用） ----------

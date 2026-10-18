@@ -82,6 +82,7 @@ async function init() {
   try {
     await loadCards(showLoading);
     await loadBanlists();   // 禁止・制限リスト（取れなくてもアプリは使える）
+    loadRegDates().then(() => { if (typeof renderDeck === 'function' && Decks.list.length) renderDeck(); });   // 過去のリストの一覧は裏で
   } catch (e) {
     console.error(e);
     showLoading('カードデータを取得できませんでした。インターネット接続を確認して再読み込みしてください。\n' + e.message);

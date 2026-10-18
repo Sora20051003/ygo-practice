@@ -78,7 +78,7 @@ function saveDecksOnline(list, currentId) {
   Online.pending = true;
   clearTimeout(Online.saveTimer);
   Online.saveTimer = setTimeout(async () => {
-    const decks = list.map(d => ({ id: d.id, name: d.name, format: d.format || 'ocg', main: d.main, extra: d.extra, side: d.side }));
+    const decks = list.map(d => ({ id: d.id, name: d.name, format: d.format || 'ocg', reg: d.reg || 'latest', main: d.main, extra: d.extra, side: d.side }));
     Online.lastSeen = JSON.stringify(decks);   // 自分が保存した内容は「別の端末の変更」として扱わない
     try {
       await userDoc().set({ decks, currentDeck: currentId, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });

@@ -158,6 +158,8 @@ textarea { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
   font-size: 11px; font-weight: 900; color: #fff; margin-right: 5px; vertical-align: 1px; flex: none;
 }
 .lim-0 { background: #c0392b; } .lim-1 { background: #e67e22; } .lim-2 { background: #d4ac0d; color: #222; } .lim-x { background: #666; }
+.lim-u { background: #7a2a2a; font-size: 10px; }
+.reg-select { font-size: 13px; padding: 4px 8px; max-width: 100%; }
 .tile-lim { position: absolute; top: 2px; left: 2px; z-index: 2; }
 .tile-lim .lim { margin: 0; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85); }
 .deck-tile.invalid .cardface { outline: 3px solid var(--danger); outline-offset: -1px; }
