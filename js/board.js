@@ -785,6 +785,7 @@ function setupBoardView() {
   $('#b-token').onclick = () => { if (Board.S) openToken(); };
   setupAutoPlay();
   setupTimer();
+  setupRotateHint();
   // ポーズ画面（設定・デッキ選択・やり直し）
   for (const id of ['#b-start', '#b-pickhand', '#b-restart']) $(id).addEventListener('click', closePause, true);
   $('#b-pause').onclick = openPause;
@@ -1015,4 +1016,26 @@ function timeUp() {
       { label: 'このまま続ける', onClick: () => {} },
     ],
   });
+}
+
+// ---------- スマホの横画面 ----------
+// 横向きにすると CSS で横画面の配置になる。縦のときは案内を出す（Android は全画面＋横向き固定もできる。iPhone は固定できない）
+function setupRotateHint() {
+  const hint = $('#rotate-hint');
+  if (store.get('ygo.rotateHintOff', false)) hint.hidden = true;
+  $('#rotate-close').onclick = () => { hint.hidden = true; store.set('ygo.rotateHintOff', true); };
+  const canLock = !!(document.documentElement.requestFullscreen && screen.orientation && screen.orientation.lock);
+  $('#rotate-lock').hidden = !canLock;
+  $('#rotate-lock').onclick = async () => {
+    try {
+      await document.documentElement.requestFullscreen();
+      await screen.orientation.lock('landscape');
+    } catch (e) {
+      toast('この端末では横向きに固定できませんでした。端末を横に回してください');
+    }
+  };
+}
+function unlockLandscape() {
+  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch { /* 固定していなければ何もしない */ }
+  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
 }

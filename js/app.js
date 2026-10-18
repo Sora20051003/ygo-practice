@@ -5,6 +5,8 @@ function switchView(name) {
   $('#view-board').hidden = name !== 'board';
   $('#view-duel').hidden = name !== 'duel';
   store.set('ygo.view', name);
+  document.body.dataset.view = name;   // スマホ横向きのとき、一人回しだけ横画面の配置にする
+  if (name !== 'board') unlockLandscape();
   if (name === 'board') { refreshBoardDeckSelect(); renderBoard(); }
   if (name === 'duel') renderDuelLobby();
 }
