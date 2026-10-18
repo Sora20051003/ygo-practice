@@ -633,6 +633,7 @@ function slotEl(zone, idx) {
   const label = { m: 'モンスター', emz: 'EXモンスター', s: idx === 0 || idx === 4 ? '魔法・罠 / P' : '魔法・罠', f: 'フィールド' }[zone];
   const slot = el('div', { class: `zone slot z-${zone}`, dataset: { zone, idx } }, el('span', { class: 'zone-label', text: label }));
   if (inst) slot.append(cardEl(inst, zone));
+  if (inst && (zone === 'm' || zone === 'emz')) { const b = statBadge(inst.tokenCard || cardOf(inst), inst); if (b) slot.append(b); }
   const pickable = Board.pick && Board.pick.slots.some(s => s.zone === zone && s.idx === idx);
   if (pickable) {
     slot.classList.add('pickable');
@@ -1184,4 +1185,19 @@ function deckOutLose() {
   S.lost = 'デッキ切れ';
   finishChange();
   gameOver('lose', 'デッキ切れ（デッキが0枚の状態でドロー）');
+}
+
+// ---------- 場のモンスターの攻撃力・守備力 ----------
+// カードの下に「攻撃力 / 守備力」を出す（リンクモンスターは「攻撃力 / LINK-n」）。
+// 自動処理では効果で変わった今の値を出し、元の値より高ければ緑・低ければ赤にする
+function statBadge(card, inst) {
+  if (!card || !inst || inst.faceUp === false || !isMonster(card)) return null;
+  const link = has(card, T.LINK);
+  const atk = inst.atk != null ? inst.atk : card.atk, def = inst.def != null ? inst.def : card.def;
+  const fmt = v => (v == null || v < 0 ? '?' : String(v));
+  const cls = (v, base) => (v == null || base == null || v === base ? '' : v > base ? ' up' : ' down');
+  return el('div', { class: 'stat-badge' + (inst.pos === 'def' ? ' is-def' : ''), title: link ? '攻撃力 / リンク' : '攻撃力 / 守備力' },
+    el('span', { class: 'sb-atk' + cls(atk, card.atk), text: fmt(atk) }),
+    el('span', { class: 'sb-sep', text: '/' }),
+    link ? el('span', { class: 'sb-def', text: 'L' + (card.level || '') }) : el('span', { class: 'sb-def' + cls(def, card.def), text: fmt(def) }));
 }

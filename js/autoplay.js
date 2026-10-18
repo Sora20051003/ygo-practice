@@ -27,6 +27,7 @@ function autoState() {
       mats: (c.overlayCards || []).map((code, i) => ({ uid: autoKey(me, LOC.OVERLAY, seq * 10 + i), id: code, faceUp: true, pos: 'atk', mats: [], ctr: 0 })),
       ctr: Object.values(c.counters || {}).reduce((a, b) => a + b, 0),
       ref: { con: me, loc, seq },
+      atk: c.attack, def: c.defense,   // 今の攻撃力・守備力（効果で変わった値）
     };
   };
   const side = q[me];
@@ -42,6 +43,7 @@ function autoState() {
   const pub = (c, loc) => (c && c.code ? {
     id: c.position & 5 ? c.code : 0, faceUp: !!(c.position & 5), pos: loc === LOC.MZONE && c.position & 12 ? 'def' : 'atk',
     ctr: Object.values(c.counters || {}).reduce((a, b) => a + b, 0), mats: c.overlayCards || [],
+    atk: c.attack, def: c.defense,
   } : null);
   const count = a => a.filter(Boolean).length;
   S.opp = {

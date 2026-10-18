@@ -363,6 +363,7 @@ function oppSlotEl(zone, idx) {
   const slot = el('div', { class: `zone slot opp-zone z-${zone}`, dataset: { ozone: zone, oidx: idx } });
   const p = o[zone] && o[zone][idx];
   if (p) slot.append(oppCardEl(p));
+  if (p && zone !== 's' && zone !== 'f') { const b = oppStatBadge(p); if (b) slot.append(b); }
   return slot;
 }
 
@@ -422,6 +423,7 @@ function emzSharedEl(i) {
   if (Board.S.emz[i] || !(op && op.emz && op.emz[1 - i])) return slotEl('emz', i);
   const slot = el('div', { class: 'zone slot opp-zone z-emz' }, el('span', { class: 'zone-label', text: '相手のEXモンスター' }));
   slot.append(oppCardEl(op.emz[1 - i]));
+  { const b = oppStatBadge(op.emz[1 - i]); if (b) slot.append(b); }
   return slot;
 }
 
@@ -549,4 +551,10 @@ function setupDuel() {
     duelJoin(m[1]);
   }
   renderDuelLobby();
+}
+
+function oppStatBadge(p) {
+  if (!p || !p.faceUp) return null;
+  const card = p.token ? { type: T.MONSTER | T.TOKEN, atk: p.token.atk, def: p.token.def } : (p.id ? DB.byId.get(p.id) : null);
+  return card ? statBadge(card, p) : null;
 }
