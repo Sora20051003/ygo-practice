@@ -276,8 +276,11 @@ function setupAutoPlay() {
     ]);
   };
   // 設定（相手・チェーン確認・演出）
+  if (store.get('ygo.oppMode', null) === null && store.get('ygo.autoOpp', '') === 'none') store.set('ygo.oppMode', 'none');   // 前の「相手：何もしない」の設定を引き継ぐ
   refreshOppSelect();
-  $('#ap-opp').onchange = e => { store.set('ygo.autoOpp', e.target.value); toast('次に開始したときから、この相手になります'); };
+  $('#ap-opp').onchange = e => { store.set('ygo.autoOpp', e.target.value); toast('次に開始したときから、このデッキになります'); };
+  $$('#ap-oppmode button').forEach(b => { b.onclick = () => { store.set('ygo.oppMode', b.dataset.v); renderOppSettings(); toast(b.dataset.v === 'trap' ? '誘発練習：次に開始したときから、相手が手札誘発を使ってきます' : '次に開始したときから、相手は何もしません'); }; });
+  $('#ap-trappick').onclick = openOppHandPicker;
   $('#ap-chain').value = store.get('ygo.chainMode', 'auto');
   $('#ap-chain').onchange = e => {
     store.set('ygo.chainMode', e.target.value);
@@ -300,31 +303,91 @@ function setupAutoPlay() {
   if (Auto.on) { Auto.resumed = true; autoResume(); }
 }
 
-// ---------- 相手のデッキ ----------
+// ---------- 相手（何もしない／誘発練習） ----------
 // 手札誘発セット：よく使われる妨害カード＋何もしない通常モンスター
 const HANDTRAP_SET = [[14558127, 3], [23434538, 3], [97268402, 3], [10045474, 3], [94145021, 2], [73642296, 2], [59438930, 3], [24224830, 2]];
+// 相手の手札を選ぶときに上に出すカード（名前で探す。無いものは出さない）
+const HANDTRAP_NAMES = ['灰流うらら', '増殖するG', 'エフェクト・ヴェーラー', '無限泡影', 'ドロール＆ロックバード', '屋敷わらし', '幽鬼うさぎ',
+  '墓穴の指名者', '原始生命態ニビル', 'PSYフレームギア・γ', '儚無みずき', '浮幽さくら', '朔夜しぐれ', 'D.D.クロウ', 'ディメンション・シフター', '抹殺の指名者', '三戦の才', 'センサー万別'];
+const oppMode = () => store.get('ygo.oppMode', 'trap');
+const oppHandIds = () => store.get('ygo.oppHand', []).filter(id => DB.byId.has(id));
+
 function refreshOppSelect() {
   const sel = $('#ap-opp');
   if (!sel) return;
   const cur = store.get('ygo.autoOpp', 'handtraps');
   sel.innerHTML = '';
-  sel.append(el('option', { value: 'none', text: '何もしない' }), el('option', { value: 'handtraps', text: '手札誘発セット（うらら・G・ヴェーラーなど）' }));
+  sel.append(el('option', { value: 'handtraps', text: '手札誘発セット（うらら・G・ヴェーラーなど）' }));
   for (const d of Decks.list) sel.append(el('option', { value: 'deck:' + d.id, text: `デッキ「${d.name}」` }));
   sel.value = [...sel.options].some(o => o.value === cur) ? cur : 'handtraps';
+  renderOppSettings();
 }
+
+function renderOppSettings() {
+  const mode = oppMode();
+  $$('#ap-oppmode button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
+  $('#ap-trapbox').hidden = mode !== 'trap';
+  const box = $('#ap-traphand');
+  box.innerHTML = '';
+  const ids = oppHandIds();
+  if (!ids.length) box.append(el('span', { class: 'muted small-note', text: 'ランダム（デッキから5枚引く）' }));
+  else box.append(...ids.map(id => el('span', { class: 'chip', text: DB.byId.get(id).name })),
+    el('span', { class: 'muted small-note', text: ids.length < 5 ? `（残り${5 - ids.length}枚はデッキから）` : '' }));
+}
+
 function oppDeck() {
+  if (oppMode() !== 'trap') return null;
   const v = $('#ap-opp').value;
-  if (v === 'handtraps') {
+  let deck = null;
+  if (v.startsWith('deck:')) {
+    const d = Decks.get(v.slice(5));
+    if (d && d.main.length) deck = { main: d.main.filter(id => DB.byId.has(id)), extra: d.extra.filter(id => DB.byId.has(id)) };
+  }
+  if (!deck) {
     const main = [];
     for (const [id, n] of HANDTRAP_SET) if (DB.byId.has(id)) for (let i = 0; i < n; i++) main.push(id);
     while (main.length < 40) main.push(OPP_FILLER);
-    return { main, extra: [] };
+    deck = { main, extra: [] };
   }
-  if (v.startsWith('deck:')) {
-    const d = Decks.get(v.slice(5));
-    if (d && d.main.length) return { main: d.main.filter(id => DB.byId.has(id)), extra: d.extra.filter(id => DB.byId.has(id)) };
+  // 選んだ初手は、デッキに無ければ足す（何もしないカードと入れ替え）
+  const handIds = oppHandIds().slice(0, 5);
+  for (const id of handIds) {
+    const need = handIds.filter(x => x === id).length, have = deck.main.filter(x => x === id).length;
+    for (let k = have; k < need; k++) { const f = deck.main.indexOf(OPP_FILLER); if (f >= 0) deck.main[f] = id; else deck.main.push(id); }
   }
-  return null;
+  deck.handIds = handIds;
+  return deck;
+}
+
+// 相手の初手を選ぶ画面
+function openOppHandPicker() {
+  const chosen = oppHandIds();
+  const list = el('div', { class: 'pile-list' });
+  const info = el('p', { class: 'muted' });
+  const search = el('input', { type: 'text', class: 'full', placeholder: 'ほかのカードを名前で探す' });
+  const draw = () => {
+    info.textContent = `相手の初手にするカードを選んでください（${chosen.length}／5枚。足りない分はデッキから引きます）`;
+    list.innerHTML = '';
+    const q = search.value.trim();
+    const cards = q ? searchCards({ q }).slice(0, 40) : HANDTRAP_NAMES.map(n => DB.cards.find(c => c.name === n)).filter(Boolean);
+    for (const c of cards) {
+      const k = chosen.filter(x => x === c.id).length;
+      list.append(el('div', { class: 'pile-row' + (k ? ' chosen' : '') }, rowMark(c),
+        el('div', { class: 'r-main' }, el('div', { class: 'r-name', text: c.name }), el('div', { class: 'r-info', text: typeLine(c) })),
+        el('button', { class: 'btn small', text: '−', disabled: !k, onclick: () => { chosen.splice(chosen.indexOf(c.id), 1); draw(); } }),
+        el('b', { class: 'qty', text: String(k) }),
+        el('button', { class: 'btn small', text: '＋', disabled: chosen.length >= 5 || k >= 3, onclick: () => { chosen.push(c.id); draw(); } })));
+    }
+  };
+  search.addEventListener('input', draw);
+  draw();
+  showModal({
+    title: '相手の初手（誘発練習）', wide: true, body: el('div', { class: 'stack' }, info, search, list),
+    buttons: [
+      { label: 'この手札にする', primary: true, onClick: () => { store.set('ygo.oppHand', chosen); renderOppSettings(); toast('次に開始したときから、この手札になります'); } },
+      { label: 'ランダムに戻す', onClick: () => { store.set('ygo.oppHand', []); renderOppSettings(); } },
+    ],
+  });
 }
 
 // ---------- カードの上に出す操作ボタン（マスターデュエル風） ----------

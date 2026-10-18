@@ -774,3 +774,8 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
 .row-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
 .ap-act.small { padding: 5px 12px; font-size: 13px; box-shadow: none; }
 .ap-question { font-size: 16px; font-weight: 700; margin: 4px 0; }
+.ap-trapbox { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }
+.ap-trapbox[hidden] { display: none; }
+.ap-traphand { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.ap-traphand .chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, #ff5a5a 22%, var(--panel)); border: 1px solid color-mix(in srgb, #ff5a5a 45%, transparent); }
+#ap-oppmode button { flex: 1; padding: 6px 4px; font-size: 13px; }

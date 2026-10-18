@@ -166,8 +166,8 @@ class AutoDuel {
     this.h = L.createDuel({
       flags: O.OcgDuelMode.MODE_MR5,
       seed: this.seed,
-      team1: team(this.me === 0 ? (this.handIds ? 0 : this.handSize) : 5),
-      team2: team(this.me === 1 ? (this.handIds ? 0 : 5) : 5),
+      team1: team(this.me === 0 ? (this.handIds ? 0 : this.handSize) : this.oppDraw()),
+      team2: team(this.me === 1 ? (this.handIds ? 0 : 5) : this.oppDraw()),
       cardReader: code => engineCardData(code),
       scriptReader: name => {
         const t = Engine.scripts.get(name);
@@ -189,13 +189,19 @@ class AutoDuel {
     for (const id of shuffle(rest)) add(me, id, LOC.DECK);
     for (const id of this.extra) add(me, id, LOC.EXTRA);
     if (this.opp) {
-      for (const id of shuffle([...this.opp.main])) add(1 - me, id, LOC.DECK);
+      const rest = [...this.opp.main];
+      // 相手の初手を指定したとき（誘発練習）：そのカードを手札に置き、残りを引く
+      for (const id of this.opp.handIds || []) { const i = rest.indexOf(id); if (i >= 0) rest.splice(i, 1); add(1 - me, id, LOC.HAND); }
+      for (const id of shuffle(rest)) add(1 - me, id, LOC.DECK);
       for (const id of this.opp.extra || []) add(1 - me, id, LOC.EXTRA);
     } else {
       for (let i = 0; i < 40; i++) add(1 - me, OPP_FILLER, LOC.DECK);
     }
     L.startDuel(this.h);
   }
+
+  // 相手が最初に引く枚数（初手を指定したら、その分だけ減らす）
+  oppDraw() { return Math.max(0, 5 - ((this.opp && this.opp.handIds) || []).length); }
 
   start() { this.create(); this.run(); }
 
@@ -414,7 +420,7 @@ function cpuAnswer(m, duel) {
     }
     case MSG.SELECT_CHAIN:
       // 相手（練習する人）のターンに、相手が発動したものへの妨害として使う
-      if (m.selects.length && (m.forced || (duel.turnPlayer === me && duel.chain.length && duel.chain[duel.chain.length - 1].con === me) || m.spe_count > 0 || (duel.turnPlayer === me && rnd() < 0.5)))
+      if (m.selects.length && (m.forced || (duel.turnPlayer === me && duel.chain.length && duel.chain[duel.chain.length - 1].con === me) || (duel.turnPlayer === me && !duel.chain.length && rnd() < 0.5)))
         return { type: RES.SELECT_CHAIN, index: Math.floor(rnd() * m.selects.length) };
       return { type: RES.SELECT_CHAIN, index: m.forced ? 0 : null };
     case MSG.SELECT_EFFECTYN: return { type: RES.SELECT_EFFECTYN, yes: true };
