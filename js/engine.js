@@ -331,6 +331,7 @@ class AutoDuel {
         if (m.from.controller !== this.me && m.to.controller !== this.me && !(m.from.location & LOC.ONFIELD_ALL) && !(m.to.location & LOC.ONFIELD_ALL)) break;   // 相手の手札・デッキ・墓地の間の移動（手札調整など）は省く
         if (m.to.location === LOC.HAND && m.from.location === LOC.DECK && m.from.controller === this.me && this.drawing) break;
         this.justMoved.add(locKey(m.to.controller, m.to.location, m.to.sequence));
+        this.justMoved.add(`${m.to.controller}-${m.to.location}-c${code}`);   // 手札などは位置の番号がずれるので、カードの種類でも覚える
         this.events.push({ t: 'move', code, from: { con: m.from.controller, loc: m.from.location, seq: m.from.sequence }, to: { con: m.to.controller, loc: m.to.location, seq: m.to.sequence }, faceUp: !!(m.to.position & 5) });
         const secret = m.to.controller !== this.me && !(m.to.position & 5) && (m.to.location & (LOC.ONFIELD_ALL | LOC.HAND | LOC.DECK));   // 相手が裏向きにしたカードは名前を伏せる
         this.addLog(`${secret ? 'カード' : cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}`);
@@ -409,7 +410,7 @@ const isSelectMsg = m => SELECT_TYPES.has(m.type);
 // チェーン確認（マスターデュエルと同じ考え方）
 //   always（オン）：召喚・発動などすべての行動のあと、発動できるものがあれば聞く
 //   auto（自動）：効果が発動したときに、それに対して発動できるものがあれば聞く（召喚・移動したカードの誘発も聞く）
-//   off（オフ）：聞かない（必ず答える場面だけ）
+//   off（オフ）：チェーンの確認はしない（必ず答える場面と、自分のカードの誘発効果だけ聞く）
 const locKey = (con, loc, seq) => `${con}-${loc}-${seq}`;
 
 function skippable(m, duel) {
@@ -423,12 +424,12 @@ function skippable(m, duel) {
     if (!m.selects.length) return { type: RES.SELECT_CHAIN, index: null };
     const mode = duel ? duel.chainMode : 'always';
     const last = duel && duel.chain[duel.chain.length - 1];
-    let ask = mode === 'always';
-    if (mode === 'auto') {
+    // 召喚したばかり・動いたばかりの自分のカードの誘発効果（「〜した場合に発動できる」）は、チェーン確認の設定に関係なく聞く
+    const freshTrigger = !!duel && !last && m.selects.some(c => duel.justSummoned.has(locKey(c.controller, c.location, c.sequence)) || duel.justMoved.has(locKey(c.controller, c.location, c.sequence)) || duel.justMoved.has(`${c.controller}-${c.location}-c${c.code}`));
+    let ask = mode === 'always' || freshTrigger;
+    if (mode === 'auto' && last) {
       // 効果が発動したときだけ聞く（相手の発動、または自分の発動に自分で重ねられるとき）
-      if (last) ask = last.con !== duel.me || !m.selects.every(c => c.location === LOC.HAND && isHandTrap(c.code));
-      // チェーンが無いとき：召喚したばかり・動いたばかりのカードの誘発効果だけ聞く（それ以外の空き時間は聞かない）
-      else ask = m.selects.some(c => duel.justSummoned.has(locKey(c.controller, c.location, c.sequence)) || duel.justMoved.has(locKey(c.controller, c.location, c.sequence)));
+      ask = last.con !== duel.me || !m.selects.every(c => c.location === LOC.HAND && isHandTrap(c.code));
     }
     if (!ask) return { type: RES.SELECT_CHAIN, index: null };
   }
