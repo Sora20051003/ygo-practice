@@ -965,3 +965,11 @@ body.land #view-board #board-detail > h4 { order: -2; margin: 4px 0 0; }
 body.land #view-board #board-detail > .ja-text { order: -1; }
 body.land #view-board #board-detail > .ja-text .card-text { font-size: 12.5px; line-height: 1.55; }
 body.land #view-board #board-detail > .d-image { max-width: 110px; align-self: center; }
+/* 横画面：選択の帯は右の詳細欄（170px＋余白）の手前まで。JS で位置を合わせられなかったときもこれで重ならない */
+body.land .ap-sheet {
+  left: calc(6px + env(safe-area-inset-left)) !important; right: calc(170px + 18px + env(safe-area-inset-right)) !important;
+  width: auto !important; transform: none !important; max-height: calc(var(--lh) * 0.62);
+}
+body.land .ap-sheet-head { padding: 6px 12px 2px; font-size: 14px; }
+body.land .ap-sheet-body { padding: 2px 12px 6px; }
+body.land .ap-sheet-foot { padding: 4px 12px 8px; }
