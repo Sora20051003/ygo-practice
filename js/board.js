@@ -121,6 +121,7 @@ function moveCard(uid, dest, note) {
     inst.faceUp = dest.faceUp ?? (wasOnField ? inst.faceUp : true);
     inst.pos = dest.pos ?? (wasOnField ? inst.pos : 'atk');
     S[dest.zone][dest.idx] = inst;
+    if (!inst.faceUp && (!wasOnField || wasFaceUp)) inst.setTurn = S.turn;   // セットしたターン（罠・反転召喚の目安用）
   } else {
     inst.pos = 'atk';
     inst.mats = inst.mats || [];
@@ -186,7 +187,9 @@ function changeInst(uid, fn, text) {
   const loc = locate(uid);
   if (!loc) return;
   commit();
+  const wasUp = loc.inst.faceUp;
   fn(Board.S, locate(uid).inst);
+  if (wasUp && !locate(uid).inst.faceUp) locate(uid).inst.setTurn = Board.S.turn;
   if (text) log(text);
   finishChange();
 }
@@ -363,7 +366,8 @@ function openPile(zone) {
     if (!items.length) list.append(el('p', { class: 'muted', text: 'カードがありません' }));
     for (const { inst, i } of items) {
       const c = cardOf(inst);
-      const row = el('div', { class: 'pile-row' + (zone === 'extra' && inst.faceUp ? ' faceup' : '') },
+      const gl = Board.glow && Board.glow.get(inst.uid);
+      const row = el('div', { class: 'pile-row' + (zone === 'extra' && inst.faceUp ? ' faceup' : '') + (gl ? ' glow-' + gl : '') },
         zone === 'deck' && orderToggle.checked ? el('span', { class: 'muted', text: `${i + 1}.` }) : null,
         rowMark(c),
         el('div', { class: 'r-main' },
@@ -571,7 +575,8 @@ function cancelPick() {
 // ---------- 描画 ----------
 function cardEl(inst, zone) {
   const c = cardOf(inst);
-  const node = el('div', { class: 'bcard' + (inst.pos === 'def' ? ' def' : '') + (Board.selected === inst.uid ? ' selected' : ''), draggable: 'true' },
+  const gl = Board.glow && Board.glow.get(inst.uid);
+  const node = el('div', { class: 'bcard' + (inst.pos === 'def' ? ' def' : '') + (Board.selected === inst.uid ? ' selected' : '') + (gl ? ' glow-' + gl : ''), draggable: 'true' },
     cardFace(c, { faceDown: !inst.faceUp }));
   if (inst.mats && inst.mats.length) node.append(el('div', { class: 'badge mats', title: 'X素材', text: '素材' + inst.mats.length }));
   if (inst.ctr) node.append(el('div', { class: 'badge ctr', title: 'カウンター', text: '●' + inst.ctr }));
@@ -618,7 +623,9 @@ function pileEl(zone) {
   const S = Board.S;
   const arr = S[zone];
   const label = ZONE_LABEL[zone];
-  const node = el('div', { class: `zone pile z-${zone}`, dataset: { zone } }, el('span', { class: 'zone-label', text: label }));
+  const gls = Board.glow ? arr.map(i => Board.glow.get(i.uid)).filter(Boolean) : [];
+  const pg = gls.includes('y') ? ' glow-y' : (gls.length ? ' glow-b' : '');
+  const node = el('div', { class: `zone pile z-${zone}${pg}`, dataset: { zone } }, el('span', { class: 'zone-label', text: label }));
   if (arr.length) {
     const top = zone === 'deck' || zone === 'extra' ? null : arr[arr.length - 1];
     if (top) node.append(el('div', { class: 'bcard' }, cardFace(cardOf(top), { faceDown: !top.faceUp })));
@@ -664,6 +671,7 @@ function renderBoard() {
     $('#b-used').innerHTML = '';
     return;
   }
+  Board.glow = computeGlow(S);
   const blank = () => el('div', { class: 'zone blank' });
   const dueling = typeof Duel !== 'undefined' && Duel.active;
   field.classList.toggle('duel', dueling);
@@ -733,6 +741,8 @@ function setupBoardView() {
   $('#b-shuffle').onclick = () => { if (Board.S) shuffleDeck(); };
   $('#b-undo').onclick = () => { if (Board.S) undo(); };
   $('#b-token').onclick = () => { if (Board.S) openToken(); };
+  $('#b-glow').checked = Glow.on;
+  $('#b-glow').onchange = e => { Glow.on = e.target.checked; store.set('ygo.glow', Glow.on); renderBoard(); };
   $('#b-ns').onclick = () => { if (!Board.S) return; commit(); Board.S.ns = !Board.S.ns; log(Board.S.ns ? '通常召喚を使用済みに' : '通常召喚を未使用に'); finishChange(); };
   $('#b-turn').onclick = () => {
     if (!Board.S) return;

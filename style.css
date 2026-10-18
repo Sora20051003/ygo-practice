@@ -698,3 +698,16 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
   .multi-panel { max-width: calc(100vw - 32px); }
   .d-image.jp { max-width: 240px; }
 }
+
+/* 使えそうなカードを光らせる（黄＝発動、青＝召喚） */
+.bcard.glow-y .cardface { box-shadow: 0 0 0 2px #ffd23f, 0 0 10px 3px rgba(255, 210, 63, 0.85); animation: glowpulse 1.2s ease-in-out infinite alternate; }
+.bcard.glow-b .cardface { box-shadow: 0 0 0 2px #3fb6ff, 0 0 10px 3px rgba(63, 182, 255, 0.85); animation: glowpulse 1.2s ease-in-out infinite alternate; }
+.pile.glow-y { box-shadow: inset 0 0 0 2px #ffd23f, 0 0 8px 2px rgba(255, 210, 63, 0.6); }
+.pile.glow-b { box-shadow: inset 0 0 0 2px #3fb6ff, 0 0 8px 2px rgba(63, 182, 255, 0.6); }
+.pile-row.glow-y { box-shadow: inset 4px 0 0 #ffd23f; background: rgba(255, 210, 63, 0.12); }
+.pile-row.glow-b { box-shadow: inset 4px 0 0 #3fb6ff; background: rgba(63, 182, 255, 0.12); }
+.glow-key { white-space: nowrap; margin-right: 4px; padding: 0 4px; border-radius: 4px; font-weight: 600; }
+.glow-key.y { background: rgba(255, 210, 63, 0.35); }
+.glow-key.b { background: rgba(63, 182, 255, 0.3); }
+@keyframes glowpulse { from { filter: brightness(1); } to { filter: brightness(1.12); } }
+@media (prefers-reduced-motion: reduce) { .bcard.glow-y .cardface, .bcard.glow-b .cardface { animation: none; } }

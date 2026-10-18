@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261018-230302">
+<link rel="stylesheet" href="style.css?v=20261018-231638">
 </head>
 <body>
 <header class="topbar">
@@ -198,6 +198,7 @@
             <button class="btn" id="b-turn">次のターン</button>
           </div>
           <label class="check"><input type="checkbox" id="b-autoshuffle" checked> デッキから取ったら自動でシャッフル</label>
+          <label class="check" title="効果の処理はしていないので、ルールと効果文から推測した目安です"><input type="checkbox" id="b-glow"> 光らせる：<span class="glow-key y">発動</span><span class="glow-key b">召喚</span></label>
         </div>
         <div class="ctrl-group">
           <div class="row between"><b>使用済みの効果</b><button class="btn small" id="b-used-clear">クリア</button></div>
@@ -264,16 +265,17 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261018-230302"></script>
-<script src="js/consts.js?v=20261018-230302"></script>
-<script src="js/ui.js?v=20261018-230302"></script>
-<script src="js/data.js?v=20261018-230302"></script>
-<script src="js/firebase-config.js?v=20261018-230302"></script>
-<script src="js/auth.js?v=20261018-230302"></script>
-<script src="js/deck.js?v=20261018-230302"></script>
-<script src="js/board.js?v=20261018-230302"></script>
-<script src="js/duel.js?v=20261018-230302"></script>
-<script src="js/imgdeck.js?v=20261018-230302"></script>
-<script src="js/app.js?v=20261018-230302"></script>
+<script src="js/version.js?v=20261018-231638"></script>
+<script src="js/consts.js?v=20261018-231638"></script>
+<script src="js/ui.js?v=20261018-231638"></script>
+<script src="js/data.js?v=20261018-231638"></script>
+<script src="js/firebase-config.js?v=20261018-231638"></script>
+<script src="js/auth.js?v=20261018-231638"></script>
+<script src="js/deck.js?v=20261018-231638"></script>
+<script src="js/board.js?v=20261018-231638"></script>
+<script src="js/glow.js?v=20261018-231638"></script>
+<script src="js/duel.js?v=20261018-231638"></script>
+<script src="js/imgdeck.js?v=20261018-231638"></script>
+<script src="js/app.js?v=20261018-231638"></script>
 </body>
 </html>
