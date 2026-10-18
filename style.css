@@ -973,3 +973,14 @@ body.land .ap-sheet {
 body.land .ap-sheet-head { padding: 6px 12px 2px; font-size: 14px; }
 body.land .ap-sheet-body { padding: 2px 12px 6px; }
 body.land .ap-sheet-foot { padding: 4px 12px 8px; }
+/* 選択の帯：「決定」などのボタンは下に固定して、スクロールしなくても押せるように */
+.ap-sheet-body .stack > .row:last-child {
+  position: sticky; bottom: -8px; z-index: 3; margin-bottom: -8px; padding: 8px 0;
+  background: var(--panel); border-top: 1px solid var(--line); justify-content: center;
+}
+.ap-sheet-body .stack > .row:last-child .btn { min-width: 120px; }
+/* スマホ横画面：選ぶカードを少し小さくして、ひと目で見えるように */
+body.land .ap-sheet .ap-item { width: 78px; padding: 3px; }
+body.land .ap-sheet .ap-face { width: 62px; }
+body.land .ap-sheet .ap-sheet-body p { margin: 2px 0; font-size: 12px; }
+@media (max-width: 720px) { .ap-sheet .ap-item { width: 84px; } .ap-sheet .ap-face { width: 68px; } }
