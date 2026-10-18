@@ -1,7 +1,7 @@
 {
   "name": "遊戯王 展開練習",
   "short_name": "遊戯王練習",
-  "description": "遊戯王のデッキ作成・一人回し・対戦の練習アプリ",
+  "description": "遊戯王OCGのデッキ作成・一人回し・対戦の練習ができる非公式のファンツール（KONAMIとは関係ありません）",
   "lang": "ja",
   "start_url": "./",
   "scope": "./",

@@ -1006,3 +1006,12 @@ body.land #view-board .hand-title > span:first-child { background: rgba(0,0,0,.5
 /* カードの大きさ：盤面（相手ありは6段・なしは3段）＋手札1段が画面の高さに収まる最大 */
 body.land #view-board .board-center { --cw: min(calc((var(--lh) - 48px) / 6.3), calc((var(--lw) - 400px) / 7.6)); }
 body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 58px) / 9.3), calc((var(--lw) - 400px) / 7.6)); }
+/* 非公式の表示・このアプリについて */
+.unofficial { font-size: 10px; font-weight: 700; vertical-align: middle; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--muted); color: var(--muted); }
+.about { font-size: 13px; line-height: 1.7; }
+.about h4 { margin: 14px 0 4px; font-size: 14px; }
+.about p { margin: 4px 0; }
+.about-lead { font-weight: 700; }
+.about-list { margin: 4px 0; padding-left: 20px; }
+.about a { color: var(--accent); word-break: break-all; }
+body.land .unofficial { display: none; }

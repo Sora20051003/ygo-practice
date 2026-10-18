@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>遊戯王 展開練習</title>
+<title>遊戯王 展開練習（非公式ファンツール）</title>
 <!-- スマホのホーム画面に追加したとき用（アイコン・アプリ名・色） -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
@@ -13,11 +13,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261019-050004">
+<link rel="stylesheet" href="style.css?v=20261019-050505">
 </head>
 <body>
 <header class="topbar">
-  <h1>遊戯王 展開練習</h1>
+  <h1>遊戯王 展開練習 <span class="unofficial" title="KONAMI とは関係のない非公式のファンツールです">非公式</span></h1>
   <nav class="tabs">
     <button class="tab active" data-view="deck">デッキ作成</button>
     <button class="tab" data-view="board">一人回し</button>
@@ -27,6 +27,7 @@
     <label class="style-pick"><span class="style-pick-label">カード表示</span> <select id="card-style"></select></label>
     <span id="data-info">読み込み中…</span>
     <button id="btn-update-data" class="btn small">データ更新</button>
+    <button id="btn-about" class="btn small" title="非公式であることと、権利・ライセンスの表記">ⓘ このアプリについて</button>
     <span id="user-box" class="user-box" hidden></span>
   </div>
 </header>
@@ -265,6 +266,7 @@
             <button class="btn primary" id="b-start">シャッフルして開始</button>
             <button class="btn" id="b-pickhand">初手を選んで開始</button>
             <button class="btn" id="b-restart">同じ初手でやり直す</button>
+            <button class="btn small" data-about>ⓘ このアプリについて（非公式・権利表記）</button>
           </div>
           <div class="pause-sec auto-only">
             <h4>相手</h4>
@@ -326,7 +328,7 @@
 <!-- ログイン画面（ネット版のみ） -->
 <div id="auth-screen" class="auth-screen" hidden>
   <div class="auth-box">
-    <h1>遊戯王 展開練習</h1>
+    <h1>遊戯王 展開練習 <span class="unofficial" title="KONAMI とは関係のない非公式のファンツールです">非公式</span></h1>
     <p class="muted">ログインすると、デッキがアカウントに保存され、どの端末からでも使えます。</p>
     <button id="auth-google" class="btn auth-google">
       <span class="g-mark">G</span> Googleでログイン
@@ -348,19 +350,19 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261019-050004"></script>
-<script src="js/consts.js?v=20261019-050004"></script>
-<script src="js/ui.js?v=20261019-050004"></script>
-<script src="js/data.js?v=20261019-050004"></script>
-<script src="js/firebase-config.js?v=20261019-050004"></script>
-<script src="js/auth.js?v=20261019-050004"></script>
-<script src="js/deck.js?v=20261019-050004"></script>
-<script src="js/board.js?v=20261019-050004"></script>
-<script src="js/engine.js?v=20261019-050004"></script>
-<script src="js/autoplay.js?v=20261019-050004"></script>
-<script src="js/glow.js?v=20261019-050004"></script>
-<script src="js/duel.js?v=20261019-050004"></script>
-<script src="js/imgdeck.js?v=20261019-050004"></script>
-<script src="js/app.js?v=20261019-050004"></script>
+<script src="js/version.js?v=20261019-050505"></script>
+<script src="js/consts.js?v=20261019-050505"></script>
+<script src="js/ui.js?v=20261019-050505"></script>
+<script src="js/data.js?v=20261019-050505"></script>
+<script src="js/firebase-config.js?v=20261019-050505"></script>
+<script src="js/auth.js?v=20261019-050505"></script>
+<script src="js/deck.js?v=20261019-050505"></script>
+<script src="js/board.js?v=20261019-050505"></script>
+<script src="js/engine.js?v=20261019-050505"></script>
+<script src="js/autoplay.js?v=20261019-050505"></script>
+<script src="js/glow.js?v=20261019-050505"></script>
+<script src="js/duel.js?v=20261019-050505"></script>
+<script src="js/imgdeck.js?v=20261019-050505"></script>
+<script src="js/app.js?v=20261019-050505"></script>
 </body>
 </html>

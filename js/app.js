@@ -143,6 +143,7 @@ async function init() {
   checkSharedDeckLink();
   window.addEventListener('hashchange', checkSharedDeckLink);
   startUpdateCheck();
+  if (!store.get('ygo.aboutSeen', false)) showAbout(true);   // 初めて開いたときに、非公式であることを知らせる
   prepareTextSearch(() => loadJaTexts(textStatus));
 
   $('#btn-update-data').onclick = async () => {
@@ -163,3 +164,42 @@ async function init() {
 }
 
 init();
+
+// ---------- このアプリについて（非公式であること・権利とライセンスの表記） ----------
+const REPO_URL = 'https://github.com/Sora20051003/ygo-practice';
+function showAbout(first) {
+  const a = (href, text) => el('a', { href, target: '_blank', rel: 'noopener', text: text || href });
+  const li = (...kids) => el('li', null, ...kids);
+  const body = el('div', { class: 'about' },
+    el('p', { class: 'about-lead', text: 'このアプリは、個人が作った非公式のファンツールです。株式会社コナミデジタルエンタテインメント（KONAMI）とは関係がなく、KONAMI の承認や後援を受けたものではありません。' }),
+    el('h4', { text: '権利の表記' }),
+    el('p', { text: '「遊☆戯☆王」および「遊戯王オフィシャルカードゲーム」のカード名・カードの効果テキスト・イラスト・ロゴなどの権利は、原作者・権利者および KONAMI に帰属します（©高橋和希 スタジオ・ダイス／集英社　©Konami Digital Entertainment）。' }),
+    el('p', { class: 'muted', text: 'このアプリはカードの画像やイラストを配布していません。表示されるイラストは、下の外部サイトから閲覧のたびに読み込んでいるか、利用者が自分で読み込んだデッキ画像を利用者の端末の中だけで切り抜いたものです。' }),
+    el('ul', { class: 'about-list' },
+      li('無料・広告なしで、お金をいただくことはありません。'),
+      li('公式の大会ルール・裁定と違う動きをすることがあります。正確なルールは公式の情報を確認してください。'),
+      li('権利者から求めがあった場合は、すみやかに内容の変更や公開の停止をします。')),
+    el('h4', { text: 'データと素材の出どころ' }),
+    el('ul', { class: 'about-list' },
+      li('カードの情報・イラスト画像：', a('https://ygoprodeck.com/', 'YGOPRODeck'), '（API・画像サーバー）'),
+      li('日本語のカード名・効果テキスト：', a('https://ygocdb.com/', '百鸽 (ygocdb)'), '、', a('https://github.com/mycard/ygopro-database', 'mycard/ygopro-database')),
+      li('禁止・制限リスト：', a('https://github.com/DawnbrandBots/yaml-yugi-limit-regulation', 'DawnbrandBots/yaml-yugi-limit-regulation')),
+      li('カードの発売日など：', a('https://db.ygoresources.com/', 'YGOResources')),
+      li('公式カードデータベースへのリンク：', a('https://www.db.yugioh-card.com/', '遊戯王OCG カードデータベース（KONAMI）'))),
+    el('h4', { text: '使っているソフトウェアとライセンス' }),
+    el('ul', { class: 'about-list' },
+      li('効果の自動処理のエンジン：', a('https://github.com/n1xx1/ocgcore-wasm', 'ocgcore-wasm'), '（MIT License）。中身は ', a('https://github.com/edo9300/ygopro-core', 'EDOPro の ygopro-core'), '（AGPL-3.0。ライセンスは各リポジトリを参照）'),
+      li('カードの効果の処理（カードスクリプト）：', a('https://github.com/ProjectIgnis/CardScripts', 'ProjectIgnis/CardScripts'), '（各リポジトリのライセンスに従います）'),
+      li('エンジン用のカードデータ：', a('https://github.com/ProjectIgnis/BabelCDB', 'ProjectIgnis/BabelCDB')),
+      li('ログイン・デッキの同期・対戦：', a('https://firebase.google.com/', 'Firebase（Google）'))),
+    el('p', null, 'このアプリのソースコードは公開しています：', a(REPO_URL)),
+  );
+  showModal({
+    title: first ? 'はじめに（非公式のファンツールです）' : 'このアプリについて', body, wide: true,
+    buttons: [{ label: first ? '了解して使う' : '閉じる', primary: true, onClick: () => { store.set('ygo.aboutSeen', true); } }],
+    onClose: () => store.set('ygo.aboutSeen', true),
+  });
+}
+document.addEventListener('click', e => {
+  if (e.target.closest('#btn-about, [data-about]')) { if (typeof closePause === 'function' && !$('#pause').hidden) closePause(); showAbout(); }
+});
