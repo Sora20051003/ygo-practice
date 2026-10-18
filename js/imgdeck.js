@@ -173,14 +173,14 @@ function loadCardFeatures() {
       // イラスト画像しかないカードは枠の色が分からないので、同じ種類（枠）のカードの平均の色で補う
       const step = FEAT_LEN + 3, sums = {}, art = new Set(CARD_FEATURES.artOnly);
       CARD_FEATURES.ids.forEach((id, k) => {
-        const c = DB.byId.get(id);
+        const c = DB.byId.get(featRealId(id));
         if (!c || art.has(id)) return;
         const s = sums[frameClass(c)] || (sums[frameClass(c)] = [0, 0, 0, 0]);
         for (let i = 0; i < 3; i++) s[i] += bytes[k * step + FEAT_LEN + i];
         s[3]++;
       });
       CARD_FEATURES.ids.forEach((id, k) => {
-        const c = DB.byId.get(id);
+        const c = DB.byId.get(featRealId(id));
         const s = c && art.has(id) && sums[frameClass(c)];
         if (s) for (let i = 0; i < 3; i++) bytes[k * step + FEAT_LEN + i] = Math.round(s[i] / s[3]);
       });
@@ -190,31 +190,73 @@ function loadCardFeatures() {
 }
 
 // 特徴が一番近いカード（候補つき）。section が extra ならEXデッキのカードだけ、それ以外はメインデッキのカードだけで探す
+// 特徴データの番号 → 本来のカードID（別イラストは元のカードにまとめる）
+const featRealId = id => (typeof CARD_FEATURES !== 'undefined' && CARD_FEATURES.alias && CARD_FEATURES.alias[id]) || id;
+
+// 2つの特徴の距離（イラスト＋枠の色）
+function featDist(feat, bytes, o) {
+  let dist = 0;
+  for (let i = 0; i < FEAT_LEN; i++) { const t = feat[i] - bytes[o + i]; dist += t * t; }
+  // 枠の色の違い（カードの種類の違い）も足す
+  for (let i = 0; i < 3; i++) { const t = feat[FEAT_LEN + i] - bytes[o + FEAT_LEN + i]; dist += t * t * 12; }
+  return dist;
+}
+
+// 特徴が一番近いカード（候補つき）。section が extra ならEXデッキのカードだけ、それ以外はメインデッキのカードだけで探す
+// 同じカードの別イラストや、前に選び直して覚えたイラストも比べ、カードごとに一番近い距離を使う
 function matchCard(feat, section, keep = 5) {
   const { ids, bytes } = CARD_FEATURES;
   const step = FEAT_LEN + 3;
   // EXデッキ用・メインデッキ用の候補の番号を、最初の1回だけ作っておく
   if (!CARD_FEATURES.pool) {
     const ex = [], mn = [];
-    ids.forEach((id, k) => { const c = DB.byId.get(id); if (c && !isToken(c)) (isExtraType(c) ? ex : mn).push(k); });
+    ids.forEach((id, k) => { const c = DB.byId.get(featRealId(id)); if (c && !isToken(c)) (isExtraType(c) ? ex : mn).push(k); });
     CARD_FEATURES.pool = { extra: Int32Array.from(ex), main: Int32Array.from(mn) };
   }
-  const pool = CARD_FEATURES.pool[section === 'extra' ? 'extra' : 'main'];
-  const best = [];
+  const extra = section === 'extra';
+  const pool = CARD_FEATURES.pool[extra ? 'extra' : 'main'];
+  const byId = new Map();
+  const add = (id, dist) => { const b = byId.get(id); if (b === undefined || dist < b) byId.set(id, dist); };
+  // 上位だけ残すための目安（keep×3 件より遠いものは捨てる）
+  let worst = Infinity;
+  const top = [];
   for (let p = 0; p < pool.length; p++) {
     const k = pool[p];
-    const o = k * step;
-    let dist = 0;
-    for (let i = 0; i < FEAT_LEN; i++) { const t = feat[i] - bytes[o + i]; dist += t * t; }
-    // 枠の色の違い（カードの種類の違い）も足す
-    for (let i = 0; i < 3; i++) { const t = feat[FEAT_LEN + i] - bytes[o + FEAT_LEN + i]; dist += t * t * 12; }
-    if (best.length < keep || dist < best[best.length - 1].dist) {
-      best.push({ id: ids[k], dist });
-      best.sort((a, b) => a.dist - b.dist);
-      if (best.length > keep) best.pop();
-    }
+    const dist = featDist(feat, bytes, k * step);
+    if (dist >= worst) continue;
+    add(featRealId(ids[k]), dist);
+    top.push(dist);
+    if (top.length > keep * 6) { top.sort((a, b) => a - b); top.length = keep * 3; worst = top[top.length - 1]; }
   }
-  return best;
+  // 自分で選び直して覚えたイラスト
+  for (const l of learnedFeatures()) {
+    const c = DB.byId.get(l.id);
+    if (!c || isExtraType(c) !== extra) continue;
+    add(l.id, featDist(feat, l.bytes, 0) * 0.9);   // 自分のデッキ画像から覚えたものは少しだけ優先
+  }
+  return [...byId].map(([id, dist]) => ({ id, dist })).sort((a, b) => a.dist - b.dist).slice(0, keep);
+}
+
+// ---------- 選び直したイラストを覚える（この端末に保存） ----------
+// 読み取り結果で選び直したカードは、その切り抜きの特徴を覚えて、次から同じイラストを正しく読めるようにする
+const LEARN_KEY = 'ygo.imgLearn', LEARN_MAX = 600;
+let learnedCache = null;
+function learnedFeatures() {
+  if (learnedCache) return learnedCache;
+  const raw = store.get(LEARN_KEY, []);
+  learnedCache = raw.map(r => {
+    const bin = atob(r.f), b = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
+    return { id: r.id, bytes: b };
+  });
+  return learnedCache;
+}
+function learnFeatures(list) {   // list: [{ id, feat }]
+  if (!list.length) return;
+  const raw = store.get(LEARN_KEY, []);
+  for (const { id, feat } of list) raw.push({ id, f: btoa(String.fromCharCode.apply(null, feat)) });
+  store.set(LEARN_KEY, raw.slice(-LEARN_MAX));
+  learnedCache = null;
 }
 
 // 画像ファイル → [{ rect, section, candidates }]
@@ -227,7 +269,7 @@ async function readDeckImage(file) {
   canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
   canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
   const rects = detectDeckCards(canvas);
-  const cards = rects.map(r => ({ rect: r, section: r.section, candidates: matchShifted(canvas, r) }));
+  const cards = rects.map(r => ({ rect: r, section: r.section, feat: cardFeature(canvas, r), candidates: matchShifted(canvas, r) }));
   preferConsistent(cards);
   return { canvas, cards };
 }
@@ -260,8 +302,24 @@ async function openImageImport(file) {
     thumb.getContext('2d').drawImage(res.canvas, c.rect.x, c.rect.y, c.rect.w, c.rect.h, 0, 0, thumb.width, thumb.height);
     const sel = el('select', null,
       c.candidates.map(k => el('option', { value: k.id, text: (DB.byId.get(k.id) || {}).name })),
-      el('option', { value: 0, text: '（このカードは入れない）' }));
-    sel.addEventListener('change', () => { choice[i] = +sel.value; });
+      el('option', { value: 0, text: '（このカードは入れない）' }),
+      el('option', { value: -1, text: '🔍 候補にない：名前で探す…' }));
+    // 候補にないときは名前で探す（同じイラストを次から正しく読めるよう、選んだカードは覚える）
+    sel.addEventListener('change', () => {
+      if (+sel.value !== -1) { choice[i] = +sel.value; return; }
+      sel.value = String(choice[i]);
+      promptText('カード名で探す（一部でも、ひらがなでも可）', '', q => {
+        const exact = findCardByName(q);
+        const hits = exact ? [{ c: exact }] : fuzzyCandidates(q, 8);
+        const allowed = hits.map(h => h.c).filter(x => x && !isToken(x) && (isExtraType(x) === (c.section === 'extra')));
+        if (!allowed.length) { toast('見つかりませんでした'); return; }
+        for (const x of allowed.slice().reverse()) {
+          if (![...sel.options].some(o => +o.value === x.id)) sel.insertBefore(el('option', { value: x.id, text: x.name }), sel.firstChild);
+        }
+        sel.value = String(allowed[0].id); choice[i] = allowed[0].id;
+        if (allowed.length > 1) toast(`「${allowed[0].name}」にしました。違うときは一覧から選んでください`);
+      });
+    });
     // 一番目と二番目の候補の差が小さいものは「要確認」
     const sure = c.candidates.length < 2 || c.candidates[1].dist - c.candidates[0].dist > c.candidates[0].dist * 0.15;
     grid.append(el('div', { class: 'imgdeck-item' + (sure ? '' : ' unsure') }, thumb,
@@ -279,6 +337,9 @@ async function openImageImport(file) {
       label: 'このデッキを追加', primary: true, onClick: () => {
         const deck = Decks.blank(file.name.replace(/\.\w+$/, '') || '画像から読み込んだデッキ');
         res.cards.forEach((c, i) => { if (choice[i]) deck[c.section].push(choice[i]); });
+        // 選び直したカードは、その切り抜きのイラストを覚えておく（別イラストのカードなどを次から正しく読めるように）
+        learnFeatures(res.cards.map((c, i) => ({ id: choice[i], feat: c.feat, top: c.candidates[0] && c.candidates[0].id }))
+          .filter(x => x.id > 0 && x.id !== x.top));
         if (usePics.checked) {
           const pics = new Map();
           res.cards.forEach((c, i) => { if (choice[i] && !pics.has(choice[i])) pics.set(choice[i], cropCardPic(res.canvas, c.rect)); });
