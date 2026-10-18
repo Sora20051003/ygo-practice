@@ -173,6 +173,38 @@ function setupMobileTabs() {
   });
 }
 
+// デッキ画面でカードの詳細を出す（詳細欄の上に、追加・減らすボタンと今の枚数を付ける）
+function showDeckCard(c) {
+  showCardDetail(c, '#deck-detail', deckCardBar(c));
+}
+
+function deckCardBar(c) {
+  const bar = el('div', { class: 'd-addbar' });
+  const draw = () => {
+    bar.innerHTML = '';
+    const deck = Decks.current();
+    if (!deck) return;
+    const main = isExtraType(c) ? 'extra' : 'main';
+    const count = sec => deck[sec].filter(id => id === c.id).length;
+    const nMain = count(main), nSide = count('side');
+    // 1枚減らす：メイン（EX）から先に、なければサイドから
+    const removeOne = () => {
+      const sec = nMain ? main : 'side';
+      const i = deck[sec].lastIndexOf(c.id);
+      if (i >= 0) removeFromDeck(sec, i);
+      draw();
+    };
+    bar.append(
+      el('div', { class: 'd-addcount', text: `今の枚数：${main === 'extra' ? 'EX' : 'メイン'} ${nMain}枚・サイド ${nSide}枚` }),
+      el('div', { class: 'd-addbtns' },
+        el('button', { class: 'btn small primary', text: `＋ ${main === 'extra' ? 'EXデッキ' : 'メインデッキ'}に追加`, onclick: () => { addToDeck(c, main); draw(); } }),
+        el('button', { class: 'btn small', text: '＋ サイドに追加', onclick: () => { addToDeck(c, 'side'); draw(); } }),
+        el('button', { class: 'btn small', text: '− 1枚減らす', disabled: !(nMain || nSide), onclick: removeOne })));
+  };
+  draw();
+  return bar;
+}
+
 function removeFromDeck(section, index) {
   const deck = Decks.current();
   deck[section].splice(index, 1);
@@ -288,7 +320,7 @@ function renderResults() {
     const info = isMonster(c)
       ? `${levelText(c)} ${ATTR[c.attr] || ''} ${RACE[c.race] || ''}　${statText(c)}${has(c, T.LINK) ? "　" + linkArrowsText(c) : ""}`
       : typeLine(c);
-    const row = el('div', { class: 'result-row', onclick: () => showCardDetail(c, '#deck-detail') },
+    const row = el('div', { class: 'result-row', onclick: () => showDeckCard(c) },
       rowMark(c),
       el('div', { class: 'r-main' },
         el('div', { class: 'r-name' }, limitBadge(c, ctx), c.name + (c.noJp ? '（TCG）' : '')),
@@ -401,7 +433,7 @@ function renderDeck() {
       const c = DB.byId.get(id);
       if (!c) { grid.append(el('div', { class: 'deck-tile missing', text: '不明なカード ' + id })); return; }
       const badge = limitBadge(c, ctx);
-      const tile = el('div', { class: 'deck-tile' + (bad.has(c.name) ? ' invalid' : ''), onclick: () => showCardDetail(c, '#deck-detail') },
+      const tile = el('div', { class: 'deck-tile' + (bad.has(c.name) ? ' invalid' : ''), onclick: () => showDeckCard(c) },
         cardFace(c, { small: true }),
         badge ? el('div', { class: 'tile-lim' }, badge) : null,
         el('button', { class: 'tile-remove', title: '1枚減らす', text: '−', onclick: e => { e.stopPropagation(); removeFromDeck(sec, i); } }));
