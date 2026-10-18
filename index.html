@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>遊戯王 展開練習</title>
+<link rel="stylesheet" href="style.css?v=20261018-214729">
+</head>
+<body>
+<header class="topbar">
+  <h1>遊戯王 展開練習</h1>
+  <nav class="tabs">
+    <button class="tab active" data-view="deck">デッキ作成</button>
+    <button class="tab" data-view="board">一人回し</button>
+  </nav>
+  <div class="data-status">
+    <label class="style-pick"><span class="style-pick-label">カード表示</span> <select id="card-style"></select></label>
+    <span id="data-info">読み込み中…</span>
+    <button id="btn-update-data" class="btn small">データ更新</button>
+    <span id="user-box" class="user-box" hidden></span>
+  </div>
+</header>
+
+<main>
+  <!-- ===== デッキ作成 ===== -->
+  <section id="view-deck" class="view">
+    <div class="mobile-tabs" id="deck-mtabs">
+      <button class="on" data-pane="search">🔍 カードを探す</button>
+      <button data-pane="deck">🃏 デッキ <span id="mt-count"></span></button>
+    </div>
+    <div class="deck-layout" data-pane="search">
+      <div class="panel search-panel">
+        <div class="search-row">
+          <input id="q" type="search" placeholder="カード名で検索（ひらがな・英語もOK）" autocomplete="off">
+          <div class="seg" id="q-mode" title="スペースで区切った語の扱い">
+            <button type="button" class="on" data-mode="and" title="すべての語を含む">AND</button>
+            <button type="button" data-mode="or" title="どれかの語を含む">OR</button>
+          </div>
+        </div>
+        <div class="search-row">
+          <input id="qt" type="search" placeholder="効果テキストで検索（例：デッキから 特殊召喚）" autocomplete="off" disabled>
+          <div class="seg" id="qt-mode" title="スペースで区切った語の扱い">
+            <button type="button" class="on" data-mode="and" title="すべての語を含む">AND</button>
+            <button type="button" data-mode="or" title="どれかの語を含む">OR</button>
+          </div>
+        </div>
+        <div id="mode-hint" class="muted small-note">AND＝すべてに当てはまる／OR＝どれかに当てはまる。検索欄はスペースで区切ると複数の語で探せます</div>
+        <div id="text-status" class="muted small-note" hidden></div>
+        <div class="filters">
+          <select id="f-kind">
+            <option value="">すべての種類</option>
+            <option value="monster">モンスター</option>
+            <option value="main-monster">メインデッキのモンスター</option>
+            <option value="extra">EXデッキのモンスター</option>
+            <option value="spell">魔法</option>
+            <option value="trap">罠</option>
+          </select>
+          <details id="f-sub" class="multi"><summary>細かい種類</summary><div class="multi-panel"></div></details>
+          <details id="f-attr" class="multi"><summary>属性</summary><div class="multi-panel"></div></details>
+          <details id="f-race" class="multi"><summary>種族</summary><div class="multi-panel"></div></details>
+          <details id="f-level" class="multi"><summary>レベル</summary><div class="multi-panel nums"></div></details>
+          <details id="f-rank" class="multi"><summary>ランク</summary><div class="multi-panel nums"></div></details>
+          <details id="f-link" class="multi"><summary>リンク</summary><div class="multi-panel nums"></div></details>
+          <details id="f-marker" class="multi"><summary>リンクマーカー</summary><div class="multi-panel arrows"></div></details>
+          <select id="f-sort">
+            <option value="new">新しい順</option>
+            <option value="name">名前順</option>
+            <option value="level">レベル順</option>
+            <option value="atk">攻撃力順</option>
+          </select>
+        </div>
+        <div id="result-count" class="muted"></div>
+        <div id="results" class="results"></div>
+      </div>
+
+      <div class="panel deck-panel">
+        <div class="deck-list-head">
+          <b>マイデッキ</b>
+          <span class="muted">クリックで切り替え（<span id="deck-total"></span>）</span>
+          <input id="deck-filter" type="search" placeholder="デッキ名で検索" autocomplete="off">
+        </div>
+        <div id="deck-list" class="deck-list"></div>
+
+        <div class="deck-current">
+          <div class="deck-title">
+            <h2 id="deck-name" title="クリックで名前を変える"></h2>
+            <span id="deck-sum" class="muted"></span>
+          </div>
+          <div class="deck-actions">
+            <button class="btn primary" id="deck-play">▶ このデッキで一人回し</button>
+            <span class="action-group">
+              <button class="btn small" id="deck-rename">✎ 名前を変える</button>
+              <button class="btn small" id="deck-copy">⧉ コピーを作る</button>
+              <button class="btn small danger" id="deck-delete">✕ 削除</button>
+            </span>
+            <span class="action-group">
+              <button class="btn small" id="deck-sort">並べ替え</button>
+              <button class="btn small" id="deck-import">ファイルから読み込み</button>
+              <button class="btn small" id="deck-export">ファイルに書き出し</button>
+            </span>
+            <span class="action-group">
+              <button class="btn small" id="deck-backup" title="全部のデッキを1つのファイルに保存（別のPCやネット版へ移すとき用）">全デッキをバックアップ</button>
+              <button class="btn small" id="deck-restore">バックアップから追加</button>
+            </span>
+          </div>
+        </div>
+        <p class="muted hint">検索結果の「＋」で追加（EXデッキのカードは自動でEXへ）。デッキ内のカードは右クリックか「−」で1枚減らせます。</p>
+        <div class="deck-section"><h3>メインデッキ <span id="cnt-main"></span></h3><div id="deck-main" class="deck-grid"></div></div>
+        <div class="deck-section"><h3>EXデッキ <span id="cnt-extra"></span></h3><div id="deck-extra" class="deck-grid"></div></div>
+        <div class="deck-section"><h3>サイドデッキ <span id="cnt-side"></span></h3><div id="deck-side" class="deck-grid"></div></div>
+      </div>
+
+      <div class="panel detail-panel" id="deck-detail">
+        <p class="muted">カードをクリックすると詳細が表示されます。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 一人回し ===== -->
+  <section id="view-board" class="view" hidden>
+    <div class="board-layout">
+      <div class="panel side-left">
+        <div class="ctrl-group">
+          <label class="muted">デッキ</label>
+          <select id="b-deck"></select>
+          <div class="row">
+            <select id="b-handsize">
+              <option value="5">先攻（5枚）</option>
+              <option value="6">後攻（6枚）</option>
+            </select>
+          </div>
+          <button class="btn primary" id="b-start">シャッフルして開始</button>
+          <button class="btn" id="b-pickhand">初手を選んで開始</button>
+          <button class="btn" id="b-restart">同じ初手でやり直す</button>
+        </div>
+        <div class="ctrl-group">
+          <div class="row">
+            <button class="btn" id="b-draw">1枚ドロー</button>
+            <button class="btn" id="b-shuffle">シャッフル</button>
+          </div>
+          <div class="row">
+            <button class="btn" id="b-undo" title="Ctrl+Z">元に戻す</button>
+            <button class="btn" id="b-token">トークン</button>
+          </div>
+          <div class="row">
+            <button class="btn" id="b-ns">通常召喚：未使用</button>
+            <button class="btn" id="b-turn">次のターン</button>
+          </div>
+          <label class="check"><input type="checkbox" id="b-autoshuffle" checked> デッキから取ったら自動でシャッフル</label>
+        </div>
+        <div class="ctrl-group">
+          <div class="row between"><b>使用済みの効果</b><button class="btn small" id="b-used-clear">クリア</button></div>
+          <ul id="b-used" class="used-list"></ul>
+        </div>
+        <div class="ctrl-group grow">
+          <div class="row between"><b>ログ</b><button class="btn small" id="b-copylog">コピー</button></div>
+          <ol id="b-log" class="log"></ol>
+        </div>
+      </div>
+
+      <div class="board-center">
+        <div id="pick-banner" class="pick-banner" hidden></div>
+        <div class="field" id="field"></div>
+        <div class="hand-wrap">
+          <div class="hand-title">手札 <span id="hand-count">0</span>枚</div>
+          <div id="hand" class="hand dropzone" data-zone="hand"></div>
+        </div>
+      </div>
+
+      <div class="panel detail-panel" id="board-detail">
+        <p class="muted">カードをクリックすると操作メニューと詳細が表示されます。カードはドラッグでも動かせます。</p>
+      </div>
+    </div>
+    <!-- スマホ用：画面下に固定するよく使うボタン -->
+    <div class="mobile-bar">
+      <button id="mb-draw">ドロー</button>
+      <button id="mb-undo">元に戻す</button>
+      <button id="mb-shuffle">シャッフル</button>
+      <button id="mb-log">ログ</button>
+      <button id="mb-ctrl">操作 ▾</button>
+    </div>
+  </section>
+</main>
+
+<!-- ログイン画面（ネット版のみ） -->
+<div id="auth-screen" class="auth-screen" hidden>
+  <div class="auth-box">
+    <h1>遊戯王 展開練習</h1>
+    <p class="muted">ログインすると、デッキがアカウントに保存され、どの端末からでも使えます。</p>
+    <button id="auth-google" class="btn auth-google">
+      <span class="g-mark">G</span> Googleでログイン
+    </button>
+    <div class="auth-or"><span>または メールアドレスで</span></div>
+    <label class="auth-field">メールアドレス<input id="auth-email" type="email" autocomplete="email"></label>
+    <label class="auth-field">パスワード（6文字以上）<input id="auth-pass" type="password" autocomplete="current-password"></label>
+    <div class="auth-buttons">
+      <button id="auth-login" class="btn primary">ログイン</button>
+      <button id="auth-signup" class="btn">新規登録</button>
+    </div>
+    <button id="auth-reset" class="auth-link">パスワードを忘れた場合</button>
+    <p id="auth-msg" class="auth-msg"></p>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div id="menu" class="menu" hidden></div>
+<div id="toast" class="toast" hidden></div>
+<div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
+
+<script src="js/version.js?v=20261018-214729"></script>
+<script src="js/consts.js?v=20261018-214729"></script>
+<script src="js/ui.js?v=20261018-214729"></script>
+<script src="js/data.js?v=20261018-214729"></script>
+<script src="js/firebase-config.js?v=20261018-214729"></script>
+<script src="js/auth.js?v=20261018-214729"></script>
+<script src="js/deck.js?v=20261018-214729"></script>
+<script src="js/board.js?v=20261018-214729"></script>
+<script src="js/app.js?v=20261018-214729"></script>
+</body>
+</html>
