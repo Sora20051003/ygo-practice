@@ -443,6 +443,8 @@ function openMaterials(hostUid) {
 // handSize：引く枚数（省略時は画面の「先攻5枚／後攻6枚」）
 function buildState(deck, handIds, handSize) {
   const S = emptyState();
+  if (!handSize) S.turn = +$('#b-handsize').value === 6 ? 2 : 1;   // 一人回しで後攻なら、自分の最初のターンは T2
+  S.phase = 'M1';
   for (const id of deck.main) if (DB.byId.has(id)) S.deck.push(newInst(S, id));
   for (const id of deck.extra) if (DB.byId.has(id)) { const i = newInst(S, id); i.faceUp = false; S.extra.push(i); }
   for (const i of S.deck) i.faceUp = false;
@@ -452,11 +454,11 @@ function buildState(deck, handIds, handSize) {
       const idx = S.deck.findIndex(i => i.id === id);
       if (idx >= 0) { const [inst] = S.deck.splice(idx, 1); inst.faceUp = true; S.hand.push(inst); }
     }
-    S.log.push(`[T1] 初手を指定して開始：${S.hand.map(i => cardOf(i).name).join('、')}`);
+    S.log.push(`[T${S.turn}] 初手を指定して開始：${S.hand.map(i => cardOf(i).name).join('、')}`);
   } else {
     const n = handSize || +$('#b-handsize').value;
     for (let k = 0; k < n && S.deck.length; k++) { const inst = S.deck.shift(); inst.faceUp = true; S.hand.push(inst); }
-    S.log.push(`[T1] ${n}枚引いて開始：${S.hand.map(i => cardOf(i).name).join('、')}`);
+    S.log.push(`[T${S.turn}] ${n}枚引いて開始：${S.hand.map(i => cardOf(i).name).join('、')}`);
   }
   return S;
 }
@@ -690,6 +692,7 @@ function renderBoard() {
   $('#view-board').classList.toggle('auto-mode', autoActive());
   $$('#b-mode button').forEach(b => b.classList.toggle('on', (b.dataset.mode === 'auto') === Auto.on));
   renderPauseSummary();
+  renderPhaseBar();
   if (!(typeof Duel !== 'undefined' && Duel.active)) $('#opp-bar').hidden = true;
   if (autoActive()) {
     autoPanel();
@@ -744,7 +747,7 @@ function renderBoard() {
 
   $('#b-ns').textContent = '通常召喚：' + (S.ns ? '使用済み' : '未使用');
   $('#b-ns').classList.toggle('on', S.ns);
-  $('#b-turn').textContent = `次のターン（今T${S.turn}）`;
+  $('#b-turn').textContent = `ターン終了（今T${S.turn}）`;
 
   const used = $('#b-used');
   used.innerHTML = '';
@@ -799,13 +802,7 @@ function setupBoardView() {
   $('#b-glow').checked = Glow.on;
   $('#b-glow').onchange = e => { Glow.on = e.target.checked; store.set('ygo.glow', Glow.on); renderBoard(); };
   $('#b-ns').onclick = () => { if (!Board.S) return; commit(); Board.S.ns = !Board.S.ns; log(Board.S.ns ? '通常召喚を使用済みに' : '通常召喚を未使用に'); finishChange(); };
-  $('#b-turn').onclick = () => {
-    if (!Board.S) return;
-    commit();
-    Board.S.turn++; Board.S.ns = false; Board.S.used = [];
-    log('---- ターン開始 ----');
-    finishChange();
-  };
+  $('#b-turn').onclick = endTurn;
   $('#b-used-clear').onclick = () => { if (!Board.S || !Board.S.used.length) return; commit(); Board.S.used = []; log('使用済みマークをすべて外す'); finishChange(); };
   $('#b-copylog').onclick = () => {
     if (!Board.S) return;
@@ -1051,4 +1048,74 @@ function setupRotateHint() {
 function unlockLandscape() {
   try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch { /* 固定していなければ何もしない */ }
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+}
+
+// ---------- ターン・フェイズの進行（一人回し。手動・自動処理の両方） ----------
+// PHASES（略号と短い名前）は duel.js で定義
+const PHASE_FULL = { DP: 'ドローフェイズ', SP: 'スタンバイフェイズ', M1: 'メインフェイズ1', BP: 'バトルフェイズ', M2: 'メインフェイズ2', EP: 'エンドフェイズ' };
+// エンジンのフェイズ番号 → 略号
+const enginePhase = n => (n === 1 ? 'DP' : n === 2 ? 'SP' : n === 4 ? 'M1' : n >= 8 && n <= 128 ? 'BP' : n === 256 ? 'M2' : n === 512 ? 'EP' : '');
+
+function renderPhaseBar() {
+  const bar = $('#phase-bar');
+  if (!bar) return;
+  const S = Board.S;
+  const dueling = typeof Duel !== 'undefined' && Duel.active;
+  bar.hidden = !S || dueling;
+  if (bar.hidden) return;
+  bar.innerHTML = '';
+  let turn, mine = true, cur, can = {}, endOk, endLabel = 'ターン終了 ▶';
+  if (S.auto) {
+    const d = Auto.duel, p = d && d.pending;
+    if (!d) { bar.hidden = true; return; }
+    turn = d.turn; mine = d.turnPlayer === d.me; cur = enginePhase(d.phase);
+    const idle = p && p.type === MSG.SELECT_IDLECMD, battle = p && p.type === MSG.SELECT_BATTLECMD;
+    can = { BP: idle && p.to_bp, M2: battle && p.to_m2, EP: (idle || battle) && p.to_ep };
+    endOk = can.EP;
+    if (d.ended) { endOk = false; endLabel = '対戦終了'; }
+  } else {
+    turn = S.turn; cur = S.phase || 'M1';
+    const i = PHASES.findIndex(x => x[0] === cur);
+    const noBattle = S.turn === 1;   // 先攻の最初のターンはバトルフェイズに入れない
+    can = { BP: cur === 'M1' && !noBattle, M2: cur === 'BP', EP: i >= 2 && cur !== 'EP' };
+    endOk = true;
+  }
+  const curIdx = PHASES.findIndex(x => x[0] === cur);
+  bar.append(el('span', { class: 'ph-turn' + (mine ? '' : ' opp'), text: `T${turn} ${mine ? '自分' : '相手'}のターン` }));
+  const chips = el('div', { class: 'ph-chips' });
+  PHASES.forEach(([k, label], i) => {
+    chips.append(el('button', {
+      class: 'ph-chip' + (k === cur ? ' on' : '') + (i < curIdx ? ' past' : ''),
+      title: PHASE_FULL[k] + (can[k] ? '　へ進む' : ''),
+      disabled: !can[k] || !mine,
+      onclick: () => goPhase(k),
+    }, el('b', { text: k }), el('small', { text: label })));
+  });
+  bar.append(chips, el('button', { class: 'btn small primary ph-end', text: endLabel, disabled: !endOk || !mine, onclick: endTurn }));
+}
+
+function goPhase(k) {
+  const S = Board.S;
+  if (!S) return;
+  if (S.auto) { autoPhase(k === 'EP' ? 'ep' : 'bp'); return; }
+  commit();
+  S.phase = k;
+  log(`${PHASE_FULL[k]}へ`);
+  finishChange();
+}
+
+function endTurn() {
+  const S = Board.S;
+  if (!S) return;
+  if (S.auto) { autoPhase('ep'); return; }
+  // 手動：相手のターンは飛ばして、自分の次のターンのドローフェイズ → メインフェイズ1 まで進める
+  commit();
+  S.turn += 2; S.ns = false; S.used = []; S.phase = 'M1';
+  log('---- 自分のターン（相手のターンは飛ばします） ----');
+  if (S.deck.length) {
+    const inst = S.deck.shift(); inst.faceUp = true; S.hand.push(inst);
+    log(`ドローフェイズ：${cardOf(inst).name} をドロー`, 'ドローフェイズ：1枚ドロー');
+  } else log('ドローフェイズ：デッキがないのでドローできません');
+  log('メインフェイズ1へ');
+  finishChange();
 }

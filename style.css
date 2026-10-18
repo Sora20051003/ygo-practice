@@ -905,3 +905,31 @@ body.land .ap-sheet { max-height: calc(var(--lh) * 0.6); width: min(980px, var(-
 body.land .ap-grid, body.land .pile-list, body.land .review-list, body.land .imgdeck-grid { max-height: calc(var(--lh) * 0.5); }
 body.land .pause-back { padding: 6px; align-items: center; }
 body.land .pause-box { height: auto; max-height: calc(var(--lh) - 12px); padding: 8px 12px; border-radius: 12px; }
+
+/* ターン・フェイズの帯 */
+.phase-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); flex-wrap: wrap; }
+.ph-turn { font-weight: 700; font-size: 13px; white-space: nowrap; color: var(--accent); }
+.ph-turn.opp { color: #ff5a5a; }
+.ph-chips { display: flex; gap: 3px; flex: 1; min-width: 0; }
+.ph-chip { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; line-height: 1.1; padding: 3px 2px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer; }
+.ph-chip b { font-size: 12px; }
+.ph-chip small { font-size: 9px; opacity: .75; white-space: nowrap; }
+.ph-chip:disabled { cursor: default; opacity: .45; }
+.ph-chip.past { opacity: .3; }
+.ph-chip.on { opacity: 1; background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.ph-chip:not(:disabled):not(.on):hover { border-color: var(--accent); }
+.ph-end { white-space: nowrap; }
+@media (max-width: 720px) {
+  .phase-bar { padding: 4px 6px; gap: 5px; }
+  .ph-turn { font-size: 12px; }
+  .ph-chip small { display: none; }
+  .ph-chip { padding: 5px 0; }
+}
+body.land #view-board .phase-bar { padding: 2px 6px; gap: 5px; border-radius: 6px; flex-wrap: nowrap; }
+body.land #view-board .ph-turn { font-size: 11px; }
+body.land #view-board .ph-chip { padding: 1px 0; }
+body.land #view-board .ph-chip small { display: none; }
+body.land #view-board .ph-chip b { font-size: 11px; }
+body.land #view-board .ph-end { padding: 2px 8px; font-size: 11px; }
+body.land #view-board .board-center { --cw: min(calc((var(--lh) - 140px) / 4 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
+body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 172px) / 6 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
