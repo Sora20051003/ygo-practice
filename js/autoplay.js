@@ -65,12 +65,19 @@ function autoActions(inst) {
   const add = (list, label, action, kind) => list.forEach((c, index) => {
     if (same(c)) out.push({ label: typeof label === 'function' ? label(c) : label, kind, res: { type: p.type === MSG.SELECT_BATTLECMD ? RES.SELECT_BATTLECMD : RES.SELECT_IDLECMD, action, index } });
   });
-  const actLabel = c => '発動：' + (descText(c.description) || '効果を発動');
+  const actLabel = c => { const t = descText(c.description); return t && !/^発動$/.test(t) ? `効果を発動：${t}` : '効果を発動'; };
   if (p.type === MSG.SELECT_IDLECMD) {
     add(p.activates, actLabel, IDLE.ACTIVATE, 'y');
-    add(p.summons, '通常召喚', IDLE.SUMMON, 'b');
+    // 通常召喚とセットは「召喚する」1つにまとめ、押したあとに表示形式を聞く
+    const res = (action, list) => { const i = list.findIndex(same); return i < 0 ? null : { type: RES.SELECT_IDLECMD, action, index: i }; };
+    const ns = res(IDLE.SUMMON, p.summons), mset = res(IDLE.MSET, p.monster_sets);
+    if (ns || mset) {
+      out.push({ label: '召喚する', kind: 'b', name: cardOf(inst).name, choose: [
+        ns && { label: '表側攻撃表示で召喚', res: ns },
+        mset && { label: 'セット（裏側守備表示）', res: mset },
+      ].filter(Boolean) });
+    }
     add(p.special_summons, summonLabel, IDLE.SPSUMMON, 'b');
-    add(p.monster_sets, '裏守備でセット', IDLE.MSET);
     add(p.spell_sets, 'セットする', IDLE.SSET);
     add(p.pos_changes, '表示形式を変更', IDLE.REPOS);
   } else if (p.type === MSG.SELECT_BATTLECMD) {
@@ -100,7 +107,7 @@ function autoMenuItems(uid) {
   const inst = loc.inst;
   const items = [{ head: cardOf(inst).name }];
   const acts = autoActions(inst);
-  for (const a of acts) items.push({ label: a.label, onClick: () => autoRespond(a.res) });
+  for (const a of acts) items.push({ label: a.label, onClick: () => runAction(a) });
   if (!acts.length) items.push({ label: Auto.duel && isPrompt(Auto.duel.pending) ? '先に選択画面で選んでください' : '今できる操作はありません', disabled: true, onClick: () => {} });
   return items;
 }
@@ -284,7 +291,12 @@ function setupAutoPlay() {
   Auto.anim = store.get('ygo.autoAnim', true);
   $('#ap-anim').checked = Auto.anim;
   $('#ap-anim').onchange = e => { Auto.anim = e.target.checked; store.set('ygo.autoAnim', Auto.anim); };
-  Auto.on = store.get('ygo.boardMode', 'manual') === 'auto';
+  // 「効果を自動処理」を標準にする（前に手動を使っていた人も1回だけ切り替える。左上でいつでも手動に戻せる）
+  if (!store.get('ygo.autoDefault1', false)) {
+    store.set('ygo.autoDefault1', true);
+    if (store.get('ygo.boardMode', 'auto') !== 'auto') { store.set('ygo.boardMode', 'auto'); setTimeout(() => toast('一人回しを「効果を自動処理」モードにしました（左上で「手動」に戻せます）'), 1500); }
+  }
+  Auto.on = store.get('ygo.boardMode', 'auto') === 'auto';
   if (Auto.on) { Auto.resumed = true; autoResume(); }
 }
 
@@ -324,7 +336,7 @@ function autoActionPopup(uid) {
   const acts = autoActions(loc.inst);
   if (!acts.length) return false;
   const box = el('div', { class: 'ap-actions', id: 'ap-actions' },
-    acts.map(a => el('button', { class: 'ap-act' + (a.kind ? ' k-' + a.kind : ''), text: a.label, onclick: e => { e.stopPropagation(); hideActionPopup(); autoRespond(a.res); } })),
+    acts.map(a => el('button', { class: 'ap-act' + (a.kind ? ' k-' + a.kind : ''), text: a.label, onclick: e => { e.stopPropagation(); hideActionPopup(); runAction(a); } })),
     isMobile() ? el('button', { class: 'ap-act k-info', text: '🔍 詳細', onclick: e => { e.stopPropagation(); hideActionPopup(); showBoardDetail(loc); } }) : null);
   document.body.append(box);
   const r = node.getBoundingClientRect(), b = box.getBoundingClientRect();
@@ -454,12 +466,12 @@ function promptTitle(p) {
 
 // 選択画面の共通の形
 // 選択は画面下の帯に出す（盤面は見えたまま。マスターデュエル風）
-function promptModal(body, buttons = []) {
+function promptModal(body, buttons = [], title) {
   closePromptModal();
   const p = Auto.duel.pending;
   const sheet = el('div', { class: 'ap-sheet', id: 'ap-sheet' },
     el('div', { class: 'ap-sheet-head' },
-      el('b', { text: promptTitle(p) }),
+      el('b', { text: title || promptTitle(p) }),
       el('button', { class: 'btn small', text: '盤面を見る', title: '左の「選択画面を開く」でまた出せます', onclick: () => closePromptModal() })),
     el('div', { class: 'ap-sheet-body' }, body),
     buttons.length ? el('div', { class: 'ap-sheet-foot' }, buttons.map(b =>
@@ -711,6 +723,16 @@ function autoRowButtons(inst, onDone) {
   if (!acts.length) return null;
   return el('div', { class: 'row-acts' }, acts.map(a => el('button', {
     class: 'ap-act small' + (a.kind ? ' k-' + a.kind : ''), text: a.label,
-    onclick: e => { e.stopPropagation(); onDone(); autoRespond(a.res); },
+    onclick: e => { e.stopPropagation(); onDone(); runAction(a); },
   })));
+}
+
+// 操作ボタンを押したとき。「召喚する」は表示形式（攻撃表示／セット）を聞いてから進める
+function runAction(a) {
+  if (!a.choose) { autoRespond(a.res); return; }
+
+  promptModal(el('div', { class: 'stack' }, el('p', { class: 'ap-question', text: '表示形式を選んでください' })), [
+    ...a.choose.map((c, i) => ({ label: c.label, primary: i === 0, onClick: () => { closePromptModal(); autoRespond(c.res); return false; } })),
+    { label: 'やめる', onClick: () => {} },
+  ], a.name ? `「${a.name}」を召喚する` : '召喚する');
 }
