@@ -51,10 +51,14 @@ function undo() {
   renderBoard();
 }
 function persist() {
+  // 対戦中は対戦用の盤面として別に保存する（一人回しの盤面を上書きしないように）
+  if (typeof Duel !== 'undefined' && Duel.active) { store.set('ygo.duel.board.' + Duel.code, { S: Board.S }); return; }
   store.set('ygo.board', { S: Board.S, initial: Board.initial, deckId: $('#b-deck').value });
 }
-function log(text) {
+// text：自分用のログ。pub：対戦相手に見せるログ（省略時は同じ。見えないカードの名前を伏せたいときに指定）
+function log(text, pub) {
   Board.S.log.push(`[T${Board.S.turn}] ${text}`);
+  (Board.S.plog || (Board.S.plog = [])).push(`[T${Board.S.turn}] ${pub ?? text}`);
 }
 
 // ---------- カードの場所を探す ----------
@@ -95,6 +99,7 @@ function moveCard(uid, dest, note) {
 
   commit();
   detach(loc);
+  const wasFaceUp = inst.faceUp;
   const fromLabel = loc.zone === 'mat' ? `${cardOf(loc.host).name}のX素材` : ZONE_LABEL[loc.zone];
   const wasOnField = FIELD_ZONES.includes(loc.zone);
 
@@ -141,7 +146,10 @@ function moveCard(uid, dest, note) {
     else state = inst.faceUp ? '表' : 'セット';
     toLabel += `${dest.idx + 1}（${state}）`;
   }
-  log(`${card.name}: ${fromLabel} → ${toLabel}${note ? '　' + note : ''}`);
+  // 対戦相手に見せるログでは、見えない所（手札・デッキ・裏向き）同士の移動はカード名を伏せる
+  const isPublicPlace = (zone, faceUp) => ['gy', 'mat'].includes(zone) || (['m', 'emz', 's', 'f', 'ban', 'extra'].includes(zone) && faceUp);
+  const pubName = inst.tokenCard || isPublicPlace(loc.zone, wasFaceUp) || isPublicPlace(dest.zone, inst.faceUp) ? card.name : 'カード';
+  log(`${card.name}: ${fromLabel} → ${toLabel}${note ? '　' + note : ''}`, `${pubName}: ${fromLabel} → ${toLabel}${note ? '　' + note : ''}`);
 
   // デッキから手札・場などへ持ってきたら（ドローや上から墓地送りを除く）シャッフル
   if (loc.zone === 'deck' && dest.zone !== 'deck' && !dest.noShuffle && $('#b-autoshuffle').checked) {
@@ -191,6 +199,7 @@ function requestPlace(uid, opts) {
   for (const z of opts.zones) {
     for (let i = 0; i < SLOTS[z]; i++) {
       if (opts.slotFilter && !opts.slotFilter(z, i)) continue;
+      if (z === 'emz' && !opts.attach && emzBlocked(i)) continue;   // 対戦相手が使っているEXモンスターゾーン
       const occupant = S[z][i];
       if (opts.attach ? (occupant && occupant.uid !== uid && isMonster(cardOf(occupant))) : !occupant) slots.push({ zone: z, idx: i });
     }
@@ -210,6 +219,9 @@ function requestPlace(uid, opts) {
 
 function closeAllModals() { [...openModals].forEach(close => close()); Board.onChange = null; }
 
+// EXモンスターゾーンは2人で共有。相手のEXモンスターゾーン(1-i)にカードがあれば、自分の i には置けない
+const emzBlocked = i => typeof Duel !== 'undefined' && Duel.active && Duel.opp && Duel.opp.emz && !!Duel.opp.emz[1 - i];
+
 // ---------- カードのメニュー ----------
 function cardMenuItems(uid) {
   const loc = locate(uid);
@@ -223,6 +235,12 @@ function cardMenuItems(uid) {
   const mZones = fromExtraType ? ['m', 'emz'] : ['m'];
   const add = (label, fn, cond = true) => { if (cond) items.push({ label, onClick: fn }); };
   const sep = () => { if (!items[items.length - 1].sep) items.push({ sep: true }); };
+
+  // 対戦中：手札・デッキ・裏向きのカードを相手に見せる（サーチしたカードの公開など）
+  if (typeof Duel !== 'undefined' && Duel.active && !inst.tokenCard && (['hand', 'deck', 'extra'].includes(z) || !inst.faceUp)) {
+    add('👁 相手に見せる（公開）', () => duelReveal(c, ZONE_LABEL[z]));
+    sep();
+  }
 
   if (!onField && z !== 'mat') {
     if (mon && !inst.tokenCard) {
@@ -402,7 +420,8 @@ function openMaterials(hostUid) {
 }
 
 // ---------- ゲーム開始 ----------
-function buildState(deck, handIds) {
+// handSize：引く枚数（省略時は画面の「先攻5枚／後攻6枚」）
+function buildState(deck, handIds, handSize) {
   const S = emptyState();
   for (const id of deck.main) if (DB.byId.has(id)) S.deck.push(newInst(S, id));
   for (const id of deck.extra) if (DB.byId.has(id)) { const i = newInst(S, id); i.faceUp = false; S.extra.push(i); }
@@ -415,7 +434,7 @@ function buildState(deck, handIds) {
     }
     S.log.push(`[T1] 初手を指定して開始：${S.hand.map(i => cardOf(i).name).join('、')}`);
   } else {
-    const n = +$('#b-handsize').value;
+    const n = handSize || +$('#b-handsize').value;
     for (let k = 0; k < n && S.deck.length; k++) { const inst = S.deck.shift(); inst.faceUp = true; S.hand.push(inst); }
     S.log.push(`[T1] ${n}枚引いて開始：${S.hand.map(i => cardOf(i).name).join('、')}`);
   }
@@ -588,6 +607,7 @@ function slotEl(zone, idx) {
     const loc = locate(uid);
     const c = cardOf(loc.inst);
     const fromField = FIELD_ZONES.includes(loc.zone);
+    if (zone === 'emz' && emzBlocked(idx)) { toast('相手が使っているEXモンスターゾーンです'); return; }
     // 手札から魔法・罠をゾーンへ → 表で発動扱い
     moveCard(uid, { zone, idx, faceUp: fromField ? undefined : true, pos: fromField ? undefined : 'atk' });
   });
@@ -645,8 +665,16 @@ function renderBoard() {
     return;
   }
   const blank = () => el('div', { class: 'zone blank' });
-  // 1段目：EXモンスターゾーン・除外
-  field.append(blank(), blank(), slotEl('emz', 0), blank(), slotEl('emz', 1), blank(), pileEl('ban'));
+  const dueling = typeof Duel !== 'undefined' && Duel.active;
+  field.classList.toggle('duel', dueling);
+  if (dueling) {
+    // 対戦中：上に相手の盤面（相手から見た向きなので左右が逆）、真ん中に共有のEXモンスターゾーン
+    renderOppRows(field);
+    field.append(oppPileEl('ban'), blank(), emzSharedEl(0), blank(), emzSharedEl(1), blank(), pileEl('ban'));
+  } else {
+    // 1段目：EXモンスターゾーン・除外
+    field.append(blank(), blank(), slotEl('emz', 0), blank(), slotEl('emz', 1), blank(), pileEl('ban'));
+  }
   // 2段目：フィールド・モンスター・墓地
   field.append(slotEl('f', 0));
   for (let i = 0; i < 5; i++) field.append(slotEl('m', i));
@@ -681,6 +709,9 @@ function renderBoard() {
   logEl.innerHTML = '';
   for (const line of S.log) logEl.append(el('li', { text: line }));
   logEl.scrollTop = logEl.scrollHeight;
+
+  // 対戦中なら、変わった盤面を相手に送る
+  if (dueling) duelAfterRender();
 }
 
 function refreshBoardDeckSelect() {

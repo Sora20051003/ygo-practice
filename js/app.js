@@ -3,8 +3,10 @@ function switchView(name) {
   for (const t of $$('.tab')) t.classList.toggle('active', t.dataset.view === name);
   $('#view-deck').hidden = name !== 'deck';
   $('#view-board').hidden = name !== 'board';
+  $('#view-duel').hidden = name !== 'duel';
   store.set('ygo.view', name);
   if (name === 'board') { refreshBoardDeckSelect(); renderBoard(); }
+  if (name === 'duel') renderDuelLobby();
 }
 
 // 新しい版が公開されたら知らせる（ネット版のみ。5分ごとと、画面に戻ってきたときに確認）
@@ -103,6 +105,7 @@ async function init() {
   renderDeck();
   renderResults();
   setupBoardView();
+  setupDuel();
   switchView(store.get('ygo.view', 'deck'));
   startRemoteSync(applyRemoteDecks);
   // カードデータ・禁止・制限リストの自動更新（アプリの更新なしで最新になる）

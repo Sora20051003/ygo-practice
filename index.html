@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>遊戯王 展開練習</title>
-<link rel="stylesheet" href="style.css?v=20261018-222221">
+<link rel="stylesheet" href="style.css?v=20261018-223440">
 </head>
 <body>
 <header class="topbar">
@@ -12,6 +12,7 @@
   <nav class="tabs">
     <button class="tab active" data-view="deck">デッキ作成</button>
     <button class="tab" data-view="board">一人回し</button>
+    <button class="tab" data-view="duel">対戦</button>
   </nav>
   <div class="data-status">
     <label class="style-pick"><span class="style-pick-label">カード表示</span> <select id="card-style"></select></label>
@@ -137,7 +138,30 @@
   <section id="view-board" class="view" hidden>
     <div class="board-layout">
       <div class="panel side-left">
-        <div class="ctrl-group">
+        <!-- 対戦中の操作パネル -->
+        <div id="duel-panel" class="duel-panel" hidden>
+          <div class="row between"><span class="muted small-note">部屋 <b id="dp-code"></b></span><button class="btn small" id="dp-leave">対戦を終える</button></div>
+          <div class="lp-box opp"><span id="dp-opp-name"></span><b id="dp-opp-lp">8000</b></div>
+          <div class="lp-box me"><span id="dp-my-name"></span><b id="dp-my-lp">8000</b></div>
+          <div class="row">
+            <button class="btn small" id="dp-my-minus">自分のLP −</button>
+            <button class="btn small" id="dp-my-plus">自分のLP ＋</button>
+          </div>
+          <button class="btn small danger" id="dp-damage">相手にダメージ</button>
+          <div id="dp-turn" class="dp-turn"></div>
+          <div class="row">
+            <button class="btn primary" id="dp-next">次のフェイズ ▶</button>
+            <button class="btn" id="dp-end">ターン終了</button>
+          </div>
+          <div class="row">
+            <button class="btn small" id="dp-coin">コイン</button>
+            <button class="btn small" id="dp-dice">サイコロ</button>
+            <button class="btn small danger" id="dp-surrender">降参</button>
+          </div>
+          <ol id="dp-feed" class="log dp-feed"></ol>
+          <div class="row chat-row"><input id="dp-chat" type="text" placeholder="チャット" maxlength="200"><button class="btn small" id="dp-send">送信</button></div>
+        </div>
+        <div class="ctrl-group solo-only">
           <label class="muted">デッキ</label>
           <select id="b-deck"></select>
           <div class="row">
@@ -177,6 +201,7 @@
 
       <div class="board-center">
         <div id="pick-banner" class="pick-banner" hidden></div>
+        <div id="opp-bar" class="opp-bar" hidden></div>
         <div class="field" id="field"></div>
         <div class="hand-wrap">
           <div class="hand-title">手札 <span id="hand-count">0</span>枚</div>
@@ -196,6 +221,11 @@
       <button id="mb-log">ログ</button>
       <button id="mb-ctrl">操作 ▾</button>
     </div>
+  </section>
+
+  <!-- ===== 対戦（ロビー） ===== -->
+  <section id="view-duel" class="view" hidden>
+    <div id="duel-lobby" class="duel-lobby"></div>
   </section>
 </main>
 
@@ -224,14 +254,15 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261018-222221"></script>
-<script src="js/consts.js?v=20261018-222221"></script>
-<script src="js/ui.js?v=20261018-222221"></script>
-<script src="js/data.js?v=20261018-222221"></script>
-<script src="js/firebase-config.js?v=20261018-222221"></script>
-<script src="js/auth.js?v=20261018-222221"></script>
-<script src="js/deck.js?v=20261018-222221"></script>
-<script src="js/board.js?v=20261018-222221"></script>
-<script src="js/app.js?v=20261018-222221"></script>
+<script src="js/version.js?v=20261018-223440"></script>
+<script src="js/consts.js?v=20261018-223440"></script>
+<script src="js/ui.js?v=20261018-223440"></script>
+<script src="js/data.js?v=20261018-223440"></script>
+<script src="js/firebase-config.js?v=20261018-223440"></script>
+<script src="js/auth.js?v=20261018-223440"></script>
+<script src="js/deck.js?v=20261018-223440"></script>
+<script src="js/board.js?v=20261018-223440"></script>
+<script src="js/duel.js?v=20261018-223440"></script>
+<script src="js/app.js?v=20261018-223440"></script>
 </body>
 </html>
