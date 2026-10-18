@@ -200,6 +200,38 @@ class AutoDuel {
     L.startDuel(this.h);
   }
 
+  // 試しに発動してみて、何か起きるか（効果が使える・サーチなどの処理がある）を調べる。
+  // 今の対戦をそのまま複製して試すので、本当の盤面は変わらない。index は今の SELECT_IDLECMD の activates の番号
+  probeActivate(index) {
+    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true });
+    try {
+      t.create();
+      t.run(this.history());
+      const p = t.pending;
+      if (!p || p.type !== MSG.SELECT_IDLECMD || !p.activates[index]) return true;   // うまく試せないときは止めない
+      const code = p.activates[index].code;
+      const stats = () => { const q = t.query(); return [0, 1].map(pl => q[pl].m.map(c => (c && c.code ? `${c.code}:${c.attack}:${c.defense}:${c.level}` : '-')).join(',')).join('|'); };
+      const before = stats();
+      t.probing = code; t.probeHits = 0; t.events = [];
+      t.respond({ type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index }, false, true);
+      t.run();
+      // ほかのカードが動いた（サーチ・特殊召喚など）／LPが変わった
+      if (t.events.some(e => (e.t === 'move' && e.code !== code) || (e.t === 'chain' && e.code !== code) || e.t === 'summon')) return true;
+      if (t.probeHits > 0) return true;
+      if (t.lp[0] !== this.lp[0] || t.lp[1] !== this.lp[1]) return true;
+      if (stats() !== before) return true;   // 攻撃力などが変わった（ずっと続く効果が働いた）
+      // 発動したあと、そのカードの効果がすぐ使える
+      const q = t.pending;
+      if (q && q.type === MSG.SELECT_IDLECMD && q.activates.some(a => a.code === code)) return true;
+      return false;
+    } catch (e) {
+      console.warn('試し発動に失敗', e);
+      return true;
+    } finally {
+      if (t.h) Engine.lib.destroyDuel(t.h);
+    }
+  }
+
   // 相手が最初に引く枚数（初手を指定したら、その分だけ減らす）
   oppDraw() { return Math.max(0, 5 - ((this.opp && this.opp.handIds) || []).length); }
 
@@ -222,6 +254,11 @@ class AutoDuel {
       // 自分が次の行動を選ぶ時点で、召喚したばかりのカードの記録は消す（誘発の機会は終わっている）
       if (ask.player === this.me && (ask.type === MSG.SELECT_IDLECMD || ask.type === MSG.SELECT_BATTLECMD)) this.justSummoned.clear();
       if (replay && replay.length) { const r = replay.shift(); this.respond(r.res, !r.user, true); continue; }
+      // 試し発動中（probeActivate）：自分の選択は自動で答え、意味のある選択が出たかを数える
+      if (this.probing && ask.player === this.me && ask.type !== MSG.SELECT_IDLECMD && ask.type !== MSG.SELECT_BATTLECMD) {
+        if (probeMeaningful(ask, this.probing)) this.probeHits++;
+        this.respond(probeAnswer(ask, this.me), true, true); continue;
+      }
       // 相手の番の入力と、聞くまでもない確認は自動で返す
       const auto = ask.player !== this.me ? (this.opp ? cpuAnswer(ask, this) : autoAnswer(ask)) : skippable(ask, this);
       if (auto) { this.respond(auto, true, true); continue; }
@@ -479,4 +516,26 @@ function isHandTrap(code) {
   }
   const c = DB.byId.get(code);
   return handTrapIds.has(code) || (c && c.alias && handTrapIds.has(c.alias));
+}
+
+// 試し発動の中で出た選択が「効果で何かを選ぶ」ものか（置く場所・表示形式・チェーン確認は数えない）
+function probeMeaningful(m, code) {
+  switch (m.type) {
+    case MSG.SELECT_CARD: case MSG.SELECT_UNSELECT_CARD: case MSG.SELECT_SUM: case MSG.SELECT_TRIBUTE:
+    case MSG.SELECT_YESNO: case MSG.SELECT_OPTION: case MSG.ANNOUNCE_CARD: case MSG.ANNOUNCE_NUMBER:
+    case MSG.ANNOUNCE_RACE: case MSG.ANNOUNCE_ATTRIB: case MSG.SELECT_COUNTER:
+      return true;
+    case MSG.SELECT_EFFECTYN: return m.code === code;
+    default: return false;
+  }
+}
+// 試し発動の中での自分の答え（できるだけ効果を使う方へ）
+function probeAnswer(m, me) {
+  switch (m.type) {
+    case MSG.SELECT_YESNO: return { type: RES.SELECT_YESNO, yes: true };
+    case MSG.SELECT_EFFECTYN: return { type: RES.SELECT_EFFECTYN, yes: true };
+    case MSG.SELECT_CHAIN: return { type: RES.SELECT_CHAIN, index: m.forced ? 0 : null };
+    case MSG.SELECT_PLACE: case MSG.SELECT_DISFIELD: return { type: m.type === MSG.SELECT_PLACE ? RES.SELECT_PLACE : RES.SELECT_DISFIELD, places: freePlaces(m.field_mask, me).slice(0, m.count) };
+    default: return autoAnswer(m);
+  }
 }

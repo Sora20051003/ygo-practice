@@ -67,7 +67,8 @@ function autoActions(inst) {
   });
   const actLabel = c => { const t = descText(c.description); return t && !/^発動$/.test(t) ? `効果を発動：${t}` : '効果を発動'; };
   if (p.type === MSG.SELECT_IDLECMD) {
-    add(p.activates, actLabel, IDLE.ACTIVATE, 'y');
+    // 発動しても何も起きない永続・フィールド魔法／永続罠は出さない（セットはできる）
+    add(p.activates.map((c, i) => (Auto.useless && Auto.useless.has(i) ? { ...c, controller: -1 } : c)), actLabel, IDLE.ACTIVATE, 'y');
     // 通常召喚とセットは「召喚する」1つにまとめ、押したあとに表示形式を聞く
     const res = (action, list) => { const i = list.findIndex(same); return i < 0 ? null : { type: RES.SELECT_IDLECMD, action, index: i }; };
     const ns = res(IDLE.SUMMON, p.summons), mset = res(IDLE.MSET, p.monster_sets);
@@ -126,6 +127,7 @@ function autoAfter(noAnim) {
   const d = Auto.duel;
   if (d.retry) { toast('その選び方はできません。選び直してください'); d.retry = false; }
   autoSave();
+  findUseless(d);
   const events = d.events.splice(0);
   const anim = Auto.anim && !noAnim && events.length;
   const before = anim ? captureRects() : null;
@@ -798,4 +800,29 @@ function runAction(a) {
     ...a.choose.map((c, i) => ({ label: c.label, primary: i === 0, onClick: () => { closePromptModal(); autoRespond(c.res); return false; } })),
     { label: 'やめる', onClick: () => {} },
   ], a.name ? `「${a.name}」を召喚する` : '召喚する');
+}
+
+// 発動しても何も起きない永続魔法・フィールド魔法・永続罠を調べる（試し発動して確かめる）
+function findUseless(d) {
+  Auto.useless = new Set();
+  const p = d.pending;
+  if (!p || p.type !== MSG.SELECT_IDLECMD || p.player !== d.me || !p.activates.length) return;
+  let field = null;
+  p.activates.forEach((a, i) => {
+    const c = DB.byId.get(a.code);
+    if (!c) return;
+    const lasting = (has(c, T.SPELL) && (has(c, T.CONTINUOUS) || has(c, T.FIELD))) || (has(c, T.TRAP) && has(c, T.CONTINUOUS));
+    if (!lasting) return;   // 通常・速攻魔法、通常・カウンター罠は、発動できるかどうかをエンジンが効果の条件まで見て決めている
+    // カード自体の発動か（手札、または裏側でセットされている）
+    if (a.location !== LOC.HAND) {
+      if (!(a.location & (LOC.SZONE | LOC.FZONE))) return;
+      field = field || d.query()[d.me];
+      const s = field.s[a.location === LOC.FZONE ? 5 : a.sequence];
+      if (!s || s.position & 5) return;   // 表側のカードの効果はエンジンが条件を見ている
+    }
+    // 「発動できる」効果や発動時の処理が無いカード（ずっと効果が続くだけのカード）は、発動に意味があるので止めない
+    const text = c.jaText || '';
+    if (!/発動できる|発動時の効果処理|発動時に/.test(text)) return;
+    if (!d.probeActivate(i)) Auto.useless.add(i);
+  });
 }
