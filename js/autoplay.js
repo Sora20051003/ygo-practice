@@ -529,10 +529,10 @@ function boardPickable(cards, grid, chosen) {
   renderBoard();
 }
 
-function yesNo(text, onAnswer, card) {
-  promptModal(el('div', { class: 'stack' }, card ? promptCard(card) : null, el('p', { text })), [
-    { label: 'はい', primary: true, onClick: () => { onAnswer(true); return false; } },
-    { label: 'いいえ', onClick: () => { onAnswer(false); return false; } },
+function yesNo(text, onAnswer, card, labels = ['はい', 'いいえ'], note) {
+  promptModal(el('div', { class: 'stack' }, card ? promptCard(card) : null, el('p', { class: 'ap-question', text }), note ? el('p', { class: 'muted', text: note }) : null), [
+    { label: labels[0], primary: true, onClick: () => { onAnswer(true); return false; } },
+    { label: labels[1], onClick: () => { onAnswer(false); return false; } },
   ]);
 }
 
@@ -576,11 +576,20 @@ function openPrompt() {
       break;
     }
     case MSG.SELECT_EFFECTYN:
-      yesNo(descText(p.description) || 'この効果を発動しますか？', yes => answer({ type: RES.SELECT_EFFECTYN, yes }), p);
+    {
+      // 発動するかどうかを聞く（「特殊召喚する」などは効果の中身として下に小さく出す）
+      const what = descText(p.description);
+      yesNo(`「${cardName(p.code)}」の効果を発動しますか？`, yes => answer({ type: RES.SELECT_EFFECTYN, yes }), p,
+        ['発動する', '発動しない'], what && !/発動/.test(what) ? `発動する効果：${what}` : null);
       break;
-    case MSG.SELECT_YESNO:
-      yesNo(descText(p.description) || 'はい／いいえ', yes => answer({ type: RES.SELECT_YESNO, yes }));
+    }
+    case MSG.SELECT_YESNO: {
+      // 効果の処理の途中で「〜できる」部分を行うかどうか
+      const code = Number(BigInt(p.description || 0) >> 20n);
+      yesNo(descText(p.description) || 'はい／いいえ', yes => answer({ type: RES.SELECT_YESNO, yes }), null, ['はい', 'いいえ'],
+        code ? `「${cardName(code)}」の効果の処理の途中です（効果の中の「〜できる」部分を行うかどうか）` : null);
       break;
+    }
     case MSG.SELECT_OPTION:
       promptModal(el('div', { class: 'stack' }, p.options.map((o, i) =>
         el('button', { class: 'btn full', text: descText(o) || `選択肢${i + 1}`, onclick: () => answer({ type: RES.SELECT_OPTION, index: i }) }))));
