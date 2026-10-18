@@ -123,6 +123,8 @@ function autoRespond(res) {
   const d = Auto.duel;
   if (!d) return;
   Auto.redoLog = null;   // 新しい手を選んだら「1手進む」はできなくなる
+  // EXデッキなどから特殊召喚するカード（リンク素材の数え方を聞くときに使う）
+  if (res.type === RES.SELECT_IDLECMD && res.action === IDLE.SPSUMMON && d.pending && d.pending.special_summons) { const c = d.pending.special_summons[res.index]; Auto.spTarget = c ? c.code : 0; }
   try { d.respond(res); } catch (e) { console.error(e); toast('処理中にエラーが起きました：' + e.message); }
   autoAfter();
 }
@@ -754,8 +756,9 @@ function openPrompt() {
         onDone: idx => {
           closePromptModal();
           if (!idx.length) { autoRespond({ type: RES.SELECT_UNSELECT_CARD, index: null }); return; }
-          Auto.selQueue = idx.map(i => p.select_cards[i]);
-          openPrompt();
+          const go = () => { Auto.selQueue = idx.map(i => p.select_cards[i]); openPrompt(); };
+          // リンク素材：リンク2以上のモンスターを「1」と「そのリンク数」のどちらとしても数えられるときは、どちらにするか聞く
+          if (hintNo === 533) askLinkCounts(Auto.spTarget, idx.map(i => p.select_cards[i]), go); else go();
         },
         onCancel: () => { closePromptModal(); Auto.selQueue = null; autoRespond({ type: RES.SELECT_UNSELECT_CARD, index: null }); },
       });
@@ -1024,3 +1027,48 @@ function fitSheet(sheet = $('#ap-sheet')) {
   }
 }
 addEventListener('resize', () => fitSheet());
+
+// ---------- リンク素材の数え方 ----------
+// リンク2以上のリンクモンスターは、リンク素材として「1体」か「そのリンク数」のどちらとしても数えられる。
+// 選んだ素材で、どちらで数えても出せる（合計がリンク先のリンク数になる）モンスターがあるときだけ聞く。
+// どちらか一方でしか出せないときは聞かない。エンジンは成り立つ数え方を自動で使うので、答えは記録（ログ）に残す
+function askLinkCounts(targetCode, mats, done) {
+  const target = DB.byId.get(targetCode);
+  if (!target || !has(target, T.LINK)) { done(); return; }
+  const need = target.level;   // リンク数
+  const rating = m => { const c = DB.byId.get(m.code); return c && has(c, T.LINK) ? c.level : 1; };
+  const vals = mats.map(rating);
+  // i 番目を v として数えたとき、ほかの素材の数え方を選んで合計 need にできるか
+  const possible = (fixed) => {
+    let sums = new Set([0]);
+    vals.forEach((k, j) => {
+      const opts = fixed.has(j) ? [fixed.get(j)] : k >= 2 ? [1, k] : [1];
+      const next = new Set();
+      for (const s of sums) for (const o of opts) if (s + o <= need) next.add(s + o);
+      sums = next;
+    });
+    return sums.has(need);
+  };
+  const decided = new Map();
+  let asked = false;
+  const ask = j => {
+    while (j < mats.length && !(vals[j] >= 2 && possible(new Map([...decided, [j, 1]])) && possible(new Map([...decided, [j, vals[j]]])))) {
+      // 片方しか成り立たないものは、成り立つ方に決めておく
+      if (vals[j] >= 2) decided.set(j, possible(new Map([...decided, [j, vals[j]]])) ? vals[j] : 1);
+      j++;
+    }
+    if (j >= mats.length) {
+      const lines = [...decided].filter(([k]) => vals[k] >= 2).map(([k, v]) => `${cardName(mats[k].code)}をリンク素材${v}体分として扱う`);
+      closePromptModal();
+      if (asked && lines.length && Auto.duel) { Auto.duel.addLog(`${target.name}のリンク召喚：${lines.join('、')}`); }
+      done(); return;
+    }
+    const name = cardName(mats[j].code), k = vals[j];
+    yesNo(`「${name}」（リンク${k}）を、リンク素材として何体分として扱いますか？`, yes => {
+      decided.set(j, yes ? k : 1); asked = true;
+      closePromptModal();
+      ask(j + 1);
+    }, mats[j], [`リンク${k}（${k}体分）として扱う`, '1体分として扱う'], `「${target.name}」（リンク${need}）のリンク召喚。リンク2以上のリンクモンスターは、1体分かそのリンク数分として数えられます`);
+  };
+  ask(0);
+}
