@@ -619,7 +619,7 @@ function promptCard(c, extra) {
 }
 
 // 複数枚から min〜max 枚を選ぶ
-function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note }) {
+function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note, link }) {
   const chosen = new Set();
   const grid = el('div', { class: 'ap-grid' });
   const info = el('p', { class: 'muted' });
@@ -641,7 +641,8 @@ function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note
   const refresh = () => {
     const names = [...chosen].map(i => cards[i] && cards[i].code ? cardName(cards[i].code) : '裏側のカード');
     info.textContent = (note ? note + '　' : '') + (min === max ? `${min}枚選んでください` : `${min}〜${max}枚選んでください`) + (names.length ? `（選択中：${names.join('、')}）` : '（カードを押して選び、「決定」で確定します）');
-    ok.disabled = chosen.size < min || chosen.size > max;
+    ok.disabled = chosen.size < min || chosen.size > max || (link && !linkReach(link, cards, chosen, new Set()));
+    if (link) info.textContent += `　リンク素材の合計：${linkSum(link, cards, chosen)}／${link.need}`;
     for (const g of groups) {
       const n = tileOf.get(g), k = g.idx.filter(i => chosen.has(i)).length;
       n.classList.toggle('on', k > 0);
@@ -654,8 +655,12 @@ function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note
   const press = g => {
     const sel = g.idx.filter(i => chosen.has(i)), free = g.idx.filter(i => !chosen.has(i));
     if (max === 1) { const had = sel.length > 0; chosen.clear(); if (!had) chosen.add(g.idx[0]); refresh(); return; }
-    if (free.length && chosen.size < max) chosen.add(free[0]);
-    else sel.forEach(i => chosen.delete(i));
+    if (free.length && chosen.size < max) {
+      const i = free[0];
+      // リンク素材：リンク2以上のモンスターを選んだとき、「1体分」と「リンク数分」のどちらでも出せる見込みがあれば聞く
+      if (link) { linkChoose(link, cards, chosen, i, () => { chosen.add(i); refresh(); }); return; }
+      chosen.add(i);
+    } else sel.forEach(i => { chosen.delete(i); if (link) link.count.delete(i); });
     refresh();
   };
   // 選べるカードの場所が分かれているときは、場所ごとに見出しを付けて分ける（場・手札・墓地・除外・デッキ…）
@@ -750,15 +755,20 @@ function openPrompt() {
       const hintNo = Number(BigInt(d.hint || 0) & 0xfffffn), hintCard = Number(BigInt(d.hint || 0) >> 20n);
       const multi = !hintCard && [511, 512, 513, 533].includes(hintNo);   // 511融合 512シンクロ 513エクシーズ 533リンク素材
       const note = done ? `選んだカード：${p.unselect_cards.map(c => cardName(c.code)).join('、')}。続けて選んでください` : '';
+      // リンク素材：リンク先のリンク数が分かれば、素材の数え方を選びながら合計を合わせる
+      const tgt = hintNo === 533 && DB.byId.get(Auto.spTarget);
+      const link = tgt && has(tgt, T.LINK) ? { need: tgt.level, name: tgt.name, count: new Map(), asked: new Map(), base: p.unselect_cards } : null;
       chooseCards(p.select_cards, {
         // 素材を選ぶとき（リンク・シンクロ・エクシーズ・融合）は、エンジンが1枚ずつ聞いてきても画面ではまとめて選べるようにする
         min: p.can_finish ? 0 : 1, max: multi ? p.select_cards.length : Math.max(p.max - done, 1), canCancel: p.can_cancel || p.can_finish, note: note || (multi ? '素材にするカードをすべて選んで「決定」を押してください' : ''),
+        link,
         onDone: idx => {
           closePromptModal();
           if (!idx.length) { autoRespond({ type: RES.SELECT_UNSELECT_CARD, index: null }); return; }
-          const go = () => { Auto.selQueue = idx.map(i => p.select_cards[i]); openPrompt(); };
-          // リンク素材：リンク2以上のモンスターを「1」と「そのリンク数」のどちらとしても数えられるときは、どちらにするか聞く
-          if (hintNo === 533) askLinkCounts(Auto.spTarget, idx.map(i => p.select_cards[i]), go); else go();
+          // 聞いて決めた数え方はログに残す（エンジンは成り立つ数え方で処理する）
+          if (link && link.asked.size) d.addLog(`${link.name}のリンク召喚：` + [...link.asked].filter(([i]) => idx.includes(i)).map(([i, v]) => `${cardName(p.select_cards[i].code)}をリンク素材${v}体分として扱う`).join('、'));
+          Auto.selQueue = idx.map(i => p.select_cards[i]);
+          openPrompt();
         },
         onCancel: () => { closePromptModal(); Auto.selQueue = null; autoRespond({ type: RES.SELECT_UNSELECT_CARD, index: null }); },
       });
@@ -1028,47 +1038,55 @@ function fitSheet(sheet = $('#ap-sheet')) {
 }
 addEventListener('resize', () => fitSheet());
 
-// ---------- リンク素材の数え方 ----------
-// リンク2以上のリンクモンスターは、リンク素材として「1体」か「そのリンク数」のどちらとしても数えられる。
-// 選んだ素材で、どちらで数えても出せる（合計がリンク先のリンク数になる）モンスターがあるときだけ聞く。
-// どちらか一方でしか出せないときは聞かない。エンジンは成り立つ数え方を自動で使うので、答えは記録（ログ）に残す
-function askLinkCounts(targetCode, mats, done) {
-  const target = DB.byId.get(targetCode);
-  if (!target || !has(target, T.LINK)) { done(); return; }
-  const need = target.level;   // リンク数
-  const rating = m => { const c = DB.byId.get(m.code); return c && has(c, T.LINK) ? c.level : 1; };
-  const vals = mats.map(rating);
-  // i 番目を v として数えたとき、ほかの素材の数え方を選んで合計 need にできるか
-  const possible = (fixed) => {
-    let sums = new Set([0]);
-    vals.forEach((k, j) => {
-      const opts = fixed.has(j) ? [fixed.get(j)] : k >= 2 ? [1, k] : [1];
-      const next = new Set();
-      for (const s of sums) for (const o of opts) if (s + o <= need) next.add(s + o);
-      sums = next;
-    });
-    return sums.has(need);
+
+// ---------- リンク素材を選ぶとき（マスターデュエル風）----------
+// link = { need: リンク先のリンク数, count: Map(番号 → 何体分として扱うか), base: すでに選び済みのカード }
+const linkRatingOf = c => { const d = c && DB.byId.get(c.code); return d && has(d, T.LINK) ? d.level : 1; };
+function linkOpts(link, cards, i) {
+  if (link.count.has(i)) return [link.count.get(i)];
+  const r = linkRatingOf(cards[i]);
+  return r >= 2 ? [1, r] : [1];
+}
+// 選んだカード（必ず使う）＋ optional（使っても使わなくてもよい）で、合計をちょうど need にできるか
+function linkReach(link, cards, chosen, optional, fixed) {
+  let sums = new Set([0]);
+  const step = (opts, mayskip) => {
+    const next = new Set(mayskip ? sums : []);
+    for (const s of sums) for (const o of opts) if (s + o <= link.need) next.add(s + o);
+    sums = next;
   };
-  const decided = new Map();
-  let asked = false;
-  const ask = j => {
-    while (j < mats.length && !(vals[j] >= 2 && possible(new Map([...decided, [j, 1]])) && possible(new Map([...decided, [j, vals[j]]])))) {
-      // 片方しか成り立たないものは、成り立つ方に決めておく
-      if (vals[j] >= 2) decided.set(j, possible(new Map([...decided, [j, vals[j]]])) ? vals[j] : 1);
-      j++;
-    }
-    if (j >= mats.length) {
-      const lines = [...decided].filter(([k]) => vals[k] >= 2).map(([k, v]) => `${cardName(mats[k].code)}をリンク素材${v}体分として扱う`);
-      closePromptModal();
-      if (asked && lines.length && Auto.duel) { Auto.duel.addLog(`${target.name}のリンク召喚：${lines.join('、')}`); }
-      done(); return;
-    }
-    const name = cardName(mats[j].code), k = vals[j];
-    yesNo(`「${name}」（リンク${k}）を、リンク素材として何体分として扱いますか？`, yes => {
-      decided.set(j, yes ? k : 1); asked = true;
-      closePromptModal();
-      ask(j + 1);
-    }, mats[j], [`リンク${k}（${k}体分）として扱う`, '1体分として扱う'], `「${target.name}」（リンク${need}）のリンク召喚。リンク2以上のリンクモンスターは、1体分かそのリンク数分として数えられます`);
-  };
-  ask(0);
+  for (const c of link.base || []) step(linkRatingOf(c) >= 2 ? [1, linkRatingOf(c)] : [1], false);
+  for (const i of chosen) step(linkOpts(link, cards, i), false);
+  if (fixed) step([fixed.v], false);
+  for (const i of optional) step(linkOpts(link, cards, i), true);
+  return sums.has(link.need);
+}
+function linkSum(link, cards, chosen) {
+  let s = (link.base || []).length;
+  for (const i of chosen) s += link.count.has(i) ? link.count.get(i) : 1;
+  return s;
+}
+// i 番目のカードを素材に加えるとき：リンク2以上なら、どちらで数えても出せる見込みがあるときだけ聞く
+function linkChoose(link, cards, chosen, i, add) {
+  const r = linkRatingOf(cards[i]);
+  if (r < 2) { add(); return; }
+  const others = cards.map((c, k) => k).filter(k => k !== i && !chosen.has(k));
+  const as1 = linkReach(link, cards, chosen, others, { v: 1 });
+  const asR = linkReach(link, cards, chosen, others, { v: r });
+  if (!(as1 && asR)) { link.count.set(i, asR || !as1 ? r : 1); add(); return; }
+  const name = cardName(cards[i].code);
+  const close = showModal({
+    title: 'リンク素材の数え方',
+    body: el('div', { class: 'stack' },
+      el('p', { class: 'ap-question', text: `「${name}」（リンク${r}）を、リンク${r}として扱いますか？` }),
+      el('p', { class: 'muted', text: `「${link.name}」（リンク${link.need}）のリンク召喚です。リンク2以上のリンクモンスターは、1体分か、そのリンク数分として数えられます。` })),
+    buttons: [
+      { label: `リンク${r}として扱う（${r}体分）`, primary: true, onClick: () => { link.count.set(i, r); link.asked.set(i, r); add(); } },
+      { label: '1体分として扱う', onClick: () => { link.count.set(i, 1); link.asked.set(i, 1); add(); } },
+    ],
+  });
+  // 選択の帯より手前に出す
+  const backs = $$('#modal-root .modal-back');
+  if (backs.length) backs[backs.length - 1].style.zIndex = 70;
+  return close;
 }
