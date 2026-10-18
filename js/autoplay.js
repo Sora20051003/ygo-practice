@@ -446,10 +446,10 @@ function autoActionPopup(uid) {
     acts.map(a => el('button', { class: 'ap-act' + (a.kind ? ' k-' + a.kind : ''), text: a.label, onclick: e => { e.stopPropagation(); hideActionPopup(); runAction(a); } })),
     isMobile() ? el('button', { class: 'ap-act k-info', text: '🔍 詳細', onclick: e => { e.stopPropagation(); hideActionPopup(); showBoardDetail(loc); } }) : null);
   document.body.append(box);
-  const r = node.getBoundingClientRect(), b = box.getBoundingClientRect();
+  const r = localRect(node.getBoundingClientRect()), b = { width: box.offsetWidth, height: box.offsetHeight };
   let left = r.left + r.width / 2 - b.width / 2, top = r.top - b.height - 6;
   if (top < 4) top = r.bottom + 6;
-  left = Math.max(4, Math.min(left, innerWidth - b.width - 4));
+  left = Math.max(4, Math.min(left, viewW() - b.width - 4));
   box.style.left = left + 'px'; box.style.top = top + 'px';
   setTimeout(() => document.addEventListener('pointerdown', onOutsideAction, true), 0);
   return true;
@@ -465,7 +465,7 @@ function hideActionPopup() {
 // 位置ごとの画面上の四角（動く前と後で比べる）
 function captureRects() {
   const me = Auto.duel.me, op = 1 - me, map = new Map();
-  const put = (k, n) => { if (n) map.set(k, n.getBoundingClientRect()); };
+  const put = (k, n) => { if (n) map.set(k, localRect(n.getBoundingClientRect())); };
   const L = { m: LOC.MZONE, emz: LOC.MZONE, s: LOC.SZONE, f: LOC.SZONE, gy: LOC.GRAVE, ban: LOC.REMOVED, extra: LOC.EXTRA, deck: LOC.DECK };
   const seqOf = (z, i) => (z === 'emz' ? 5 + i : z === 'f' ? 5 : i);
   $$('#field .slot[data-zone]').forEach(n => put(`${me}-${L[n.dataset.zone]}-${seqOf(n.dataset.zone, +n.dataset.idx)}`, n));

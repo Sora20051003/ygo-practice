@@ -77,6 +77,16 @@ function promptText(title, initial, onOk) {
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && submit() !== false) close(); });
 }
 
+// ページを90度回して横画面にしているとき（スマホを縦持ち）、画面上の位置をページの中の位置に直す
+const Rot = { on: false };
+const viewW = () => (Rot.on ? innerHeight : innerWidth);
+const viewH = () => (Rot.on ? innerWidth : innerHeight);
+function screenToLocal(x, y) { return Rot.on ? { x: y, y: innerWidth - x } : { x, y }; }
+function localRect(r) {
+  if (!Rot.on) return r;
+  return { left: r.top, top: innerWidth - r.right, width: r.height, height: r.width, right: r.bottom, bottom: innerWidth - r.left };
+}
+
 // 右クリック風メニュー。items: {label, onClick, disabled} / {sep:true} / {head:'見出し'}
 function showMenu(x, y, items) {
   const m = $('#menu');
@@ -90,10 +100,11 @@ function showMenu(x, y, items) {
     }));
   }
   m.hidden = false;
-  const r = m.getBoundingClientRect();
-  const vw = window.innerWidth, vh = window.innerHeight;
-  m.style.left = Math.max(4, Math.min(x, vw - r.width - 4)) + 'px';
-  m.style.top = Math.max(4, Math.min(y, vh - r.height - 4)) + 'px';
+  ({ x, y } = screenToLocal(x, y));
+  const w = m.offsetWidth, h = m.offsetHeight;
+  const vw = viewW(), vh = viewH();
+  m.style.left = Math.max(4, Math.min(x, vw - w - 4)) + 'px';
+  m.style.top = Math.max(4, Math.min(y, vh - h - 4)) + 'px';
 }
 function hideMenu() { $('#menu').hidden = true; }
 document.addEventListener('mousedown', e => { if (!e.target.closest('#menu')) hideMenu(); });
@@ -363,7 +374,7 @@ function detailImage(c) {
 }
 
 // スマホ幅かどうか（CSSの切り替えと同じ幅）
-const isMobile = () => window.matchMedia('(max-width: 720px)').matches;
+const isMobile = () => !document.body.classList.contains('land') && window.matchMedia('(max-width: 720px)').matches;
 
 // カードの詳細を出す。パソコンは右の欄、スマホは画面下から出る窓
 function showCardDetail(c, panelSel, extra) {

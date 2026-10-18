@@ -845,55 +845,63 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
 #b-timelimit { width: 100%; }
 
 /* ---------- スマホ横向き：一人回しを横画面の配置にする ---------- */
-.rotate-hint { display: none; }
-@media (max-width: 720px) and (orientation: portrait) {
-  body[data-view="board"] .rotate-hint:not([hidden]) {
-    display: flex; align-items: center; gap: 8px; margin: 8px 16px 0; padding: 8px 10px; font-size: 13px;
-    border: 1px solid var(--accent); border-radius: 9px; background: var(--panel-2);
-  }
-  .rotate-hint span { flex: 1; }
+body.land { height: var(--lh); overflow: hidden; }
+body.land .topbar { padding: 3px 10px; gap: 8px; flex-wrap: nowrap; }
+body.land .topbar h1 { font-size: 13px; white-space: nowrap; }
+body.land .tab { padding: 3px 9px; font-size: 13px; }
+body.land .data-status { display: none; }
+body.land main { min-height: 0; }
+body.land #view-board { height: 100%; }
+body.land #view-board .board-layout {
+  grid-template-columns: 150px minmax(0, 1fr) 190px; gap: 6px; padding: 6px calc(6px + env(safe-area-inset-right)) 6px calc(6px + env(safe-area-inset-left));
+  height: 100%; box-sizing: border-box;
 }
-@media (orientation: landscape) and (max-height: 520px) {
-  body[data-view="board"] { height: 100dvh; overflow: hidden; }
-  body[data-view="board"] .topbar { padding: 3px 10px; gap: 8px; flex-wrap: nowrap; }
-  body[data-view="board"] .topbar h1 { font-size: 13px; white-space: nowrap; }
-  body[data-view="board"] .tab { padding: 3px 9px; font-size: 13px; }
-  body[data-view="board"] .data-status { display: none; }
-  body[data-view="board"] main { min-height: 0; }
-  #view-board { height: 100%; }
-  #view-board .board-layout {
-    grid-template-columns: 150px minmax(0, 1fr) 190px; gap: 6px; padding: 6px calc(6px + env(safe-area-inset-right)) 6px calc(6px + env(safe-area-inset-left));
-    height: 100%; box-sizing: border-box;
-  }
-  #view-board #board-detail { grid-column: auto; overflow-y: auto; padding: 8px; font-size: 12px; }
-  #view-board .side-left { gap: 6px; padding: 6px; font-size: 12px; }
-  #view-board .side-left .btn { padding: 5px 6px; font-size: 12px; }
-  #view-board .ctrl-group { gap: 4px; }
-  #view-board .ctrl-group.grow { min-height: 90px; }
-  #view-board .log { max-height: none; min-height: 60px; }
-  /* カードの大きさは画面の高さに合わせる（盤面3段＋手札1段。相手の段があるときは5段＋手札） */
-  #view-board .board-center {
-    --cw: min(calc((100dvh - 118px) / 4 / 1.5), calc((100vw - 400px) / 7.8));
-    overflow: hidden; gap: 4px;
-  }
-  #view-board .board-center:has(.field.duel) { --cw: min(calc((100dvh - 118px) / 6 / 1.5), calc((100vw - 400px) / 7.8)); }
-  #view-board .board-center { --ch: calc(var(--cw) * 1.46); }
-  #view-board .field { padding: 5px; gap: 3px; border-radius: 8px; }
-  #view-board .zone-label { display: none; }
-  #view-board .pile .zone-label { display: block; font-size: 8px; top: -10px; }
-  #view-board .hand-wrap { padding: 3px 8px; }
-  #view-board .hand-title { margin-bottom: 2px; font-size: 11px; }
-  #view-board .hand { flex-wrap: nowrap; overflow-x: auto; gap: 4px; min-height: calc(var(--ch) + 4px); }
-  #view-board .hand .bcard { width: var(--cw); flex: none; }
-  #view-board .board-timer { font-size: 12px; padding: 0 8px; }
-  #view-board .mobile-bar { display: none; }
-  #view-board .opp-bar { padding: 2px 8px; gap: 6px; font-size: 11px; min-height: 0; border-radius: 6px; }
-  #view-board .opp-bar img, #view-board .opp-bar .bcard, #view-board .opp-bar .cardface { max-height: 22px; width: auto; }
-  #view-board .lp-box { padding: 0 8px; border-width: 1px; }
-  #view-board .lp-box b { font-size: 13px; }
-  #view-board .lp-box small, #view-board .lp-box span { font-size: 10px; }
-  #view-board .board-center:has(.field.duel) { --cw: min(calc((100dvh - 150px) / 6 / 1.5), calc((100vw - 400px) / 7.8)); }
-  #view-board .hand .bcard { width: calc(var(--cw) * 1.25); }
-  #view-board .hand { min-height: calc(var(--ch) * 1.25 + 4px); }
-  #view-board .pile-count { font-size: 9px; padding: 0 3px; white-space: nowrap; top: -6px; right: -4px; }
+body.land #view-board #board-detail { grid-column: auto; overflow-y: auto; padding: 8px; font-size: 12px; }
+body.land #view-board .side-left { gap: 6px; padding: 6px; font-size: 12px; }
+body.land #view-board .side-left .btn { padding: 5px 6px; font-size: 12px; }
+body.land #view-board .ctrl-group { gap: 4px; }
+body.land #view-board .ctrl-group.grow { min-height: 90px; }
+body.land #view-board .log { max-height: none; min-height: 60px; }
+/* カードの大きさは画面の高さに合わせる（盤面3段＋手札1段。相手の段があるときは5段＋手札） */
+body.land #view-board .board-center {
+  --cw: min(calc((var(--lh) - 118px) / 4 / 1.5), calc((var(--lw) - 400px) / 7.8));
+  overflow: hidden; gap: 4px;
 }
+body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 118px) / 6 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
+body.land #view-board .board-center { --ch: calc(var(--cw) * 1.46); }
+body.land #view-board .field { padding: 5px; gap: 3px; border-radius: 8px; }
+body.land #view-board .zone-label { display: none; }
+body.land #view-board .pile .zone-label { display: block; font-size: 8px; top: -10px; }
+body.land #view-board .hand-wrap { padding: 3px 8px; }
+body.land #view-board .hand-title { margin-bottom: 2px; font-size: 11px; }
+body.land #view-board .hand { flex-wrap: nowrap; overflow-x: auto; gap: 4px; min-height: calc(var(--ch) + 4px); }
+body.land #view-board .hand .bcard { width: var(--cw); flex: none; }
+body.land #view-board .board-timer { font-size: 12px; padding: 0 8px; }
+body.land #view-board .mobile-bar { display: none; }
+body.land #view-board .opp-bar { padding: 2px 8px; gap: 6px; font-size: 11px; min-height: 0; border-radius: 6px; }
+body.land #view-board .opp-bar img, body.land #view-board .opp-bar .bcard, body.land #view-board .opp-bar .cardface { max-height: 22px; width: auto; }
+body.land #view-board .lp-box { padding: 0 8px; border-width: 1px; }
+body.land #view-board .lp-box b { font-size: 13px; }
+body.land #view-board .lp-box small, body.land #view-board .lp-box span { font-size: 10px; }
+body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 150px) / 6 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
+body.land #view-board .hand .bcard { width: calc(var(--cw) * 1.25); }
+body.land #view-board .hand { min-height: calc(var(--ch) * 1.25 + 4px); }
+body.land #view-board .pile-count { font-size: 9px; padding: 0 3px; white-space: nowrap; top: -6px; right: -4px; }
+/* スマホの縦画面用の決まりを打ち消す */
+body.land #view-board .board-center { order: 0; overflow: hidden; }
+body.land #view-board #board-detail { display: block; }
+body.land { display: flex; flex-direction: column; }
+/* 縦持ちのまま横画面にする（iPhone など向きを固定できない端末）：ページ全体を90度回す */
+body.land.rotated {
+  position: fixed; top: 0; left: 0; width: var(--lw); height: var(--lh);
+  transform-origin: 0 0; transform: translateX(var(--lh)) rotate(90deg);
+}
+/* 横画面では、窓やメニューの高さを横画面の高さに合わせる（回して表示しているときは vh が使えないため） */
+body.land .menu { max-height: calc(var(--lh) - 8px); overflow-y: auto; min-width: 180px; }
+body.land .menu-item { padding: 6px 10px; font-size: 13px; }
+body.land .modal, body.land .modal.wide { max-height: calc(var(--lh) - 12px); width: min(720px, calc(var(--lw) - 24px)); border-radius: 12px; }
+body.land .modal-back { align-items: center; padding: 6px; }
+body.land .ap-sheet { max-height: calc(var(--lh) * 0.6); width: min(980px, var(--lw)); }
+body.land .ap-grid, body.land .pile-list, body.land .review-list, body.land .imgdeck-grid { max-height: calc(var(--lh) * 0.5); }
+body.land .pause-back { padding: 6px; align-items: center; }
+body.land .pause-box { height: auto; max-height: calc(var(--lh) - 12px); padding: 8px 12px; border-radius: 12px; }

@@ -1019,21 +1019,34 @@ function timeUp() {
 }
 
 // ---------- スマホの横画面 ----------
-// 横向きにすると CSS で横画面の配置になる。縦のときは案内を出す（Android は全画面＋横向き固定もできる。iPhone は固定できない）
+// 一人回しはスマホでは常に横画面にする。
+//  ・端末が横向き：そのまま横画面の配置（CSS の body.land）
+//  ・端末が縦向き：Android は最初に触ったときに全画面＋横向き固定。固定できない端末（iPhone など）はページを90度回して表示（body.rotated）
+const isPhone = () => matchMedia('(pointer: coarse)').matches && Math.min(innerWidth, innerHeight) <= 520;
+function updateLandscape() {
+  const b = document.body;
+  const land = b.dataset.view === 'board' && isPhone();
+  const rotated = land && innerHeight > innerWidth;
+  b.classList.toggle('land', land);
+  b.classList.toggle('rotated', rotated);
+  Rot.on = rotated;
+  // 横画面として使える幅と高さ（回したときは入れ替わる）
+  b.style.setProperty('--lw', (rotated ? innerHeight : innerWidth) + 'px');
+  b.style.setProperty('--lh', (rotated ? innerWidth : innerHeight) + 'px');
+}
 function setupRotateHint() {
-  const hint = $('#rotate-hint');
-  if (store.get('ygo.rotateHintOff', false)) hint.hidden = true;
-  $('#rotate-close').onclick = () => { hint.hidden = true; store.set('ygo.rotateHintOff', true); };
+  addEventListener('resize', updateLandscape);
+  addEventListener('orientationchange', () => setTimeout(updateLandscape, 200));
+  updateLandscape();
+  // Android など：一人回しで縦のまま触ったら、全画面にして横向きに固定する（ボタンなどを押したときだけ許可される）
   const canLock = !!(document.documentElement.requestFullscreen && screen.orientation && screen.orientation.lock);
-  $('#rotate-lock').hidden = !canLock;
-  $('#rotate-lock').onclick = async () => {
-    try {
-      await document.documentElement.requestFullscreen();
-      await screen.orientation.lock('landscape');
-    } catch (e) {
-      toast('この端末では横向きに固定できませんでした。端末を横に回してください');
-    }
-  };
+  if (!canLock) return;
+  document.addEventListener('pointerdown', () => {
+    if (!document.body.classList.contains('rotated') || document.fullscreenElement) return;
+    document.documentElement.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => screen.orientation.lock('landscape'))
+      .catch(() => { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); });   // 固定できなければ回した表示のまま使う
+  }, true);
 }
 function unlockLandscape() {
   try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch { /* 固定していなければ何もしない */ }
