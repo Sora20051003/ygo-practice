@@ -559,10 +559,38 @@ function parseDeckText(text) {
   let sec = 'main';
   const isYdk = /^\s*#main/m.test(text);
   let last = null;   // 直前に読んだカード（次の行が枚数だけのとき用）
-  const add = (c, n, explicit) => {
-    const target = isExtraType(c) && sec === 'main' ? 'extra' : (!isExtraType(c) && sec === 'extra' ? 'main' : sec);
+  // secOverride：表の何列目かで決まる区分（左右2列のデッキ登録用紙など）
+  const add = (c, n, explicit, secOverride) => {
+    const s = secOverride || sec;
+    const target = isExtraType(c) && s === 'main' ? 'extra' : (!isExtraType(c) && s === 'extra' ? 'main' : s);
     for (let i = 0; i < Math.min(n, MAX_COPIES); i++) result[target].push(c.id);
     last = { c, target, explicit };
+  };
+  // 表の列ごとの区分（例：左の列はメイン、右の列はEX→サイド）
+  const colSec = [];
+  const countOf = s => { const m = (s || '').match(/^[×xX]?\s*([1-3])\s*枚?$/); return m ? +m[1] : 0; };
+  const secOf = s => (/side|サイド/i.test(s) ? 'side' : /extra|ＥＸ|^ex|エクストラ/i.test(s) ? 'extra' : /main|メイン|モンスター|魔法|罠/i.test(s) ? 'main' : null);
+  // 3つ以上に区切られた行（複数列の表）を、「枚数・カード名」の組ごとに左から読む。読めたら true
+  const parseColumns = cells => {
+    let col = 0, used = false;
+    for (let k = 0; k < cells.length; k++) {
+      const a = cells[k], b = cells[k + 1];
+      if (/^枚数$/.test(a) && b !== undefined) { const s = secOf(b); if (s) colSec[col] = s; col++; k++; used = true; continue; }
+      const cb = b !== undefined && countOf(a) ? findCardByName(b) : null;
+      if (cb) { add(cb, countOf(a), true, colSec[col]); col++; k++; used = true; continue; }
+      const ca = findCardByName(a);
+      if (ca) {
+        // カード名の後ろの列に枚数があれば使う（「カード名｜種類｜枚数」のように間に別の列があってもよい）
+        let j = k + 1;
+        while (j < cells.length && !countOf(cells[j]) && !findCardByName(cells[j])) j++;
+        if (j < cells.length && countOf(cells[j])) { add(ca, countOf(cells[j]), true, colSec[col]); k = j; }
+        else add(ca, 1, false, colSec[col]);
+        col++; used = true; continue;
+      }
+      const s = a.length <= 14 ? secOf(a) : null;
+      if (s) { colSec[col] = s; used = true; }
+    }
+    return used;
   };
   // 見出しなどの、カードではない行（公式データベースのページをコピーしたときに混ざるもの）
   const ignorable = l => /^(モンスター|魔法|罠|monster|spell|trap|カード名|枚数|合計|total|レアリティ|種類)/i.test(l) || /^[\d\s()（）枚:：/／-]+$/.test(l);
@@ -591,6 +619,10 @@ function parseDeckText(text) {
       if (DB.byId.has(id)) result[sec].push(id); else unknown.push(line);
       continue;
     }
+    // 複数列の表（PDFのデッキ登録用紙など）
+    const multi = line.split(/\t|\s{2,}|\s*[|｜]\s*/).map(s => s.trim()).filter(Boolean);
+    if (multi.length >= 3 && parseColumns(multi)) continue;
+
     // そのままカード名と一致する行（「デッキ破壊ウイルス」のように見出しと紛らわしい名前もあるので先に調べる）
     const exact = findCardByName(line);
     if (exact && normalizeText(line) === exact.nkey) { add(exact, 1, false); continue; }
@@ -622,6 +654,41 @@ function parseDeckText(text) {
   return { result, unknown };
 }
 
+// ---------- PDF から文字を取り出す（PDF.js を使う。使うときだけ読み込む） ----------
+// 文字の位置（高さ）が同じものを1行にまとめ、離れている文字の間にはタブを入れる（表の「枚数｜カード名」を分けるため）
+const PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+async function pdfToText(buf) {
+  if (typeof pdfjsLib === 'undefined') await loadScript(PDFJS_BASE + 'pdf.min.js');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js';
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+  const out = [];
+  for (let p = 1; p <= Math.min(pdf.numPages, 10); p++) {
+    const page = await pdf.getPage(p);
+    const { items } = await page.getTextContent();
+    const rows = [];
+    for (const it of items) {
+      if (!it.str || !it.str.trim()) continue;
+      const x = it.transform[4], y = it.transform[5], h = Math.abs(it.transform[3]) || 10;
+      let row = rows.find(r => Math.abs(r.y - y) < h * 0.5);
+      if (!row) rows.push(row = { y, h, parts: [] });
+      row.parts.push({ x, w: it.width || 0, s: it.str });
+    }
+    rows.sort((a, b) => b.y - a.y);   // 上の行から
+    for (const r of rows) {
+      r.parts.sort((a, b) => a.x - b.x);
+      let line = '', end = null;
+      for (const part of r.parts) {
+        if (end !== null) line += part.x - end > r.h * 0.8 ? '\t' : '';
+        line += part.s;
+        end = part.x + part.w;
+      }
+      // PDFによっては「穴」「生」などが部首の文字（⽳・⽣）で入っているので普通の漢字に直す
+      out.push(line.replace(/[⺀-⿟]/g, ch => ch.normalize('NFKC')).trim());
+    }
+  }
+  return out.join('\n');
+}
+
 function openImport() {
   const ta = el('textarea', { class: 'full', rows: 12, placeholder: '次のどれでも貼り付けられます\n・YDKファイルの中身\n・ydke:// で始まる文字列\n・公式カードデータベースのデッキページからコピーした文字\n・「灰流うらら ×3」のようなカード名の一覧' });
   const neuronHelp = el('details', { class: 'import-help' },
@@ -631,8 +698,27 @@ function openImport() {
       el('li', { text: 'パソコンのブラウザでそのデッキのページを開き、カード一覧の部分を選択してコピーし、下の欄に貼り付けます。' }),
       el('li', { text: 'うまく読めない場合は、ブラウザ拡張「Deck transfer for Master Duel」を入れると、デッキのページに書き出しボタンが付きます。YDKファイルか ydke:// の文字列で書き出して、ここで読み込んでください。' })),
     el('p', { class: 'muted', text: '※ニューロンの「デッキコード」は KONAMI のサーバーに保存されたデッキの番号なので、コードそのものからは読み取れません。' }));
-  const file = el('input', { type: 'file', accept: '.ydk,.txt' });
-  file.addEventListener('change', async () => { if (file.files[0]) ta.value = await file.files[0].text(); });
+  const file = el('input', { type: 'file', accept: '.ydk,.txt,.pdf,application/pdf' });
+  file.addEventListener('change', async () => {
+    const f = file.files[0];
+    if (!f) return;
+    if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf') {
+      // PDF（大会のデッキ登録用紙やデッキレシピ）から文字を取り出して、下の欄に入れる
+      ta.value = 'PDFを読み込み中…';
+      try {
+        ta.value = await pdfToText(await f.arrayBuffer());
+        if (!ta.value.trim()) ta.value = '';
+        const { result } = parseDeckText(ta.value);
+        const n = result.main.length + result.extra.length + result.side.length;
+        toast(n ? `PDFから${n}枚のカードを読み取りました。内容を確かめて「読み込む」を押してください` : 'PDFからカードを読み取れませんでした（画像だけのPDFは読めません）');
+      } catch (e) {
+        ta.value = '';
+        toast('PDFを読めませんでした：' + e.message);
+      }
+      return;
+    }
+    ta.value = await f.text();
+  });
   const asNew = el('input', { type: 'checkbox', checked: true });
   showModal({
     title: 'デッキを読み込む', wide: true,
