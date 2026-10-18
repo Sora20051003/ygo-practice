@@ -126,7 +126,8 @@ function descText(desc) {
     const s = c && c.jaStrs && c.jaStrs[idx];
     return s || `「${cardName(code)}」の効果${idx + 1}`;
   }
-  return Engine.sys.get(idx) || '';
+  const s = Engine.sys.get(idx) || '';
+  return s.includes('%') ? '' : s;   // 「[%ls]の…」のような埋め込み前提の文は使わない
 }
 const placeText = (con, loc, seq) => {
   const side = con === Engine.me ? '' : '相手の';
@@ -137,10 +138,13 @@ const placeText = (con, loc, seq) => {
 
 // ---------- 1回の対戦 ----------
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
+// opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed }) {
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto' }) {
     this.main = main; this.extra = extra; this.handIds = handIds || null; this.handSize = handSize;
-    this.me = handSize === 6 ? 1 : 0;   // 後攻なら相手が先に動く（相手は何もしない）
+    this.opp = opp && opp.main && opp.main.length ? opp : null;
+    this.chainMode = chainMode;
+    this.me = handSize === 6 ? 1 : 0;   // 後攻なら相手が先に動く
     this.seed = seed || [...crypto.getRandomValues(new Uint32Array(4))].map(BigInt);
     this.responses = [];     // これまでの返答（元に戻すときは最初からやり直して、ここを途中まで流し直す）
     this.userMarks = [];     // 自分が選んだ返答の位置
@@ -150,7 +154,8 @@ class AutoDuel {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
     this.log = []; this.pending = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
-    this.lp = [8000, 8000]; this.chain = [];
+    this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0;
+    this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);   // 相手の判断用（やり直しで同じになるように）
     const team = n => ({ drawCountPerTurn: 1, startingDrawCount: n, startingLP: 8000 });
     this.h = L.createDuel({
       flags: O.OcgDuelMode.MODE_MR5,
@@ -173,12 +178,16 @@ class AutoDuel {
     const rest = [...this.main];
     if (this.handIds) for (const id of this.handIds) { const i = rest.indexOf(id); if (i >= 0) { rest.splice(i, 1); add(me, id, LOC.HAND, POS.FD_ATK); } }
     // デッキはこちらで混ぜる（エンジンは混ぜない）。やり直しで同じ順になるよう seed から作る乱数を使う
-    let r = Number(BigInt(this.seed[0]) & 0xffffffffn) || 1;
-    const rand = () => { r = (r + 0x6D2B79F5) | 0; let t = Math.imul(r ^ (r >>> 15), 1 | r); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-    for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
-    for (const id of rest) add(me, id, LOC.DECK);
+    const rand = seededRandom(Number(BigInt(this.seed[0]) & 0xffffffffn) || 1);
+    const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    for (const id of shuffle(rest)) add(me, id, LOC.DECK);
     for (const id of this.extra) add(me, id, LOC.EXTRA);
-    for (let i = 0; i < 40; i++) add(1 - me, OPP_FILLER, LOC.DECK);
+    if (this.opp) {
+      for (const id of shuffle([...this.opp.main])) add(1 - me, id, LOC.DECK);
+      for (const id of this.opp.extra || []) add(1 - me, id, LOC.EXTRA);
+    } else {
+      for (let i = 0; i < 40; i++) add(1 - me, OPP_FILLER, LOC.DECK);
+    }
     L.startDuel(this.h);
   }
 
@@ -192,14 +201,14 @@ class AutoDuel {
       const msgs = L.duelGetMessage(this.h);
       let ask = null;
       for (const m of msgs) {
-        if (m.type === MSG.RETRY) { this.retry = true; continue; }
+        if (m.type === MSG.RETRY) { this.retry = true; if (++this.retries > 20) throw new Error('処理が先に進めなくなりました'); continue; }
         if (isSelectMsg(m)) ask = m; else this.onInfo(m);
       }
       if (status === 0) { this.pending = null; return; }   // 対戦終了
       if (status === 2) continue;
       if (!ask) continue;
       // 相手の番の入力と、選ぶものが無い確認は自動で返す
-      const auto = ask.player !== this.me ? autoAnswer(ask) : skippable(ask);
+      const auto = ask.player !== this.me ? (this.opp ? cpuAnswer(ask, this) : autoAnswer(ask)) : skippable(ask, this);
       if (auto) { this.respond(auto, true, replay); continue; }
       if (replay && replay.length) { this.respond(replay.shift(), false, replay); continue; }
       this.pending = ask;
@@ -211,6 +220,7 @@ class AutoDuel {
     if (!auto) this.userMarks.push(this.responses.length);
     this.responses.push(res);
     this.retry = false;
+    if (!auto) this.retries = 0;
     Engine.lib.duelSetResponse(this.h, res);
     if (!auto && !replay) { this.pending = null; this.run(); }
   }
@@ -231,17 +241,23 @@ class AutoDuel {
   restart() { this.responses = []; this.userMarks = []; this.start(); }
 
   addLog(text) { this.log.push(`[T${this.turn || 1}] ${text}`); }
+  who(con) { return con === this.me ? '' : '相手の'; }
 
   onInfo(m) {
     switch (m.type) {
       case MSG.HINT: if (m.hint_type === 3 && m.player === this.me) this.hint = m.hint; break;
       case MSG.NEW_TURN: this.turn++; this.turnPlayer = m.player; this.addLog(`---- ${m.player === this.me ? '自分' : '相手'}のターン ----`); break;
-      case MSG.NEW_PHASE: this.phase = m.phase; if (this.turnPlayer === 0) this.addLog(PHASE_NAME[m.phase] || 'フェイズ'); break;
+      case MSG.NEW_PHASE: this.phase = m.phase; if (this.turnPlayer === this.me) this.addLog(PHASE_NAME[m.phase] || 'フェイズ'); break;
       case MSG.DRAW: if (m.player === this.me) this.addLog(`ドロー：${m.drawn.map(d => cardName(d.code & 0x7fffffff)).join('、')}`); break;
-      case MSG.SUMMONING: this.addLog(`${cardName(m.code)} を通常召喚`); break;
-      case MSG.SPSUMMONING: this.addLog(`${cardName(m.code)} を特殊召喚`); break;
-      case MSG.FLIPSUMMONING: this.addLog(`${cardName(m.code)} を反転召喚`); break;
-      case MSG.CHAINING: this.chain.push(m.code); this.addLog(`チェーン${m.chain_size}：${cardName(m.code)} の効果を発動（${descText(m.description) || '効果'}）`); break;
+      case MSG.SUMMONING: this.addLog(`${this.who(m.controller)}${cardName(m.code)} を通常召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
+      case MSG.SPSUMMONING: this.addLog(`${this.who(m.controller)}${cardName(m.code)} を特殊召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
+      case MSG.FLIPSUMMONING: this.addLog(`${this.who(m.controller)}${cardName(m.code)} を反転召喚`); break;
+      case MSG.CHAINING: {
+        const link = { code: m.code, con: m.controller, loc: m.location, seq: m.sequence, desc: descText(m.description), n: m.chain_size };
+        this.chain.push(link); this.events.push({ t: 'chain', ...link });
+        this.addLog(`チェーン${m.chain_size}：${this.who(m.controller)}${cardName(m.code)} の効果を発動（${link.desc || '効果'}）`); break;
+      }
+      case MSG.CHAIN_SOLVED: this.chain.pop(); break;
       case MSG.CHAIN_END: this.chain = []; break;
       case MSG.CHAIN_NEGATED: case MSG.CHAIN_DISABLED: this.addLog('チェーンの効果が無効になった'); break;
       case MSG.MOVE: {
@@ -249,7 +265,9 @@ class AutoDuel {
         if (!code || m.from.location === m.to.location && m.from.controller === m.to.controller) break;
         if (m.from.controller !== this.me && m.to.controller !== this.me && !(m.from.location & LOC.ONFIELD_ALL) && !(m.to.location & LOC.ONFIELD_ALL)) break;   // 相手の手札・デッキ・墓地の間の移動（手札調整など）は省く
         if (m.to.location === LOC.HAND && m.from.location === LOC.DECK && m.from.controller === this.me && this.drawing) break;
-        this.addLog(`${cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}`);
+        this.events.push({ t: 'move', code, from: { con: m.from.controller, loc: m.from.location, seq: m.from.sequence }, to: { con: m.to.controller, loc: m.to.location, seq: m.to.sequence }, faceUp: !!(m.to.position & 5) });
+        const secret = m.to.controller !== this.me && !(m.to.position & 5) && (m.to.location & (LOC.ONFIELD_ALL | LOC.HAND | LOC.DECK));   // 相手が裏向きにしたカードは名前を伏せる
+        this.addLog(`${secret ? 'カード' : cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}`);
         break;
       }
       case MSG.DAMAGE: this.addLog(`${m.player === this.me ? '自分' : '相手'}に ${m.amount} ダメージ`); break;
@@ -303,11 +321,70 @@ const SELECT_TYPES = new Set([MSG.SELECT_BATTLECMD, MSG.SELECT_IDLECMD, MSG.SELE
 const isSelectMsg = m => SELECT_TYPES.has(m.type);
 
 // 自分の入力でも、聞くまでもないもの（発動できるものが無いチェーン確認・並び替え）は自動で返す
-function skippable(m) {
-  if (m.type === MSG.SELECT_CHAIN && !m.selects.length && !m.forced) return { type: RES.SELECT_CHAIN, index: null };
+// チェーン確認（マスターデュエルと同じ考え方）
+//   always：発動できるものがあれば毎回聞く
+//   auto  ：相手が発動したとき・自分の誘発効果があるときだけ聞く
+//   off   ：誘発効果があるときだけ聞く
+function skippable(m, duel) {
+  if (m.type === MSG.SELECT_CHAIN && !m.forced) {
+    if (!m.selects.length) return { type: RES.SELECT_CHAIN, index: null };
+    const mode = duel ? duel.chainMode : 'always';
+    const last = duel && duel.chain[duel.chain.length - 1];
+    const ask = mode === 'always' || m.spe_count > 0 || (mode === 'auto' && last && last.con !== duel.me);
+    if (!ask) return { type: RES.SELECT_CHAIN, index: null };
+  }
   if (m.type === MSG.SORT_CHAIN) return { type: RES.SORT_CARD, order: null };
   if (m.type === MSG.ROCK_PAPER_SCISSORS) return { type: RES.ROCK_PAPER_SCISSORS, value: 1 + Math.floor(Math.random() * 3) };
   return null;
+}
+
+// 決まった種から作る乱数（やり直しても同じ結果になる）
+function seededRandom(seed) {
+  let r = seed | 0;
+  return () => { r = (r + 0x6D2B79F5) | 0; let t = Math.imul(r ^ (r >>> 15), 1 | r); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+// 相手（CPU）の返答。妨害（手札誘発・伏せカード）は使えるときに使い、自分のターンは簡単に動く
+function cpuAnswer(m, duel) {
+  const me = duel.me;            // 練習する人（CPU から見た相手）
+  const rnd = duel.rng;
+  const theirs = c => c.controller === me;
+  // 選ぶカード：相手（練習する人）のフィールドのカードを優先
+  const prefer = list => {
+    const idx = list.map((c, i) => i);
+    const score = c => (theirs(c) ? 10 : 0) + (c.location & LOC.ONFIELD_ALL ? 5 : 0);
+    return idx.sort((a, b) => score(list[b]) - score(list[a]));
+  };
+  switch (m.type) {
+    case MSG.SELECT_IDLECMD: {
+      // 罠などを伏せる → 一番攻撃力の高いモンスターを召喚 → 終わり
+      const traps = m.spell_sets.filter(c => { const d = DB.byId.get(c.code); return d && has(d, T.TRAP); });
+      if (traps.length) return { type: RES.SELECT_IDLECMD, action: IDLE.SSET, index: m.spell_sets.indexOf(traps[0]) };
+      if (m.summons.length) {
+        let best = 0;
+        m.summons.forEach((c, i) => { if ((DB.byId.get(c.code) || {}).atk > (DB.byId.get(m.summons[best].code) || {}).atk) best = i; });
+        return { type: RES.SELECT_IDLECMD, action: IDLE.SUMMON, index: best };
+      }
+      return { type: RES.SELECT_IDLECMD, action: m.to_ep ? IDLE.TO_EP : IDLE.TO_BP, index: null };
+    }
+    case MSG.SELECT_CHAIN:
+      // 相手（練習する人）のターンに、相手が発動したものへの妨害として使う
+      if (m.selects.length && (m.forced || (duel.turnPlayer === me && duel.chain.length && duel.chain[duel.chain.length - 1].con === me) || m.spe_count > 0 || (duel.turnPlayer === me && rnd() < 0.5)))
+        return { type: RES.SELECT_CHAIN, index: Math.floor(rnd() * m.selects.length) };
+      return { type: RES.SELECT_CHAIN, index: m.forced ? 0 : null };
+    case MSG.SELECT_EFFECTYN: return { type: RES.SELECT_EFFECTYN, yes: true };
+    case MSG.SELECT_YESNO: return { type: RES.SELECT_YESNO, yes: true };
+    case MSG.SELECT_CARD: return { type: RES.SELECT_CARD, indicies: prefer(m.selects).slice(0, m.min).sort((a, b) => a - b) };
+    case MSG.SELECT_TRIBUTE: return { type: RES.SELECT_TRIBUTE, indicies: [...Array(m.min).keys()] };
+    case MSG.SELECT_UNSELECT_CARD: {
+      if (m.can_finish || !m.select_cards.length) return { type: RES.SELECT_UNSELECT_CARD, index: null };
+      return { type: RES.SELECT_UNSELECT_CARD, index: prefer(m.select_cards)[0] };
+    }
+    case MSG.SELECT_POSITION: return { type: RES.SELECT_POSITION, position: [1, 4, 2, 8].find(p => m.positions & p) };
+    case MSG.SELECT_OPTION: return { type: RES.SELECT_OPTION, index: Math.floor(rnd() * m.options.length) };
+    case MSG.ANNOUNCE_CARD: { const hit = [...duel.main, ...DB.cards.map(c => c.id)].find(id => Engine.ocg.cardMatchesOpcode(engineCardData(id), m.opcodes)); return { type: RES.ANNOUNCE_CARD, card: hit || duel.main[0] }; }
+    default: return autoAnswer(m);
+  }
 }
 
 // 相手（何もしない）の返答

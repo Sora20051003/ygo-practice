@@ -133,7 +133,9 @@ function duelMe() {
   return { uid: u.uid, name: u.displayName || (u.email || '').split('@')[0] || 'プレイヤー' };
 }
 const oppUid = () => Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guest : Duel.room.host);
-const oppName = () => Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guestName : Duel.room.hostName) || '相手';
+const oppName = () => (Board.S && Board.S.auto ? 'CPU' : (Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guestName : Duel.room.hostName) || '相手'));
+// 表示する相手の盤面（自動処理モードでは CPU の盤面）
+const curOpp = () => (Board.S && Board.S.auto ? Board.S.opp : Duel.opp);
 const myTurn = () => Duel.room && Duel.room.turnPlayer === Duel.me.uid;
 
 function feed(text, cls = '') {
@@ -357,17 +359,17 @@ function oppCardEl(p) {
 }
 
 function oppSlotEl(zone, idx) {
-  const o = Duel.opp || emptyPub;
-  const slot = el('div', { class: `zone slot opp-zone z-${zone}` });
+  const o = curOpp() || emptyPub;
+  const slot = el('div', { class: `zone slot opp-zone z-${zone}`, dataset: { ozone: zone, oidx: idx } });
   const p = o[zone] && o[zone][idx];
   if (p) slot.append(oppCardEl(p));
   return slot;
 }
 
 function oppPileEl(zone) {
-  const o = Duel.opp || emptyPub;
+  const o = curOpp() || emptyPub;
   const label = { deck: 'デッキ', extra: 'EXデッキ', gy: '墓地', ban: '除外' }[zone];
-  const node = el('div', { class: `zone pile opp-zone z-${zone}` }, el('span', { class: 'zone-label', text: '相手の' + label }));
+  const node = el('div', { class: `zone pile opp-zone z-${zone}`, dataset: { ozone: zone } }, el('span', { class: 'zone-label', text: '相手の' + label }));
   const list = zone === 'gy' ? o.gy : zone === 'ban' ? o.ban : null;
   const count = list ? list.length : o[zone];
   if (count) {
@@ -405,7 +407,7 @@ function renderOppRows(field) {
   for (let i = 4; i >= 0; i--) field.append(oppSlotEl('m', i));
   field.append(oppSlotEl('f', 0));
   // 相手の手札（枚数だけ）
-  const o = Duel.opp || emptyPub;
+  const o = curOpp() || emptyPub;
   const bar = $('#opp-bar');
   bar.hidden = false;
   bar.innerHTML = '';
@@ -416,9 +418,10 @@ function renderOppRows(field) {
 
 // 共有のEXモンスターゾーン：自分のカードがあれば自分、無ければ相手（相手の 1-i 番）
 function emzSharedEl(i) {
-  if (Board.S.emz[i] || !(Duel.opp && Duel.opp.emz && Duel.opp.emz[1 - i])) return slotEl('emz', i);
+  const op = curOpp();
+  if (Board.S.emz[i] || !(op && op.emz && op.emz[1 - i])) return slotEl('emz', i);
   const slot = el('div', { class: 'zone slot opp-zone z-emz' }, el('span', { class: 'zone-label', text: '相手のEXモンスター' }));
-  slot.append(oppCardEl(Duel.opp.emz[1 - i]));
+  slot.append(oppCardEl(op.emz[1 - i]));
   return slot;
 }
 
@@ -483,7 +486,7 @@ function renderDuelPanel() {
   p.hidden = !Duel.active;
   if (!Duel.active || !Board.S) return;
   const r = Duel.room || {};
-  const o = Duel.opp || emptyPub;
+  const o = curOpp() || emptyPub;
   const phase = PHASES.find(x => x[0] === r.phase) || PHASES[0];
   $('#dp-code').textContent = Duel.code;
   $('#dp-opp-name').textContent = oppName();

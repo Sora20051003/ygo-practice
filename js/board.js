@@ -314,6 +314,13 @@ function toggleUsed(name) {
 }
 
 function openCardMenu(uid, x, y) {
+  if (Board.S && Board.S.auto) {
+    // 自動処理モード：選択中なら盤面から選ぶ。そうでなければカードの上に操作ボタンを出す（マスターデュエル風）
+    if (Auto.selectable && Auto.selectable.has(uid)) { Auto.pickFromBoard(uid); return; }
+    const l = locate(uid);
+    if (l && !isMobile()) showBoardDetail(l);
+    if (autoActionPopup(uid)) return;
+  }
   Board.selected = uid;
   const loc = locate(uid);
   const items = cardMenuItems(uid);
@@ -582,7 +589,8 @@ function cancelPick() {
 function cardEl(inst, zone) {
   const c = cardOf(inst);
   const gl = Board.glow && Board.glow.get(inst.uid);
-  const node = el('div', { class: 'bcard' + (inst.pos === 'def' ? ' def' : '') + (Board.selected === inst.uid ? ' selected' : '') + (gl ? ' glow-' + gl : ''), draggable: 'true' },
+  const tgt = Board.S && Board.S.auto && Auto.selectable && Auto.selectable.has(inst.uid);   // 自動処理の選択中：盤面から選べるカード
+  const node = el('div', { class: 'bcard' + (inst.pos === 'def' ? ' def' : '') + (Board.selected === inst.uid ? ' selected' : '') + (gl ? ' glow-' + gl : '') + (tgt ? ' ap-target' + (Auto.chosen && Auto.chosen.has(Auto.selectable.get(inst.uid)) ? ' ap-chosen' : '') : ''), draggable: 'true', dataset: { uid: inst.uid } },
     cardFace(c, { faceDown: !inst.faceUp }));
   if (inst.mats && inst.mats.length) node.append(el('div', { class: 'badge mats', title: 'X素材', text: '素材' + inst.mats.length }));
   if (inst.ctr) node.append(el('div', { class: 'badge ctr', title: 'カウンター', text: '●' + inst.ctr }));
@@ -689,8 +697,9 @@ function renderBoard() {
   Board.glow = computeGlow(S);
   const blank = () => el('div', { class: 'zone blank' });
   const dueling = typeof Duel !== 'undefined' && Duel.active;
-  field.classList.toggle('duel', dueling);
-  if (dueling) {
+  const withOpp = dueling || !!(S.auto && S.opp);   // 自動処理モードでは CPU の盤面も出す
+  field.classList.toggle('duel', withOpp);
+  if (withOpp) {
     // 対戦中：上に相手の盤面（相手から見た向きなので左右が逆）、真ん中に共有のEXモンスターゾーン
     renderOppRows(field);
     field.append(oppPileEl('ban'), blank(), emzSharedEl(0), blank(), emzSharedEl(1), blank(), pileEl('ban'));

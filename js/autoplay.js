@@ -37,10 +37,21 @@ function autoState() {
   side.extra.forEach((c, i) => { const x = mk(c, LOC.EXTRA, i); if (x) S.extra.push(x); });
   side.m.forEach((c, i) => { const x = mk(c, LOC.MZONE, i); if (i < 5) S.m[i] = x; else if (i < 7) S.emz[i - 5] = x; });
   side.s.forEach((c, i) => { const x = mk(c, LOC.SZONE, i); if (i < 5) S.s[i] = x; else if (i === 5) S.f[0] = x; });
-  // 相手の様子（文字で出す）
+  // 相手（CPU）の盤面。対戦タブの相手の表示と同じ形にする（裏向きのカードは id を伏せる）
   const op = q[1 - me];
-  const oppCards = [...op.m, ...op.s].filter(c => c && c.code && c.position & 5).map(c => cardName(c.code));
-  S.oppText = `相手：LP ${d.lp[1 - me]}　手札${op.hand.filter(Boolean).length}枚` + (oppCards.length ? `　場：${oppCards.join('、')}` : '');
+  const pub = (c, loc) => (c && c.code ? {
+    id: c.position & 5 ? c.code : 0, faceUp: !!(c.position & 5), pos: loc === LOC.MZONE && c.position & 12 ? 'def' : 'atk',
+    ctr: Object.values(c.counters || {}).reduce((a, b) => a + b, 0), mats: c.overlayCards || [],
+  } : null);
+  const count = a => a.filter(Boolean).length;
+  S.opp = {
+    lp: d.lp[1 - me], hand: count(op.hand), deck: count(op.deck), extra: count(op.extra),
+    extraUp: op.extra.filter(c => c && c.position & 5).map(c => c.code),
+    gy: op.gy.filter(Boolean).map(c => c.code), ban: op.ban.filter(Boolean).map(c => (c.position & 5 ? c.code : 0)),
+    m: op.m.slice(0, 5).map(c => pub(c, LOC.MZONE)), emz: [pub(op.m[5], LOC.MZONE), pub(op.m[6], LOC.MZONE)],
+    s: op.s.slice(0, 5).map(c => pub(c, LOC.SZONE)), f: [pub(op.s[5], LOC.SZONE)],
+  };
+  S.oppText = `CPU：LP ${d.lp[1 - me]}　手札${S.opp.hand}枚`;
   return S;
 }
 
@@ -104,11 +115,16 @@ function autoRespond(res) {
   autoAfter();
 }
 
-function autoAfter() {
+function autoAfter(noAnim) {
   const d = Auto.duel;
   if (d.retry) { toast('その選び方はできません。選び直してください'); d.retry = false; }
   autoSave();
+  const events = d.events.splice(0);
+  const anim = Auto.anim && !noAnim && events.length;
+  const before = anim ? captureRects() : null;
   autoSync();
+  if (anim) playEvents(events, before);
+  if (!noAnim) queueActivations(events);
   if (isPrompt(d.pending)) openPrompt();
 }
 
@@ -140,6 +156,7 @@ function autoPanel() {
   else { bp.textContent = 'バトルフェイズへ'; bp.disabled = !(p && p.type === MSG.SELECT_IDLECMD && p.to_bp); ep.disabled = !(p && p.type === MSG.SELECT_IDLECMD && p.to_ep); }
   $('#ap-undo').disabled = !d.userMarks.length;
   $('#ap-open').disabled = !isPrompt(p);
+  renderChainBox();
 }
 
 function autoPhase(which) {
@@ -154,7 +171,7 @@ function autoUndo() {
   if (!d || !d.userMarks.length) { toast('これ以上戻せません'); return; }
   closePromptModal();
   try { d.undo(); } catch (e) { toast('戻せませんでした：' + e.message); }
-  autoAfter();
+  autoAfter(true);
 }
 
 // ---------- 開始・保存 ----------
@@ -162,7 +179,7 @@ async function autoPrepare(deck) {
   showLoading('自動処理の準備中…');
   try {
     await engineLoad(showLoading);
-    await loadCardScripts([...deck.main, ...deck.extra, OPP_FILLER], showLoading);
+    await loadCardScripts([...deck.main, ...(deck.extra || []), OPP_FILLER], showLoading);
   } finally { showLoading(null); }
 }
 
@@ -172,7 +189,11 @@ async function autoStart(handIds) {
   closeAllModals();
   try { await autoPrepare(deck); } catch (e) { toast('自動処理を準備できませんでした：' + e.message); return; }
   const handSize = +$('#b-handsize').value;
-  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize });
+  const opp = oppDeck();
+  if (opp) {
+    try { await autoPrepare(opp); } catch (e) { toast('相手のデッキを準備できませんでした：' + e.message); return; }
+  }
+  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value });
   Auto.deckId = deck.id;
   try { Auto.duel.start(); } catch (e) { console.error(e); toast('開始できませんでした：' + e.message); Auto.duel = null; renderBoard(); return; }
   autoAfter();
@@ -182,7 +203,7 @@ function autoRestart() {
   if (!Auto.duel) { toast('まだ開始していません'); return; }
   closePromptModal();
   Auto.duel.restart();
-  autoAfter();
+  autoAfter(true);
   toast('最初の状態に戻しました');
 }
 
@@ -195,7 +216,7 @@ function autoSave() {
   const picks = d.userMarks.map(i => d.responses[i]);
   try {
     store.set('ygo.autoBoard', JSON.parse(JSON.stringify({
-      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, picks, deckId: Auto.deckId,
+      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, picks, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode,
     }, bigReplacer)));
   } catch { /* 保存できなくても続けられる */ }
 }
@@ -203,11 +224,11 @@ async function autoResume() {
   let saved = null;
   try { saved = JSON.parse(JSON.stringify(store.get('ygo.autoBoard', null)), bigReviver); } catch { saved = null; }
   if (!saved || !saved.main) return;
-  try { await autoPrepare(saved); } catch { return; }
-  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed });
+  try { await autoPrepare(saved); if (saved.opp) await autoPrepare(saved.opp); } catch { return; }
+  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto' });
   Auto.duel = d; Auto.deckId = saved.deckId;
   try { d.create(); d.run([...saved.picks]); } catch (e) { console.error(e); Auto.duel = null; return; }
-  if (autoActive()) autoAfter();
+  if (autoActive()) autoAfter(true);
 }
 
 // ---------- モード切り替え ----------
@@ -243,8 +264,158 @@ function setupAutoPlay() {
       { label: 'ターン終了', disabled: $('#ap-ep').disabled, onClick: () => autoPhase('ep') },
     ]);
   };
+  // 設定（相手・チェーン確認・演出）
+  refreshOppSelect();
+  $('#ap-opp').onchange = e => { store.set('ygo.autoOpp', e.target.value); toast('次に開始したときから、この相手になります'); };
+  $('#ap-chain').value = store.get('ygo.chainMode', 'auto');
+  $('#ap-chain').onchange = e => {
+    store.set('ygo.chainMode', e.target.value);
+    if (Auto.duel) { Auto.duel.chainMode = e.target.value; autoSave(); }
+  };
+  Auto.anim = store.get('ygo.autoAnim', true);
+  $('#ap-anim').checked = Auto.anim;
+  $('#ap-anim').onchange = e => { Auto.anim = e.target.checked; store.set('ygo.autoAnim', Auto.anim); };
   Auto.on = store.get('ygo.boardMode', 'manual') === 'auto';
   if (Auto.on) { Auto.resumed = true; autoResume(); }
+}
+
+// ---------- 相手のデッキ ----------
+// 手札誘発セット：よく使われる妨害カード＋何もしない通常モンスター
+const HANDTRAP_SET = [[14558127, 3], [23434538, 3], [97268402, 3], [10045474, 3], [94145021, 2], [73642296, 2], [59438930, 3], [24224830, 2]];
+function refreshOppSelect() {
+  const sel = $('#ap-opp');
+  if (!sel) return;
+  const cur = store.get('ygo.autoOpp', 'handtraps');
+  sel.innerHTML = '';
+  sel.append(el('option', { value: 'none', text: '何もしない' }), el('option', { value: 'handtraps', text: '手札誘発セット（うらら・G・ヴェーラーなど）' }));
+  for (const d of Decks.list) sel.append(el('option', { value: 'deck:' + d.id, text: `デッキ「${d.name}」` }));
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : 'handtraps';
+}
+function oppDeck() {
+  const v = $('#ap-opp').value;
+  if (v === 'handtraps') {
+    const main = [];
+    for (const [id, n] of HANDTRAP_SET) if (DB.byId.has(id)) for (let i = 0; i < n; i++) main.push(id);
+    while (main.length < 40) main.push(OPP_FILLER);
+    return { main, extra: [] };
+  }
+  if (v.startsWith('deck:')) {
+    const d = Decks.get(v.slice(5));
+    if (d && d.main.length) return { main: d.main.filter(id => DB.byId.has(id)), extra: d.extra.filter(id => DB.byId.has(id)) };
+  }
+  return null;
+}
+
+// ---------- カードの上に出す操作ボタン（マスターデュエル風） ----------
+function autoActionPopup(uid) {
+  hideActionPopup();
+  const node = document.querySelector(`.bcard[data-uid="${uid}"]`);
+  const loc = locate(uid);
+  if (!node || !loc) return false;
+  const acts = autoActions(loc.inst);
+  if (!acts.length) return false;
+  const box = el('div', { class: 'ap-actions', id: 'ap-actions' },
+    acts.map(a => el('button', { class: 'ap-act' + (a.kind ? ' k-' + a.kind : ''), text: a.label, onclick: e => { e.stopPropagation(); hideActionPopup(); autoRespond(a.res); } })),
+    isMobile() ? el('button', { class: 'ap-act k-info', text: '🔍 詳細', onclick: e => { e.stopPropagation(); hideActionPopup(); showBoardDetail(loc); } }) : null);
+  document.body.append(box);
+  const r = node.getBoundingClientRect(), b = box.getBoundingClientRect();
+  let left = r.left + r.width / 2 - b.width / 2, top = r.top - b.height - 6;
+  if (top < 4) top = r.bottom + 6;
+  left = Math.max(4, Math.min(left, innerWidth - b.width - 4));
+  box.style.left = left + 'px'; box.style.top = top + 'px';
+  setTimeout(() => document.addEventListener('pointerdown', onOutsideAction, true), 0);
+  return true;
+}
+function onOutsideAction(e) { if (!e.target.closest('#ap-actions')) hideActionPopup(); }
+function hideActionPopup() {
+  const b = $('#ap-actions');
+  if (b) b.remove();
+  document.removeEventListener('pointerdown', onOutsideAction, true);
+}
+
+// ---------- 演出 ----------
+// 位置ごとの画面上の四角（動く前と後で比べる）
+function captureRects() {
+  const me = Auto.duel.me, op = 1 - me, map = new Map();
+  const put = (k, n) => { if (n) map.set(k, n.getBoundingClientRect()); };
+  const L = { m: LOC.MZONE, emz: LOC.MZONE, s: LOC.SZONE, f: LOC.SZONE, gy: LOC.GRAVE, ban: LOC.REMOVED, extra: LOC.EXTRA, deck: LOC.DECK };
+  const seqOf = (z, i) => (z === 'emz' ? 5 + i : z === 'f' ? 5 : i);
+  $$('#field .slot[data-zone]').forEach(n => put(`${me}-${L[n.dataset.zone]}-${seqOf(n.dataset.zone, +n.dataset.idx)}`, n));
+  $$('#field .pile[data-zone]').forEach(n => put(`${me}-${L[n.dataset.zone]}`, n));
+  $$('#hand .bcard').forEach((n, i) => put(`${me}-${LOC.HAND}-${i}`, n));
+  put(`${me}-${LOC.HAND}`, $('#hand'));
+  $$('#field [data-ozone]').forEach(n => put(n.dataset.oidx !== undefined ? `${op}-${L[n.dataset.ozone]}-${seqOf(n.dataset.ozone, +n.dataset.oidx)}` : `${op}-${L[n.dataset.ozone]}`, n));
+  put(`${op}-${LOC.HAND}`, $('#opp-bar'));
+  return map;
+}
+const rectAt = (map, p) => map.get(`${p.con}-${p.loc & ~LOC.OVERLAY}-${p.seq}`) || map.get(`${p.con}-${p.loc & ~LOC.OVERLAY}`) || map.get(`${p.con}-${LOC.HAND}`);
+
+function playEvents(events, before) {
+  if (!events.length) return;
+  const after = captureRects();
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let n = 0;
+  for (const ev of events) {
+    if (ev.t !== 'move' || n >= 14 || reduce) continue;
+    const a = rectAt(before, ev.from), b = rectAt(after, ev.to);
+    if (!a || !b) continue;
+    const card = DB.byId.get(ev.code);
+    const showFace = card && (ev.faceUp || ev.to.con === Auto.duel.me);
+    const w = Math.min(b.width, 90), h = w * 1.46;
+    const ghost = el('div', { class: 'ap-ghost' }, cardFace(showFace ? card : null, { faceDown: !showFace }));
+    ghost.style.width = w + 'px';
+    document.body.append(ghost);
+    const at = r => `translate(${r.left + r.width / 2 - w / 2}px, ${r.top + r.height / 2 - h / 2}px)`;
+    ghost.animate([{ transform: at(a), opacity: 0.9 }, { transform: at(b), opacity: 1 }], { duration: 420, delay: n * 90, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'both' })
+      .finished.then(() => ghost.remove(), () => ghost.remove());
+    n++;
+  }
+  // 召喚したゾーンを光らせる
+  for (const ev of events) {
+    if (ev.t !== 'summon') continue;
+    const sel = ev.con === Auto.duel.me ? `#field .slot[data-zone="${ev.seq >= 5 ? 'emz' : 'm'}"][data-idx="${ev.seq >= 5 ? ev.seq - 5 : ev.seq}"]` : `#field [data-ozone="m"][data-oidx="${ev.seq}"]`;
+    const node = $(sel);
+    if (node) { node.classList.add('ap-flash'); setTimeout(() => node.classList.remove('ap-flash'), 900); }
+  }
+}
+
+// 発動したカードを大きく出す（順番に）
+const activationQueue = [];
+function queueActivations(events) {
+  const me = Auto.duel.me;
+  for (const ev of events) {
+    if (ev.t !== 'chain') continue;
+    if (ev.con !== me) toast(`CPU が「${cardName(ev.code)}」を発動しました`);
+    if (Auto.anim && !matchMedia('(prefers-reduced-motion: reduce)').matches) activationQueue.push(ev);
+  }
+  if (activationQueue.length && !activationQueue.running) showNextActivation();
+}
+function showNextActivation() {
+  const ev = activationQueue.shift();
+  if (!ev) { activationQueue.running = false; return; }
+  activationQueue.running = true;
+  const card = DB.byId.get(ev.code);
+  const mine = ev.con === Auto.duel.me;
+  const pop = el('div', { class: 'ap-activate' + (mine ? '' : ' opp') },
+    el('div', { class: 'ap-act-card' }, cardFace(card || null, { faceDown: !card })),
+    el('div', { class: 'ap-act-text' }, el('b', { text: `チェーン${ev.n}` }), el('span', { text: (mine ? '' : 'CPU：') + cardName(ev.code) }), ev.desc ? el('small', { text: ev.desc }) : null));
+  document.body.append(pop);
+  pop.animate([{ opacity: 0, transform: 'translate(-50%, -50%) scale(.85)' }, { opacity: 1, transform: 'translate(-50%, -50%) scale(1)', offset: 0.2 }, { opacity: 1, transform: 'translate(-50%, -50%) scale(1)', offset: 0.8 }, { opacity: 0, transform: 'translate(-50%, -50%) scale(1.05)' }],
+    { duration: activationQueue.length > 2 ? 700 : 1100, easing: 'ease-out', fill: 'both' })
+    .finished.then(() => { pop.remove(); showNextActivation(); }, () => { pop.remove(); showNextActivation(); });
+  pop.addEventListener('click', () => pop.getAnimations().forEach(a => a.finish()));
+}
+
+// 処理中のチェーン（選択待ちのあいだ盤面に出す）
+function renderChainBox() {
+  let box = $('#ap-chainbox');
+  const d = Auto.duel;
+  const chain = d && isPrompt(d.pending) ? d.chain : [];
+  if (!chain.length) { if (box) box.remove(); return; }
+  if (!box) { box = el('div', { class: 'ap-chainbox', id: 'ap-chainbox' }); $('.board-center').append(box); }
+  box.innerHTML = '';
+  box.append(el('b', { text: 'チェーン' }));
+  for (const c of [...chain].reverse()) box.append(el('div', { class: 'ap-link' + (c.con === d.me ? '' : ' opp') }, `${c.n}. ${c.con === d.me ? '' : 'CPU：'}${cardName(c.code)}`));
 }
 
 // ---------- 選択画面 ----------
@@ -273,10 +444,23 @@ function promptTitle(p) {
 }
 
 // 選択画面の共通の形
-function promptModal(body, buttons) {
+// 選択は画面下の帯に出す（盤面は見えたまま。マスターデュエル風）
+function promptModal(body, buttons = []) {
   closePromptModal();
   const p = Auto.duel.pending;
-  const close = showModal({ title: promptTitle(p), body, buttons, wide: true, onClose: () => { if (Auto.closePrompt === close) Auto.closePrompt = null; autoPanel(); } });
+  const sheet = el('div', { class: 'ap-sheet', id: 'ap-sheet' },
+    el('div', { class: 'ap-sheet-head' },
+      el('b', { text: promptTitle(p) }),
+      el('button', { class: 'btn small', text: '盤面を見る', title: '左の「選択画面を開く」でまた出せます', onclick: () => closePromptModal() })),
+    el('div', { class: 'ap-sheet-body' }, body),
+    buttons.length ? el('div', { class: 'ap-sheet-foot' }, buttons.map(b =>
+      el('button', { class: 'btn' + (b.primary ? ' primary' : ''), text: b.label, onclick: () => { if (b.onClick() !== false) closePromptModal(); } }))) : null);
+  document.body.append(sheet);
+  const close = () => {
+    sheet.remove();
+    if (Auto.selectable) { Auto.selectable = null; Auto.pickFromBoard = null; renderBoard(); }
+    autoPanel();
+  };
   Auto.closePrompt = close;
   return close;
 }
@@ -305,6 +489,7 @@ function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note
     info.textContent = (note ? note + '　' : '') + (min === max ? `${min}枚選んでください` : `${min}〜${max}枚選んでください`) + `（${chosen.size}枚選択中）`;
     ok.disabled = chosen.size < min || chosen.size > max;
     [...grid.children].forEach((n, i) => n.classList.toggle('on', chosen.has(i)));
+    if (Auto.selectable) renderBoard();
   };
   cards.forEach((c, i) => {
     const n = promptCard(c, extra && extra(c, i));
@@ -320,6 +505,19 @@ function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note
   const foot = el('div', { class: 'row' }, ok, canCancel ? el('button', { class: 'btn', text: 'キャンセル', onclick: onCancel }) : null);
   refresh();
   promptModal(el('div', { class: 'stack' }, info, grid, foot));
+  boardPickable(cards, grid, chosen);
+}
+
+// 選べるカードのうち、盤面・手札にある自分のカードは、盤面をクリックしても選べるようにする
+function boardPickable(cards, grid, chosen) {
+  const me = Auto.duel.me;
+  const map = new Map();
+  cards.forEach((c, i) => { if (c.controller === me && (c.location & (LOC.MZONE | LOC.SZONE | LOC.HAND))) map.set(autoKey(me, c.location, c.sequence), i); });
+  if (!map.size) return;
+  Auto.selectable = map;
+  Auto.chosen = chosen || new Set();
+  Auto.pickFromBoard = uid => { const n = grid.children[map.get(uid)]; if (n) n.click(); };
+  renderBoard();
 }
 
 function yesNo(text, onAnswer, card) {
@@ -358,6 +556,7 @@ function openPrompt() {
       if (p.can_finish) btns.push({ label: '決定', primary: true, onClick: () => { answer({ type: RES.SELECT_UNSELECT_CARD, index: null }); return false; } });
       if (p.can_cancel && !p.can_finish) btns.push({ label: 'キャンセル', onClick: () => { answer({ type: RES.SELECT_UNSELECT_CARD, index: null }); return false; } });
       promptModal(el('div', { class: 'stack' }, el('p', { class: 'muted', text: `1枚ずつクリックして選びます（${p.min}〜${p.max}枚）` }), grid), btns);
+      boardPickable([...p.select_cards, ...p.unselect_cards], grid, new Set(p.unselect_cards.map((c, i) => p.select_cards.length + i)));
       break;
     }
     case MSG.SELECT_CHAIN: {
