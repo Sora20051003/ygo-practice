@@ -140,7 +140,7 @@ function autoPanel() {
   const st = $('#ap-status');
   if (!st) return;
   $('#ap-bp').hidden = $('#ap-ep').hidden = false;
-  if (!d) { st.textContent = '「シャッフルして開始」で始めます'; $('#ap-lp').textContent = ''; $('#ap-bp').disabled = $('#ap-ep').disabled = $('#ap-undo').disabled = $('#ap-open').disabled = true; return; }
+  if (!d) { $('#ap-locks').hidden = true; st.textContent = '「シャッフルして開始」で始めます'; $('#ap-lp').textContent = ''; $('#ap-bp').disabled = $('#ap-ep').disabled = $('#ap-undo').disabled = $('#ap-open').disabled = true; return; }
   const phase = PHASE_NAME[d.phase] || '';
   let text;
   if (d.ended) text = `対戦終了（${d.ended}）`;
@@ -157,6 +157,10 @@ function autoPanel() {
   $('#ap-undo').disabled = !d.userMarks.length;
   $('#ap-open').disabled = !isPrompt(p);
   renderChainBox();
+  const locks = $('#ap-locks');
+  locks.innerHTML = '';
+  locks.hidden = !d.locks || !d.locks.length;
+  if (!locks.hidden) { locks.append(el('li', { class: 'ap-locks-head', text: '今かかっている制限（縛り）' })); for (const l of d.locks) locks.append(el('li', { text: l.text })); }
 }
 
 function autoPhase(which) {

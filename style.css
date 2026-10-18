@@ -769,3 +769,5 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
   .ap-act-card { width: 72px; }
   .ap-act-text b { font-size: 17px; } .ap-act-text span { font-size: 14px; }
 }
+.ap-locks { list-style: none; margin: 0; padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, #ff5a5a 16%, var(--panel-2)); border: 1px solid color-mix(in srgb, #ff5a5a 45%, transparent); font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
+.ap-locks-head { font-weight: 700; }

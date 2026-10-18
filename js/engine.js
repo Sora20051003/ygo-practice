@@ -29,7 +29,7 @@ const MSG = {
   SUMMONING: 60, SPSUMMONING: 62, FLIPSUMMONING: 64, CHAINING: 70, CHAIN_SOLVED: 73, CHAIN_END: 74, CHAIN_NEGATED: 75,
   CHAIN_DISABLED: 76, DRAW: 90, DAMAGE: 91, RECOVER: 92, LPUPDATE: 94, PAY_LPCOST: 100, ATTACK: 110,
   TOSS_COIN: 130, TOSS_DICE: 131, ROCK_PAPER_SCISSORS: 132, ANNOUNCE_RACE: 140, ANNOUNCE_ATTRIB: 141,
-  ANNOUNCE_CARD: 142, ANNOUNCE_NUMBER: 143,
+  ANNOUNCE_CARD: 142, ANNOUNCE_NUMBER: 143, CARD_HINT: 160, PLAYER_HINT: 165,
 };
 const RES = {
   SELECT_BATTLECMD: 0, SELECT_IDLECMD: 1, SELECT_EFFECTYN: 2, SELECT_YESNO: 3, SELECT_OPTION: 4, SELECT_CARD: 5,
@@ -154,7 +154,7 @@ class AutoDuel {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
     this.log = []; this.pending = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
-    this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0;
+    this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);   // 相手の判断用（やり直しで同じになるように）
     const team = n => ({ drawCountPerTurn: 1, startingDrawCount: n, startingLP: 8000 });
     this.h = L.createDuel({
@@ -274,6 +274,15 @@ class AutoDuel {
       case MSG.RECOVER: this.addLog(`${m.player === this.me ? '自分' : '相手'}が ${m.amount} 回復`); break;
       case MSG.PAY_LPCOST: this.addLog(`${m.player === this.me ? '自分' : '相手'}が ${m.amount} LPを払った`); break;
       case MSG.LPUPDATE: this.lp[m.player] = m.lp; break;
+      case MSG.PLAYER_HINT: {
+        // 「このターン、〇〇しか特殊召喚できない」などの制限（縛り）が付いた・外れた
+        if (m.player !== this.me) break;
+        const code = Number(BigInt(m.description) >> 20n);
+        const text = (code ? `「${cardName(code)}」：` : '') + (descText(m.description) || '効果による制限');
+        if (m.player_hint === 6) { this.locks.push({ desc: String(m.description), text }); this.addLog('制限が付いた ' + text); }
+        else if (m.player_hint === 7) { const i = this.locks.findIndex(l => l.desc === String(m.description)); if (i >= 0) this.locks.splice(i, 1); }
+        break;
+      }
       case MSG.CONFIRM_CARDS: if (m.cards.length) this.addLog(`確認：${m.cards.map(c => cardName(c.code)).join('、')}`); break;
       case MSG.TOSS_COIN: this.addLog(`コイン：${m.results.map(r => (r ? '表' : '裏')).join('・')}`); break;
       case MSG.TOSS_DICE: this.addLog(`サイコロ：${m.results.join('・')}`); break;
