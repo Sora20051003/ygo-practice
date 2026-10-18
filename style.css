@@ -984,3 +984,8 @@ body.land .ap-sheet .ap-item { width: 78px; padding: 3px; }
 body.land .ap-sheet .ap-face { width: 62px; }
 body.land .ap-sheet .ap-sheet-body p { margin: 2px 0; font-size: 12px; }
 @media (max-width: 720px) { .ap-sheet .ap-item { width: 84px; } .ap-sheet .ap-face { width: 68px; } }
+.ap-sheet { overflow: hidden; }
+.ap-sheet-body { flex: 1 1 auto; min-height: 0; }
+.ap-sheet-foot { flex: none; border-top: 1px solid var(--line); }
+.ap-sheet-foot > .row { display: flex; gap: 8px; justify-content: center; margin: 0; width: 100%; }
+.ap-sheet-foot > .row .btn { min-width: 120px; }

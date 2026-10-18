@@ -957,7 +957,7 @@ async function confirmDeckRules(deck, go) {
 
 // ---------- ポーズ画面 ----------
 const pauseOpen = () => !$('#pause').hidden;
-function openPause() { renderPauseSummary(); $('#pause').hidden = false; timerHold(true); renderTimer(); }
+function openPause() { $('#pause-ver').textContent = '版 ' + APP_VERSION; renderPauseSummary(); $('#pause').hidden = false; timerHold(true); renderTimer(); }
 function closePause() { $('#pause').hidden = true; timerHold(false); renderPauseSummary(); renderTimer(); }
 // 盤面の左に出す「今の設定」の短い説明
 function renderPauseSummary() {

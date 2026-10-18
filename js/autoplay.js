@@ -586,6 +586,11 @@ function promptModal(body, buttons = [], title) {
     el('div', { class: 'ap-sheet-body' }, body),
     buttons.length ? el('div', { class: 'ap-sheet-foot' }, buttons.map(b =>
       el('button', { class: 'btn' + (b.primary ? ' primary' : ''), text: b.label, onclick: () => { if (b.onClick() !== false) closePromptModal(); } }))) : null);
+  // 選択の中にある「決定」「発動する」などのボタンの列は、スクロールする部分の外（帯の一番下）に出す
+  if (!buttons.length) {
+    const row = body.matches && body.matches('.stack') ? [...body.children].filter(n => n.classList.contains('row')).pop() : null;
+    if (row && row === body.lastElementChild) sheet.append(el('div', { class: 'ap-sheet-foot' }, row));
+  }
   document.body.append(sheet);
   fitSheet(sheet);
   const close = () => {
