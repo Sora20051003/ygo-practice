@@ -465,7 +465,9 @@ function boardDeck() {
   return Decks.get($('#b-deck').value) || Decks.current();
 }
 
-function startGame(handIds) {
+function startGame(handIds, checked) {
+  const deck0 = boardDeck();
+  if (!checked && deck0 && deck0.main.length) { confirmDeckRules(deck0, () => startGame(handIds, true)); return; }   // デッキの形式（OCG／MD）のルールに合っているか確認
   if (autoActive()) { autoStart(handIds); return; }
   const deck = boardDeck();
   if (!deck || !deck.main.length) { toast('メインデッキが空です。先にデッキを作ってください'); return; }
@@ -760,13 +762,16 @@ function refreshBoardDeckSelect() {
   if (!sel) return;
   const cur = sel.value || Decks.currentId;
   sel.innerHTML = '';
-  for (const d of Decks.list) sel.append(el('option', { value: d.id, text: `${d.name}（${d.main.length}枚）` }));
+  for (const d of Decks.list) sel.append(el('option', { value: d.id, text: `${d.name}（${FORMATS[deckFormat(d)].short}・${d.main.length}枚）` }));
   sel.value = Decks.get(cur) ? cur : Decks.currentId;
+  renderRegInfo();
 }
 
 function setupBoardView() {
   setupMobileBar();
   refreshBoardDeckSelect();
+  renderRegInfo();
+  $('#b-deck').addEventListener('change', renderRegInfo);
   $('#b-start').onclick = () => startGame();
   $('#b-pickhand').onclick = openPickHand;
   $('#b-restart').onclick = restartSame;
@@ -875,4 +880,44 @@ function redo() {
   Board.pick = null;
   persist();
   renderBoard();
+}
+
+// ---------- デッキのルール（OCG／マスターデュエル）の確認 ----------
+function regText(deck) {
+  const fmt = deckFormat(deck), reg = deck.reg || 'latest';
+  const list = DB.banlists[fmt];
+  const when = reg === 'none' ? '禁止・制限なし' : reg === 'latest' ? `最新の禁止・制限${list && list.date ? `（${list.date.replace(/-/g, '/')}〜）` : ''}` : `${reg.replace(/-/g, '/')} の禁止・制限`;
+  return `ルール：${FORMATS[fmt].label}・${when}`;
+}
+function renderRegInfo() {
+  const box = $('#b-reginfo');
+  if (!box) return;
+  const deck = boardDeck();
+  box.textContent = deck ? regText(deck) : '';
+}
+// 開始前に、デッキがそのルールに合っているか調べる。合っていなければ確認してから始める
+async function confirmDeckRules(deck, go) {
+  const ctx = regContext(deck);
+  if (ctx.loading) {
+    showLoading('禁止・制限リストを読み込み中…');
+    try { await Promise.all([loadRegulation(ctx.fmt, ctx.reg), loadReleaseDates()]); } catch { /* 読めなくても続ける */ }
+    showLoading(null);
+  }
+  const { notAllowed, over } = deckProblems(deck);
+  const size = [];
+  if (deck.main.length < 40) size.push(`メインデッキが${deck.main.length}枚です（40枚以上必要）`);
+  if (deck.main.length > 60) size.push(`メインデッキが${deck.main.length}枚です（60枚まで）`);
+  if (deck.extra.length > 15) size.push(`EXデッキが${deck.extra.length}枚です（15枚まで）`);
+  if (!notAllowed.length && !over.length && !size.length) { go(); return; }
+  const fmt = FORMATS[deckFormat(deck)].label;
+  const body = el('div', { class: 'stack' },
+    el('p', { text: `このデッキは${regText(deck).replace('ルール：', '')}のルールに合っていません。` }),
+    notAllowed.length ? el('div', null, el('b', { text: `${fmt}では使えないカード` }), el('ul', null, notAllowed.map(n => el('li', { text: n })))) : null,
+    over.length ? el('div', null, el('b', { text: '禁止・制限の枚数を超えているカード' }), el('ul', null, over.map(n => el('li', { text: n })))) : null,
+    size.length ? el('div', null, el('b', { text: '枚数' }), el('ul', null, size.map(n => el('li', { text: n })))) : null,
+    el('p', { class: 'muted', text: 'デッキ作成画面で直すか、練習のためにこのまま回すこともできます。' }));
+  showModal({ title: 'ルールの確認', body, buttons: [
+    { label: 'このまま回す', primary: true, onClick: () => { go(); } },
+    { label: 'やめる', onClick: () => {} },
+  ] });
 }
