@@ -874,12 +874,17 @@ function previewCard(c) {
     el('span', { class: 'mp-more muted', text: '詳細 ›' }));
   bar.onclick = () => showCardDetail(c, '#board-detail');
 }
-document.addEventListener('pointerdown', e => {
+// マウス：押した瞬間に出す。指（iPhone など）：タップが終わってから出す
+//  iPhone の Safari は、指が触れてから離れるまでの間に画面の中身が変わると「マウスを乗せただけ」とみなしてタップ（click）を取り消すため、
+//  触れた瞬間に説明を書き換えると、召喚・発動のボタンが出なくなる
+const previewFromEvent = e => {
   if ($('#view-board').hidden) return;
   if (e.target.closest('#board-detail, .detail-sheet, #m-preview')) return;
   const n = e.target.closest('[data-cid]');
   if (n) previewCard(DB.byId.get(+n.dataset.cid));
-}, true);
+};
+document.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') previewFromEvent(e); }, true);
+document.addEventListener('click', e => { if (!matchMedia('(pointer: fine)').matches || e.pointerType === 'touch') previewFromEvent(e); }, true);
 
 // ライフの表示（減ったら赤、増えたら緑に光らせる）
 const lastLp = {};
