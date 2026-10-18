@@ -689,28 +689,54 @@ async function pdfToText(buf) {
   return out.join('\n');
 }
 
+// PDF の1ページ目を画像（PNG）にする（文字の入っていない、デッキ画像の PDF 用）
+async function pdfFirstPageImage(buf) {
+  if (typeof pdfjsLib === 'undefined') await loadScript(PDFJS_BASE + 'pdf.min.js');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js';
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+  const page = await pdf.getPage(1);
+  const vp0 = page.getViewport({ scale: 1 });
+  const vp = page.getViewport({ scale: Math.min(4, 1400 / vp0.width) });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  return new Promise(res => canvas.toBlob(res, 'image/png'));
+}
+
 function openImport() {
   const ta = el('textarea', { class: 'full', rows: 12, placeholder: '次のどれでも貼り付けられます\n・YDKファイルの中身\n・ydke:// で始まる文字列\n・公式カードデータベースのデッキページからコピーした文字\n・「灰流うらら ×3」のようなカード名の一覧' });
   const neuronHelp = el('details', { class: 'import-help' },
     el('summary', { text: 'ニューロン／マスターデュエルのデッキを取り込むには' }),
+    el('p', { text: 'いちばん簡単なのは、ニューロンの「デッキ画像」を保存して、上の「ファイルから」で選ぶ方法です。カードのイラストを照合してデッキにします。' }),
     el('ol', null,
       el('li', { text: 'ニューロンを KONAMI ID と連携すると、デッキが公式カードデータベース（db.yugioh-card.com）の「マイデッキ」に表示されます。' }),
       el('li', { text: 'パソコンのブラウザでそのデッキのページを開き、カード一覧の部分を選択してコピーし、下の欄に貼り付けます。' }),
       el('li', { text: 'うまく読めない場合は、ブラウザ拡張「Deck transfer for Master Duel」を入れると、デッキのページに書き出しボタンが付きます。YDKファイルか ydke:// の文字列で書き出して、ここで読み込んでください。' })),
     el('p', { class: 'muted', text: '※ニューロンの「デッキコード」は KONAMI のサーバーに保存されたデッキの番号なので、コードそのものからは読み取れません。' }));
-  const file = el('input', { type: 'file', accept: '.ydk,.txt,.pdf,application/pdf' });
+  const file = el('input', { type: 'file', accept: '.ydk,.txt,.pdf,application/pdf,image/*' });
   file.addEventListener('change', async () => {
     const f = file.files[0];
     if (!f) return;
+    // 画像（ニューロンのデッキ画像やスクリーンショット）→ カードのイラストで照合する
+    if (/^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)) {
+      closeImport();
+      openImageImport(f);
+      return;
+    }
     if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf') {
       // PDF（大会のデッキ登録用紙やデッキレシピ）から文字を取り出して、下の欄に入れる
       ta.value = 'PDFを読み込み中…';
       try {
-        ta.value = await pdfToText(await f.arrayBuffer());
+        const buf = await f.arrayBuffer();
+        ta.value = await pdfToText(buf.slice(0));
         if (!ta.value.trim()) ta.value = '';
         const { result } = parseDeckText(ta.value);
         const n = result.main.length + result.extra.length + result.side.length;
-        toast(n ? `PDFから${n}枚のカードを読み取りました。内容を確かめて「読み込む」を押してください` : 'PDFからカードを読み取れませんでした（画像だけのPDFは読めません）');
+        if (n) { toast(`PDFから${n}枚のカードを読み取りました。内容を確かめて「読み込む」を押してください`); return; }
+        // 文字が無い（デッキ画像を PDF にしたもの）なら、1ページ目を画像にしてイラストで照合する
+        const img = await pdfFirstPageImage(buf);
+        closeImport();
+        openImageImport(new File([img], f.name.replace(/\.pdf$/i, '.png'), { type: 'image/png' }));
       } catch (e) {
         ta.value = '';
         toast('PDFを読めませんでした：' + e.message);
@@ -720,7 +746,8 @@ function openImport() {
     ta.value = await f.text();
   });
   const asNew = el('input', { type: 'checkbox', checked: true });
-  showModal({
+  let closeImport = () => {};
+  closeImport = showModal({
     title: 'デッキを読み込む', wide: true,
     body: el('div', { class: 'stack' }, neuronHelp, el('div', null, 'ファイルから：', file), ta,
       el('label', { class: 'check' }, asNew, '新しいデッキとして追加する（オフにすると今のデッキを上書き）')),
@@ -936,6 +963,18 @@ function setupDeckView() {
   });
   $('#deck-code').onclick = openDeckCode;
   $('#deck-code-import').onclick = openCodeImport;
+  $('#deck-image-import').onclick = () => {
+    const input = el('input', { type: 'file', accept: 'image/*,.pdf,application/pdf' });
+    input.addEventListener('change', async () => {
+      const f = input.files[0];
+      if (!f) return;
+      if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf') {
+        try { openImageImport(new File([await pdfFirstPageImage(await f.arrayBuffer())], f.name.replace(/\.pdf$/i, '.png'), { type: 'image/png' })); }
+        catch (e) { toast('PDFを読めませんでした：' + e.message); }
+      } else openImageImport(f);
+    });
+    input.click();
+  };
   $('#deck-restore').onclick = restoreBackup;
   $('#deck-play').onclick = () => {
     if (Decks.current().main.length === 0) { toast('メインデッキが空です'); return; }
