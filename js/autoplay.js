@@ -239,6 +239,7 @@ async function autoStart(handIds) {
   Auto.deckId = deck.id;
   try { Auto.duel.start(); } catch (e) { console.error(e); toast('開始できませんでした：' + e.message); Auto.duel = null; renderBoard(); return; }
   autoAfter();
+  timerStart();
 }
 
 function autoRestart() {
@@ -247,6 +248,7 @@ function autoRestart() {
   Auto.redoLog = null;
   Auto.duel.restart();
   autoAfter(true);
+  timerStart();
   toast('最初の状態に戻しました');
 }
 

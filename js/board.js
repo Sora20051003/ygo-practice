@@ -478,6 +478,7 @@ function startGame(handIds, checked) {
   Board.pick = null;
   persist();
   renderBoard();
+  timerStart();
 }
 
 function restartSame() {
@@ -489,6 +490,7 @@ function restartSame() {
   Board.pick = null;
   persist();
   renderBoard();
+  timerStart();
   toast('最初の状態に戻しました');
 }
 
@@ -782,6 +784,7 @@ function setupBoardView() {
   $('#b-rewind').onclick = () => { if (Board.S) redo(); };
   $('#b-token').onclick = () => { if (Board.S) openToken(); };
   setupAutoPlay();
+  setupTimer();
   // ポーズ画面（設定・デッキ選択・やり直し）
   for (const id of ['#b-start', '#b-pickhand', '#b-restart']) $(id).addEventListener('click', closePause, true);
   $('#b-pause').onclick = openPause;
@@ -943,13 +946,73 @@ async function confirmDeckRules(deck, go) {
 
 // ---------- ポーズ画面 ----------
 const pauseOpen = () => !$('#pause').hidden;
-function openPause() { renderPauseSummary(); $('#pause').hidden = false; }
-function closePause() { $('#pause').hidden = true; renderPauseSummary(); }
+function openPause() { renderPauseSummary(); $('#pause').hidden = false; timerHold(true); renderTimer(); }
+function closePause() { $('#pause').hidden = true; timerHold(false); renderPauseSummary(); renderTimer(); }
 // 盤面の左に出す「今の設定」の短い説明
 function renderPauseSummary() {
   const box = $('#b-summary');
   if (!box) return;
   const d = Decks.get($('#b-deck').value);
   const mode = $('#view-board').classList.contains('auto-mode') ? '効果を自動処理' : '手動';
-  box.textContent = `${d ? d.name : 'デッキ未選択'}・${$('#b-handsize').value === '6' ? '後攻' : '先攻'}・${mode}`;
+  box.textContent = `${d ? d.name : 'デッキ未選択'}・${$('#b-handsize').value === '6' ? '後攻' : '先攻'}・${mode}・制限時間 ${timeLabel(timeLimit())}`;
+}
+
+// ---------- 制限時間（一人回し） ----------
+// 設定は秒数。0 は無限（時間制限なし）。ポーズ画面を開いている間は止まる
+const Timer = { used: 0, since: null, id: null, over: false, running: false };
+const timeLimit = () => store.get('ygo.timeLimit', 0);
+const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const timeLabel = s => (s ? (s % 60 ? `${s}秒（${fmtTime(s)}）` : `${s}秒（${s / 60}分）`) : '無限');
+
+function setupTimer() {
+  const range = $('#b-timelimit');
+  const sync = () => { const v = +range.value; $('#b-timelabel').textContent = timeLabel(v > 900 ? 0 : v); };
+  range.value = timeLimit() || 930;
+  sync();
+  range.addEventListener('input', sync);
+  range.addEventListener('change', () => { sync(); const v = +range.value; store.set('ygo.timeLimit', v > 900 ? 0 : v); Timer.over = false; renderTimer(); renderPauseSummary(); });
+  setInterval(tickTimer, 250);
+}
+const timerElapsed = () => Timer.used + (Timer.since != null ? (performance.now() - Timer.since) / 1000 : 0);
+function timerStart() {
+  Timer.used = 0; Timer.over = false; Timer.running = true;
+  Timer.since = pauseOpen() ? null : performance.now();
+  renderTimer();
+}
+// ポーズ中は止める
+function timerHold(hold) {
+  if (!Timer.running) return;
+  if (hold && Timer.since != null) { Timer.used = timerElapsed(); Timer.since = null; }
+  if (!hold && Timer.since == null) Timer.since = performance.now();
+}
+function tickTimer() {
+  if (!Timer.running) return;
+  renderTimer();
+  const lim = timeLimit();
+  if (lim && !Timer.over && timerElapsed() >= lim) { Timer.over = true; timeUp(); }
+}
+function renderTimer() {
+  const box = $('#b-timer');
+  if (!box) return;
+  const lim = timeLimit();
+  const solo = !document.body.classList.contains('dueling');
+  box.hidden = !(Timer.running && solo);
+  if (box.hidden) return;
+  const t = timerElapsed();
+  const left = lim ? Math.max(0, lim - t) : null;
+  box.textContent = (Timer.since == null ? '⏸ ' : '⏱ ') + (!lim ? `経過 ${fmtTime(t)}` : t >= lim ? `時間切れ（+${fmtTime(t - lim)}）` : `残り ${fmtTime(Math.ceil(left))}`);
+  box.classList.toggle('warn', !!lim && left <= 60 && left > 10);
+  box.classList.toggle('danger', !!lim && left <= 10);
+}
+function timeUp() {
+  if (typeof log === 'function' && Board.S && !autoActive()) { log(`---- 時間切れ（${timeLabel(timeLimit())}） ----`); finishChange(); }
+  showModal({
+    title: '⏰ 時間切れ',
+    body: el('p', { text: `制限時間（${timeLabel(timeLimit())}）になりました。` }),
+    buttons: [
+      { label: '同じ初手でやり直す', primary: true, onClick: () => restartSame() },
+      { label: 'シャッフルして開始', onClick: () => startGame() },
+      { label: 'このまま続ける', onClick: () => {} },
+    ],
+  });
 }
