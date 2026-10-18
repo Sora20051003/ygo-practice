@@ -234,19 +234,41 @@ DB.regCache = {};                    // 'ocg:2024-01-01' → リスト
 // 選べる日付の一覧（1日1回取り直す）
 async function loadRegDates(force = false) {
   let saved = null;
-  try { saved = await idbGet('regDates'); } catch { /* 無ければ取りに行く */ }
-  if (saved) DB.regDates = saved.dates;
+  try { saved = await idbGet('regDates2'); } catch { /* 無ければ取りに行く */ }
+  if (saved) { DB.regDates = saved.dates; DB.regNameOnly = new Set(saved.nameOnly || []); }
   if (saved && !force && Date.now() - saved.fetched < BANLIST_TTL) return;
   try {
-    const dates = {};
+    const dates = {}, nameOnly = [];
     for (const [fmt, f] of Object.entries(FORMATS)) {
       const r = await fetch(REG_REPO_API(f.list));
       if (!r.ok) throw new Error(r.status);
-      dates[fmt] = (await r.json()).map(x => (x.name.match(/^(\d{4}-\d{2}-\d{2})\.vector\.json$/) || [])[1]).filter(Boolean).sort().reverse();
+      const files = (await r.json()).map(x => x.name);
+      const pick = re => new Set(files.map(n => (n.match(re) || [])[1]).filter(Boolean));
+      const vec = pick(/^(\d{4}-\d{2}-\d{2})\.vector\.json$/);
+      // 古いリスト（OCG は 2021 年より前）は英語のカード名で書かれた .name.json しかないので、それも使う
+      const names = pick(/^(\d{4}-\d{2}-\d{2})\.name\.json$/);
+      for (const d of names) if (!vec.has(d)) nameOnly.push(fmt + ':' + d);
+      dates[fmt] = [...new Set([...vec, ...names])].sort().reverse();
     }
     DB.regDates = dates;
-    await idbSet('regDates', { fetched: Date.now(), dates });
+    DB.regNameOnly = new Set(nameOnly);
+    await idbSet('regDates2', { fetched: Date.now(), dates, nameOnly });
   } catch (e) { console.warn('過去のリストの一覧を取得できませんでした', e); }
+}
+DB.regNameOnly = new Set();
+
+// 英語名で書かれた古いリストを、カード番号（cid）のリストに直す
+const REG_NAME_URL = (key, date) => `https://raw.githubusercontent.com/DawnbrandBots/yaml-yugi-limit-regulation/master/data/${key}/${date}.name.json`;
+const enKey = s => String(s || '').toLowerCase().normalize('NFKC').replace(/[^a-z0-9]/g, '');
+function namesToVector(date, byName) {
+  const index = new Map();
+  for (const c of DB.cards) if (c.cid && c.en) { const k = enKey(c.en); if (!index.has(k)) index.set(k, c.cid); }
+  const regulation = {}, missing = [];
+  for (const [name, v] of Object.entries(byName)) {
+    const cid = index.get(enKey(name));
+    if (cid) regulation[cid] = v; else missing.push(name);
+  }
+  return { date, regulation, missing };
 }
 
 // 過去のリスト本体（一度取ったら変わらないので保存しておく）
@@ -254,9 +276,16 @@ async function loadRegulation(fmt, date) {
   const key = fmt + ':' + date;
   if (DB.regCache[key]) return DB.regCache[key];
   try { const saved = await idbGet('reg:' + key); if (saved) return (DB.regCache[key] = saved); } catch { /* 取りに行く */ }
-  const r = await fetch(REG_URL(FORMATS[fmt].list, date));
-  if (!r.ok) throw new Error('リストを取得できませんでした（' + r.status + '）');
-  const v = await r.json();
+  let v;
+  if (DB.regNameOnly.has(key)) {
+    const r = await fetch(REG_NAME_URL(FORMATS[fmt].list, date));
+    if (!r.ok) throw new Error('リストを取得できませんでした（' + r.status + '）');
+    v = namesToVector(date, await r.json());
+  } else {
+    const r = await fetch(REG_URL(FORMATS[fmt].list, date));
+    if (!r.ok) throw new Error('リストを取得できませんでした（' + r.status + '）');
+    v = await r.json();
+  }
   idbSet('reg:' + key, v).catch(() => {});
   return (DB.regCache[key] = v);
 }

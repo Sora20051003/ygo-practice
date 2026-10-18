@@ -96,9 +96,12 @@ function renderRegSelect(deck) {
     sel.append(g);
   }
   const past = dates.filter(d => d <= today && d !== latest);
-  if (past.length) {
-    const g = el('optgroup', { label: '過去のリスト（その時に未発売のカードは禁止扱い）' });
-    for (const d of past) g.append(el('option', { value: d, text: `${fmtDate(d)}〜` }));
+  // 過去のリストは年ごとにまとめる（その時に未発売のカードは禁止扱い）
+  const years = new Map();
+  for (const d of past) { const y = d.slice(0, 4); if (!years.has(y)) years.set(y, []); years.get(y).push(d); }
+  for (const [y, ds] of years) {
+    const g = el('optgroup', { label: `${y}年（過去のリスト・未発売のカードは禁止扱い）` });
+    for (const d of ds) g.append(el('option', { value: d, text: `${fmtDate(d)}〜` }));
     sel.append(g);
   }
   if (cur !== 'latest' && cur !== 'none' && !dates.includes(cur)) sel.append(el('option', { value: cur, text: `${fmtDate(cur)}〜` }));
