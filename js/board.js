@@ -1054,8 +1054,14 @@ function setupRotateHint() {
 }
 let lockTried = 0, lockFailed = false;
 function tryLandscapeLock() {
-  if (!(document.documentElement.requestFullscreen && screen.orientation && screen.orientation.lock)) return;
+  if (!(screen.orientation && screen.orientation.lock)) return;
   if (lockFailed || !document.body.classList.contains('rotated') || document.fullscreenElement) return;
+  // ホーム画面に追加したアプリとして開いているとき：全画面の案内を出さずに、そのまま横向きに固定する
+  if (matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches) {
+    screen.orientation.lock('landscape').catch(() => { lockFailed = true; });
+    return;
+  }
+  if (!document.documentElement.requestFullscreen) return;
   if (Date.now() - lockTried < 1500) return;   // touchend と click で2回呼ばれないように
   lockTried = Date.now();
   document.documentElement.requestFullscreen({ navigationUI: 'hide' })
