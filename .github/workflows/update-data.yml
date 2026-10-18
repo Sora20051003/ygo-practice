@@ -1,0 +1,35 @@
+# カードの発売日の対応表（data/release-dates.js）を毎日作り直し、変わっていれば自動で公開する。
+# 禁止・制限リストとカードデータはアプリが自分で取りに行くので、ここでは発売日の表だけを扱う。
+name: 発売日データの自動更新
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 毎日 12:00（日本時間）
+  workflow_dispatch:       # 手動でも実行できる
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 発売日の表を作り直す
+        run: python3 .github/scripts/build_release_dates.py
+      - name: 変わっていれば記録して公開
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- data/release-dates.js; then
+            echo "変更なし"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/release-dates.js
+          git commit -m "発売日データを自動更新"
+          git push
+          # 自動の記録では公開が始まらないことがあるので、明示的に公開をやり直す
+          gh api -X POST "repos/${{ github.repository }}/pages/builds" || true

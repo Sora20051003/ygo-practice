@@ -163,12 +163,18 @@ const FORMATS = {
 const BANLIST_URL = key => `https://dawnbrandbots.github.io/yaml-yugi-limit-regulation/${key}/current.vector.json`;
 DB.banlists = { ocg: null, md: null };
 
+// 保存済みのリストがあればすぐそれを使い、無いときだけ取りに行く（起動を待たせないため）
+const BANLIST_TTL = 6 * 60 * 60 * 1000;   // 6時間たったら新しいリストが出ていないか確認する
 async function loadBanlists(force = false) {
   let saved = null;
   try { saved = await idbGet('banlists'); } catch { /* 無ければ取りに行く */ }
-  const fresh = saved && Date.now() - saved.fetched < 24 * 60 * 60 * 1000;   // 1日1回だけ取り直す
   if (saved) DB.banlists = saved.lists;
-  if (fresh && !force) return;
+  DB.banlistFetched = saved ? saved.fetched : 0;
+  if (!saved || force) await refreshBanlists();
+}
+
+// 新しいリストを取りに行く。適用日が変わったルールの一覧を返す（変化なしなら空）
+async function refreshBanlists() {
   try {
     const lists = {};
     for (const [fmt, f] of Object.entries(FORMATS)) {
@@ -176,11 +182,44 @@ async function loadBanlists(force = false) {
       if (!r.ok) throw new Error(r.status);
       lists[fmt] = await r.json();
     }
+    const changed = Object.keys(lists).filter(fmt => DB.banlists[fmt] && DB.banlists[fmt].date !== lists[fmt].date);
     DB.banlists = lists;
+    DB.banlistFetched = Date.now();
     await idbSet('banlists', { fetched: Date.now(), lists });
+    return changed;
   } catch (e) {
     console.warn('禁止・制限リストを取得できませんでした', e);   // 保存済みのものがあればそれを使う
+    return [];
   }
+}
+
+// 起動中・使っている間に、カードデータと禁止・制限リストの更新を裏で確認する（コードの更新は不要）
+// onChange(内容) で画面を描き直してもらう
+function startAutoDataUpdate(onChange) {
+  const check = async () => {
+    // 禁止・制限リスト（6時間おき）と、過去のリストの一覧
+    if (Date.now() - (DB.banlistFetched || 0) > BANLIST_TTL) {
+      const changed = await refreshBanlists();
+      await loadRegDates(true);
+      if (changed.length) onChange('banlist', changed);
+    }
+    // カードデータ（1日1回。新しいカードがあれば取り込む）
+    if (DB.meta && Date.now() - Date.parse(DB.meta.checked || DB.meta.date) > 24 * 60 * 60 * 1000) {
+      try {
+        const updated = await updateCards(null);
+        DB.meta.checked = new Date().toISOString();
+        idbSet('meta', DB.meta).catch(() => {});
+        if (updated) {
+          // 新しく取り込んだカードにも日本語の効果文を付け直す
+          try { applyJaTexts(await idbGet('jatexts') || {}); } catch { /* 無くても動く */ }
+          onChange('cards');
+        }
+      } catch (e) { console.warn('カードデータの確認に失敗しました', e); }
+    }
+  };
+  check();
+  setInterval(check, 30 * 60 * 1000);   // 開きっぱなしでも30分おきに確認
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
 }
 
 // ---------- レギュレーション（どの時点の禁止・制限リストを使うか） ----------
@@ -192,11 +231,11 @@ DB.regDates = { ocg: [], md: [] };   // 選べる過去のリストの日付（�
 DB.regCache = {};                    // 'ocg:2024-01-01' → リスト
 
 // 選べる日付の一覧（1日1回取り直す）
-async function loadRegDates() {
+async function loadRegDates(force = false) {
   let saved = null;
   try { saved = await idbGet('regDates'); } catch { /* 無ければ取りに行く */ }
   if (saved) DB.regDates = saved.dates;
-  if (saved && Date.now() - saved.fetched < 24 * 60 * 60 * 1000) return;
+  if (saved && !force && Date.now() - saved.fetched < BANLIST_TTL) return;
   try {
     const dates = {};
     for (const [fmt, f] of Object.entries(FORMATS)) {

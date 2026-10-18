@@ -105,6 +105,16 @@ async function init() {
   setupBoardView();
   switchView(store.get('ygo.view', 'deck'));
   startRemoteSync(applyRemoteDecks);
+  // カードデータ・禁止・制限リストの自動更新（アプリの更新なしで最新になる）
+  startAutoDataUpdate((what, detail) => {
+    updateDataInfo();
+    renderResults(); renderDeck(); renderBoard();
+    if (what === 'banlist') {
+      toast('禁止・制限リストが更新されました（' + detail.map(f => `${FORMATS[f].short} ${DB.banlists[f].date.replace(/-/g, '/')}〜`).join('・') + '）');
+    } else if (what === 'cards') {
+      toast('新しいカードを取り込みました');
+    }
+  });
   checkSharedDeckLink();
   window.addEventListener('hashchange', checkSharedDeckLink);
   startUpdateCheck();

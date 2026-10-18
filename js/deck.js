@@ -87,9 +87,18 @@ function renderRegSelect(deck) {
   const latest = DB.banlists[fmt] && DB.banlists[fmt].date;
   sel.append(el('option', { value: 'latest', text: `最新${latest ? `（${fmtDate(latest)}〜）` : ''}` }));
   const dates = DB.regDates[fmt] || [];
-  if (dates.length) {
+  // 発表済みで、まだ適用日が来ていない次回のリスト
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = dates.filter(d => d > today && d !== latest);
+  if (upcoming.length) {
+    const g = el('optgroup', { label: '次回のリスト（発表済み）' });
+    for (const d of upcoming) g.append(el('option', { value: d, text: `${fmtDate(d)}〜（次回・発表済み）` }));
+    sel.append(g);
+  }
+  const past = dates.filter(d => d <= today && d !== latest);
+  if (past.length) {
     const g = el('optgroup', { label: '過去のリスト（その時に未発売のカードは禁止扱い）' });
-    for (const d of dates) if (d !== latest) g.append(el('option', { value: d, text: `${fmtDate(d)}〜` }));
+    for (const d of past) g.append(el('option', { value: d, text: `${fmtDate(d)}〜` }));
     sel.append(g);
   }
   if (cur !== 'latest' && cur !== 'none' && !dates.includes(cur)) sel.append(el('option', { value: cur, text: `${fmtDate(cur)}〜` }));
