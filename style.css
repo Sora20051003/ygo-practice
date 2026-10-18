@@ -825,3 +825,17 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
 .d-addbtns .btn { flex: 1 1 auto; }
 .sort-pick { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
 .sort-pick select { font-size: 13px; padding: 2px 4px; }
+
+/* 一人回しのポーズ画面（設定はここにまとめる） */
+.pause-back { position: fixed; inset: 0; z-index: 45; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.pause-back[hidden] { display: none; }
+.pause-box { background: var(--panel); border-radius: 12px; width: min(980px, 100%); max-height: 90vh; overflow: auto; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); }
+.pause-head { margin-bottom: 10px; font-size: 17px; }
+.pause-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.pause-sec { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2, transparent); }
+.pause-sec h4 { margin: 0; font-size: 14px; }
+@media (max-width: 720px) {
+  .pause-back { padding: 0; align-items: stretch; }
+  .pause-box { border-radius: 0; max-height: none; height: 100%; padding-bottom: 80px; }
+}
+.pause-head .btn { flex: 0 0 auto; min-width: 120px; }

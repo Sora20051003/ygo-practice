@@ -687,6 +687,7 @@ function renderBoard() {
   field.innerHTML = '';
   $('#view-board').classList.toggle('auto-mode', autoActive());
   $$('#b-mode button').forEach(b => b.classList.toggle('on', (b.dataset.mode === 'auto') === Auto.on));
+  renderPauseSummary();
   if (!(typeof Duel !== 'undefined' && Duel.active)) $('#opp-bar').hidden = true;
   if (autoActive()) {
     autoPanel();
@@ -781,6 +782,16 @@ function setupBoardView() {
   $('#b-rewind').onclick = () => { if (Board.S) redo(); };
   $('#b-token').onclick = () => { if (Board.S) openToken(); };
   setupAutoPlay();
+  // ポーズ画面（設定・デッキ選択・やり直し）
+  for (const id of ['#b-start', '#b-pickhand', '#b-restart']) $(id).addEventListener('click', closePause, true);
+  $('#b-pause').onclick = openPause;
+  $('#mb-pause').onclick = openPause;
+  $('#pause-close').onclick = closePause;
+  $('#b-quickstart').onclick = () => startGame();
+  $('#pause').addEventListener('mousedown', e => { if (e.target.id === 'pause') closePause(); });
+  for (const id of ['#b-deck', '#b-handsize']) $(id).addEventListener('change', renderPauseSummary);
+  $('#b-mode').addEventListener('click', () => setTimeout(renderPauseSummary));
+  renderPauseSummary();
   $('#b-glow').checked = Glow.on;
   $('#b-glow').onchange = e => { Glow.on = e.target.checked; store.set('ygo.glow', Glow.on); renderBoard(); };
   $('#b-ns').onclick = () => { if (!Board.S) return; commit(); Board.S.ns = !Board.S.ns; log(Board.S.ns ? '通常召喚を使用済みに' : '通常召喚を未使用に'); finishChange(); };
@@ -803,12 +814,19 @@ function setupBoardView() {
   });
   document.addEventListener('keydown', e => {
     if ($('#view-board').hidden) return;
-    if (e.target.matches('input, textarea, select')) return;
-    if (e.key === 'Escape') cancelPick();
+    if (e.target.matches && e.target.matches('input, textarea, select')) return;
+    if (e.key === 'Escape') {
+      // ポーズ画面の開け閉め（選択中・メニューや窓が開いているときはそちらを閉じるだけ）
+      if (pauseOpen()) closePause();
+      else if (Board.pick) cancelPick();
+      else if ($('#menu').hidden && !$('#modal-root').children.length && !document.body.classList.contains('dueling')) openPause();
+      return;
+    }
+    if (pauseOpen()) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (Board.S) undo(); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); if (Board.S) redo(); }
     if (e.key === 'd' && Board.S && !$('#modal-root').children.length) drawCard();
-  });
+  }, true);   // メニューを閉じる処理より先に、メニューが開いていたかを見る
 
   const saved = store.get('ygo.board', null);
   if (saved && saved.S) {
@@ -921,4 +939,17 @@ async function confirmDeckRules(deck, go) {
     { label: 'このまま回す', primary: true, onClick: () => { go(); } },
     { label: 'やめる', onClick: () => {} },
   ] });
+}
+
+// ---------- ポーズ画面 ----------
+const pauseOpen = () => !$('#pause').hidden;
+function openPause() { renderPauseSummary(); $('#pause').hidden = false; }
+function closePause() { $('#pause').hidden = true; renderPauseSummary(); }
+// 盤面の左に出す「今の設定」の短い説明
+function renderPauseSummary() {
+  const box = $('#b-summary');
+  if (!box) return;
+  const d = Decks.get($('#b-deck').value);
+  const mode = $('#view-board').classList.contains('auto-mode') ? '効果を自動処理' : '手動';
+  box.textContent = `${d ? d.name : 'デッキ未選択'}・${$('#b-handsize').value === '6' ? '後攻' : '先攻'}・${mode}`;
 }

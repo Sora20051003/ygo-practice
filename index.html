@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261019-032606">
+<link rel="stylesheet" href="style.css?v=20261019-033937">
 </head>
 <body>
 <header class="topbar">
@@ -172,22 +172,11 @@
           <div class="row chat-row"><input id="dp-chat" type="text" placeholder="チャット" maxlength="200"><button class="btn small" id="dp-send">送信</button></div>
         </div>
         <div class="ctrl-group solo-only">
-          <div class="seg full" id="b-mode">
-            <button data-mode="manual">手動</button>
-            <button data-mode="auto" title="カードの効果をルールどおりに自動で処理します（対象などは自分で選びます）">効果を自動処理</button>
-          </div>
-          <label class="muted">デッキ</label>
-          <select id="b-deck"></select>
-          <div id="b-reginfo" class="muted small-note"></div>
           <div class="row">
-            <select id="b-handsize">
-              <option value="5">先攻（5枚）</option>
-              <option value="6">後攻（6枚）</option>
-            </select>
+            <button class="btn" id="b-pause" title="設定・デッキ選択・やり直し（Escキー）">⏸ ポーズ・設定</button>
+            <button class="btn primary" id="b-quickstart">シャッフルして開始</button>
           </div>
-          <button class="btn primary" id="b-start">シャッフルして開始</button>
-          <button class="btn" id="b-pickhand">初手を選んで開始</button>
-          <button class="btn" id="b-restart">同じ初手でやり直す</button>
+          <div id="b-summary" class="muted small-note"></div>
         </div>
         <div class="ctrl-group auto-only" id="auto-panel">
           <div id="ap-status" class="ap-status">「シャッフルして開始」で始めます</div>
@@ -204,32 +193,6 @@
           <div class="row">
             <button class="btn" id="ap-rewind" title="戻した手を1手やり直す（Ctrl+Y）">1手進む ⏩</button>
           </div>
-          <label class="muted">相手</label>
-          <div class="seg full" id="ap-oppmode" title="次に開始したときから使われます">
-            <button data-v="none">何もしない</button>
-            <button data-v="trap">誘発練習</button>
-          </div>
-          <div id="ap-trapbox" class="ap-trapbox">
-            <div class="row between"><span class="muted small-note">相手の手札</span><button class="btn small" id="ap-trappick">選ぶ</button></div>
-            <div id="ap-traphand" class="ap-traphand"></div>
-            <label class="muted small-note">相手のデッキ</label>
-            <select id="ap-opp"></select>
-          </div>
-          <label class="muted">チェーン確認</label>
-          <div class="seg full" id="ap-chainseg">
-            <button data-v="off" title="チェーンの確認をしない（必ず答える場面だけ）">オフ</button>
-            <button data-v="always" title="召喚・発動などすべての行動のあとで、発動できるものがあれば聞く">オン</button>
-            <button data-v="auto" title="効果が発動したときに、それに対して発動できるものがあるときだけ聞く">自動</button>
-          </div>
-          <div id="ap-chainnote" class="muted small-note"></div>
-          <select id="ap-chain" hidden>
-            <option value="auto">自動（効果の発動に対して何かできるときだけ）</option>
-            <option value="always">オン（すべての行動で確認）</option>
-            <option value="off">オフ（確認しない）</option>
-          </select>
-          <label class="check" title="オフ（おすすめ）：任意の効果は「発動しますか？」と聞きます。強制の効果はルールどおり自動で発動します。オンにすると、召喚・特殊召喚したモンスター自身の任意の効果も聞かずに発動します"><input type="checkbox" id="ap-autotrig"> 任意の召喚時効果も聞かずに発動する</label>
-          <label class="check"><input type="checkbox" id="ap-anim"> 動きの演出</label>
-          <p class="muted small-note">カードをクリックすると、今できる操作が出ます。効果の処理には EDOPro のカードスクリプトを使っています（まれに未対応のカードがあります）。</p>
         </div>
         <div class="ctrl-group manual-only">
           <div class="row">
@@ -247,8 +210,6 @@
             <button class="btn" id="b-ns">通常召喚：未使用</button>
             <button class="btn" id="b-turn">次のターン</button>
           </div>
-          <label class="check"><input type="checkbox" id="b-autoshuffle" checked> デッキから取ったら自動でシャッフル</label>
-          <label class="check" title="効果の処理はしていないので、ルールと効果文から推測した目安です"><input type="checkbox" id="b-glow"> 光らせる：<span class="glow-key y">発動</span><span class="glow-key b">召喚</span></label>
         </div>
         <div class="ctrl-group manual-only">
           <div class="row between"><b>使用済みの効果</b><button class="btn small" id="b-used-clear">クリア</button></div>
@@ -275,6 +236,67 @@
         <p class="muted">カードをクリックすると操作メニューと詳細が表示されます。カードはドラッグでも動かせます。</p>
       </div>
     </div>
+    <!-- ポーズ画面：設定・デッキ選択・やり直し -->
+    <div id="pause" class="pause-back" hidden>
+      <div class="pause-box">
+        <div class="row between pause-head"><b>⏸ ポーズ</b><button class="btn primary" id="pause-close">▶ 再開</button></div>
+        <div class="pause-grid">
+          <div class="pause-sec">
+            <h4>ゲーム</h4>
+            <div class="seg full" id="b-mode">
+              <button data-mode="manual">手動</button>
+              <button data-mode="auto" title="カードの効果をルールどおりに自動で処理します（対象などは自分で選びます）">効果を自動処理</button>
+            </div>
+            <label class="muted">デッキ</label>
+            <select id="b-deck"></select>
+            <div id="b-reginfo" class="muted small-note"></div>
+            <select id="b-handsize">
+              <option value="5">先攻（5枚）</option>
+              <option value="6">後攻（6枚）</option>
+            </select>
+            <button class="btn primary" id="b-start">シャッフルして開始</button>
+            <button class="btn" id="b-pickhand">初手を選んで開始</button>
+            <button class="btn" id="b-restart">同じ初手でやり直す</button>
+          </div>
+          <div class="pause-sec auto-only">
+            <h4>相手</h4>
+            <div class="seg full" id="ap-oppmode" title="次に開始したときから使われます">
+              <button data-v="none">何もしない</button>
+              <button data-v="trap">誘発練習</button>
+            </div>
+            <div id="ap-trapbox" class="ap-trapbox">
+              <div class="row between"><span class="muted small-note">相手の手札</span><button class="btn small" id="ap-trappick">選ぶ</button></div>
+              <div id="ap-traphand" class="ap-traphand"></div>
+              <label class="muted small-note">相手のデッキ</label>
+              <select id="ap-opp"></select>
+            </div>
+          </div>
+          <div class="pause-sec auto-only">
+            <h4>処理の設定</h4>
+            <label class="muted">チェーン確認</label>
+            <div class="seg full" id="ap-chainseg">
+              <button data-v="off" title="チェーンの確認をしない（必ず答える場面だけ）">オフ</button>
+              <button data-v="always" title="召喚・発動などすべての行動のあとで、発動できるものがあれば聞く">オン</button>
+              <button data-v="auto" title="効果が発動したときに、それに対して発動できるものがあるときだけ聞く">自動</button>
+            </div>
+            <div id="ap-chainnote" class="muted small-note"></div>
+            <select id="ap-chain" hidden>
+              <option value="auto">自動（効果の発動に対して何かできるときだけ）</option>
+              <option value="always">オン（すべての行動で確認）</option>
+              <option value="off">オフ（確認しない）</option>
+            </select>
+            <label class="check" title="オフ（おすすめ）：任意の効果は「発動しますか？」と聞きます。強制の効果はルールどおり自動で発動します。オンにすると、召喚・特殊召喚したモンスター自身の任意の効果も聞かずに発動します"><input type="checkbox" id="ap-autotrig"> 任意の召喚時効果も聞かずに発動する</label>
+            <label class="check"><input type="checkbox" id="ap-anim"> 動きの演出</label>
+            <p class="muted small-note">カードをクリックすると、今できる操作が出ます。効果の処理には EDOPro のカードスクリプトを使っています（まれに未対応のカードがあります）。</p>
+          </div>
+          <div class="pause-sec manual-only">
+            <h4>手動の設定</h4>
+            <label class="check"><input type="checkbox" id="b-autoshuffle" checked> デッキから取ったら自動でシャッフル</label>
+            <label class="check" title="効果の処理はしていないので、ルールと効果文から推測した目安です"><input type="checkbox" id="b-glow"> 光らせる：<span class="glow-key y">発動</span><span class="glow-key b">召喚</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
     <!-- スマホ用：画面下に固定するよく使うボタン -->
     <div class="mobile-bar">
       <button id="mb-draw" class="manual-only">ドロー</button>
@@ -283,6 +305,7 @@
       <button id="mb-shuffle" class="manual-only">シャッフル</button>
       <button id="mb-log">ログ</button>
       <button id="mb-ctrl">操作 ▾</button>
+      <button id="mb-pause" class="solo-only">⏸ 設定</button>
     </div>
   </section>
 
@@ -317,19 +340,19 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261019-032606"></script>
-<script src="js/consts.js?v=20261019-032606"></script>
-<script src="js/ui.js?v=20261019-032606"></script>
-<script src="js/data.js?v=20261019-032606"></script>
-<script src="js/firebase-config.js?v=20261019-032606"></script>
-<script src="js/auth.js?v=20261019-032606"></script>
-<script src="js/deck.js?v=20261019-032606"></script>
-<script src="js/board.js?v=20261019-032606"></script>
-<script src="js/engine.js?v=20261019-032606"></script>
-<script src="js/autoplay.js?v=20261019-032606"></script>
-<script src="js/glow.js?v=20261019-032606"></script>
-<script src="js/duel.js?v=20261019-032606"></script>
-<script src="js/imgdeck.js?v=20261019-032606"></script>
-<script src="js/app.js?v=20261019-032606"></script>
+<script src="js/version.js?v=20261019-033937"></script>
+<script src="js/consts.js?v=20261019-033937"></script>
+<script src="js/ui.js?v=20261019-033937"></script>
+<script src="js/data.js?v=20261019-033937"></script>
+<script src="js/firebase-config.js?v=20261019-033937"></script>
+<script src="js/auth.js?v=20261019-033937"></script>
+<script src="js/deck.js?v=20261019-033937"></script>
+<script src="js/board.js?v=20261019-033937"></script>
+<script src="js/engine.js?v=20261019-033937"></script>
+<script src="js/autoplay.js?v=20261019-033937"></script>
+<script src="js/glow.js?v=20261019-033937"></script>
+<script src="js/duel.js?v=20261019-033937"></script>
+<script src="js/imgdeck.js?v=20261019-033937"></script>
+<script src="js/app.js?v=20261019-033937"></script>
 </body>
 </html>
