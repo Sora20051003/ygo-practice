@@ -1,9 +1,9 @@
-// 対戦（2人のブラウザを直接つなぐ。ログインしていなくてもよい）
+// 対戦（公開の中継サーバー MQTT を通して2人がやり取りする。ログインしていなくてもよい）
 // ・部屋を作る → 6文字の部屋コードを相手に教える → 相手が参加 → お互いデッキを選んで「準備OK」で開始
 // ・自分の盤面は今までどおり手で動かす。変わるたびに「相手に見せてよい情報だけ」を相手に送る
 //   （手札の中身・デッキの順番・裏向きのカードは送らない）
 // ・LP・ターン・フェイズ・チャット・コイン・サイコロ・カードの公開・相手へのダメージは、部屋で共有する
-// 通信は PeerJS（WebRTC。相手を見つけるときだけ公開の仲介サーバーを使う）。Supabase 用の通信も残してある。テスト用に、同じパソコンの2つの画面でやり取りする仕組みもある（?duelTest=A など）
+// 通信は MQTT（公開の中継サーバー）。直接つなぐ PeerJS 版と Supabase 版も残してある（今は使っていない）。テスト用に、同じパソコンの2つの画面でやり取りする仕組みもある（?duelTest=A など）
 
 const PHASES = [['DP', 'ドロー'], ['SP', 'スタンバイ'], ['M1', 'メイン1'], ['BP', 'バトル'], ['M2', 'メイン2'], ['EP', 'エンド']];
 const START_LP = 8000;
@@ -189,6 +189,198 @@ class PeerDuelTransport {
   leave() { this.closed = true; this.h = null; try { if (this.peer) this.peer.destroy(); } catch { /* もう閉じている */ } }
 }
 
+// ---------- 通信（サーバーなし：公開の中継サーバー MQTT を経由する） ----------
+// 2人とも、誰でも無料で使える公開の中継サーバー（MQTT ブローカー）へつなぎ、部屋ごとの「話題（トピック）」でやり取りする。
+// どちらも外へ向かってつなぐだけなので、スマホの回線どうしでもつながる（ブラウザどうしを直接つなぐ方式はつながらないことがある）。
+// 部屋を作った人（ホスト）の画面が部屋の情報を持ち、参加した人に送る。
+//   <base>/room/<コード>/alive ：部屋があるしるし（残しておくメッセージ。ホストが落ちると自動で消える）
+//   <base>/room/<コード>/msg   ：やり取り（{ from, to?, kind, ... }）
+//   <base>/match/<コード>      ：「だれかと対戦」で相手を待っているしるし
+const MQTT_URL = 'https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js';
+const MQTT_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
+const MQTT_BASE = 'ygo-practice-sora20051003/v1';
+class MqttDuelTransport {
+  constructor(me) { this.me = me; this.h = null; this.room = null; this.client = null; this.closed = false; }
+  topic(kind, code) { return MQTT_BASE + '/room/' + (code || this.code) + '/' + kind; }
+  // 中継サーバーにつなぐ（つながらなければ次のサーバー）。will：自分が落ちたときに代わりに出してもらうメッセージ
+  async connect(will, brokers) {
+    if (typeof mqtt === 'undefined') await loadScript(MQTT_URL);
+    let last = null;
+    for (const url of brokers || MQTT_BROKERS) {
+      try {
+        const client = await new Promise((resolve, reject) => {
+          const c = mqtt.connect(url, { clientId: 'ygo_' + Math.random().toString(36).slice(2, 12), clean: true, keepalive: 20, reconnectPeriod: 2000, connectTimeout: 8000, will });
+          const timer = setTimeout(() => { c.end(true); reject(new Error('timeout')); }, 9000);
+          c.once('connect', () => { clearTimeout(timer); resolve(c); });
+          c.once('error', e => { clearTimeout(timer); c.end(true); reject(e); });
+        });
+        this.client = client; this.broker = url;
+        client.on('message', (t, buf) => this.onMessage(t, buf));
+        return client;
+      } catch (e) { last = e; }
+    }
+    throw new Error('対戦の中継サーバーにつながりませんでした。インターネット接続を確認してください' + (last ? '（' + last.message + '）' : ''));
+  }
+  sub(t) { return new Promise((res, rej) => this.client.subscribe(t, { qos: 1 }, e => (e ? rej(e) : res()))); }
+  pub(t, obj, retain) {
+    if (!this.client) return;
+    this.client.publish(t, obj == null ? '' : JSON.stringify(obj), { qos: 1, retain: !!retain });
+  }
+  send(m) { this.pub(this.topic('msg'), Object.assign({}, m, { from: this.me.uid })); }
+  // 部屋があるか（残してあるしるしを読む）。少し待って返事がなければ「ない」
+  peekAlive(code, ms) {
+    return new Promise(resolve => {
+      const t = this.topic('alive', code);
+      const off = (tp, buf) => {
+        if (tp !== t) return;
+        this.client.removeListener('message', off); clearTimeout(timer);
+        let v = null; try { v = buf.length ? JSON.parse(buf.toString()) : null; } catch { v = null; }
+        resolve(v);
+      };
+      const timer = setTimeout(() => { this.client.removeListener('message', off); resolve(null); }, ms || 2500);
+      this.client.on('message', off);
+      this.sub(t).catch(() => {});
+    });
+  }
+  setAlive() {
+    const open = !!this.room && !this.room.guest && this.room.status === 'waiting';
+    this.pub(this.topic('alive'), { host: this.me.uid, name: this.me.name, open, t: Date.now() }, true);
+    if (/^MATCH/.test(this.code)) this.pub(MQTT_BASE + '/match/' + this.code, open ? { host: this.me.uid, t: Date.now() } : null, true);
+  }
+  emitRoom() { if (this.h && this.room) this.h.room(JSON.parse(JSON.stringify(this.room))); }
+
+  async create(code) {
+    for (let t = 0; t < 5; t++) {
+      const c = code || newRoomCode();
+      this.code = c;
+      // 落ちたときは「部屋があるしるし」を消してもらう
+      await this.connect({ topic: this.topic('alive', c), payload: '', qos: 1, retain: true }, [MQTT_BROKERS[0]]).catch(() => this.connect({ topic: this.topic('alive', c), payload: '', qos: 1, retain: true }));
+      const alive = await this.peekAlive(c, 1500);
+      if (alive && alive.host !== this.me.uid) {   // ほかの人が使っている
+        this.client.end(true); this.client = null;
+        if (code) throw new Error('その部屋コードは今使われています');
+        continue;
+      }
+      this.isHost = true;
+      this.room = { host: this.me.uid, hostName: this.me.name, guest: null, guestName: null, status: 'waiting', ready: {}, decks: {}, turn: 0, turnPlayer: null, phase: 'DP', winner: null, createdAt: Date.now() };
+      await this.sub(this.topic('msg'));
+      this.setAlive();
+      return c;
+    }
+    throw new Error('部屋を作れませんでした。もう一度お試しください');
+  }
+
+  async join(code) {
+    this.code = code;
+    // 部屋を作った人と同じ中継サーバーを探す。自分が落ちたら部屋を作った人に知らせる
+    for (const url of MQTT_BROKERS) {
+      try { await this.connect({ topic: this.topic('msg', code), payload: JSON.stringify({ kind: 'bye', from: this.me.uid }), qos: 1, retain: false }, [url]); } catch { continue; }
+      const alive = await this.peekAlive(code, 2500);
+      if (alive) break;
+      this.client.end(true); this.client = null;   // このサーバーにはない：次のサーバーで探す
+    }
+    if (!this.client) throw new Error('その部屋コードの部屋はありません（部屋を作った人がアプリを開いている間だけ入れます）');
+    await this.sub(this.topic('msg'));
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.waitJoin = null; reject(new Error('部屋に入れませんでした（部屋を作った人がアプリを閉じていないか確認してください）')); }, 10000);
+      this.waitJoin = {
+        resolve: () => { clearTimeout(timer); this.waitJoin = null; resolve(); },
+        reject: e => { clearTimeout(timer); this.waitJoin = null; reject(e); },
+      };
+      this.send({ kind: 'join', me: this.me });
+    });
+  }
+
+  onMessage(t, buf) {
+    if (this.closed) return;
+    if (!buf.length) {
+      // 部屋があるしるしが消えた ＝ 部屋を作った人がいなくなった
+      if (!this.isHost && t === this.topic('alive') && this.room && this.h) this.h.error(new Error('部屋を作った人との接続が切れました'));
+      return;
+    }
+    if (t !== this.topic('msg')) return;
+    let m;
+    try { m = JSON.parse(buf.toString()); } catch { return; }
+    if (m.from === this.me.uid) return;   // 自分が出したもの
+    if (m.to && m.to !== this.me.uid) return;   // ほかの人あて
+    if (this.isHost) this.hostRecv(m); else this.guestRecv(m);
+  }
+  // 部屋を作った人：参加した人からのメッセージ
+  hostRecv(m) {
+    const r = this.room;
+    if (m.kind === 'join') {
+      if (!m.me || (r.guest && r.guest !== m.me.uid)) { if (m.me) this.send({ kind: 'full', to: m.me.uid }); return; }
+      const rejoin = r.guest === m.me.uid;
+      r.guest = m.me.uid; r.guestName = m.me.name;
+      this.send({ kind: 'room', to: m.me.uid, room: r });
+      if (this.lastState) this.send({ kind: 'state', to: m.me.uid, json: this.lastState });   // 入り直しのときは自分の盤面も送り直す
+      this.setAlive();
+      this.emitRoom();
+      if (rejoin && this.h) this.h.event({ type: 'sys', from: 'sys', name: '', text: m.me.name + ' が入り直しました', ts: Date.now() });
+      return;
+    }
+    if (m.from !== r.guest) return;   // 部屋の参加者以外は無視
+    if (m.kind === 'bye') { if (this.h) this.h.error(new Error('相手との接続が切れました（相手が「前回の部屋に戻る」で戻ってこられます）')); return; }
+    this.common(m);
+  }
+  // 参加した人：部屋を作った人からのメッセージ
+  guestRecv(m) {
+    if (this.waitJoin) {
+      if (m.kind === 'full') { this.waitJoin.reject(new Error('この部屋はもう満員です')); return; }
+      if (m.kind === 'room') { this.room = m.room; this.waitJoin.resolve(); this.emitRoom(); return; }
+    }
+    if (this.room && m.from !== this.room.host) return;
+    this.common(m);
+  }
+  common(m) {
+    if (m.kind === 'room') { this.room = m.room; this.emitRoom(); }
+    else if (m.kind === 'patch' && this.room) { applyPatch(this.room, m.patch); if (this.isHost) this.setAlive(); this.emitRoom(); }
+    else if (m.kind === 'state' && this.h) this.h.opp(JSON.parse(m.json));
+    else if (m.kind === 'event' && this.h) this.h.event(m.ev);
+  }
+  listen(code, h) { this.h = h; this.emitRoom(); }
+  async updateRoom(patch) { applyPatch(this.room, patch); this.send({ kind: 'patch', patch }); if (this.isHost) this.setAlive(); this.emitRoom(); }
+  async sendState(json) { this.lastState = json; this.send({ kind: 'state', json }); }
+  async sendEvent(ev) {
+    const e = Object.assign({}, ev, { from: this.me.uid, name: this.me.name, ts: Date.now() });
+    this.send({ kind: 'event', ev: e });
+    if (this.h) this.h.event(e);
+  }
+  leave() {
+    if (this.closed) return;
+    if (this.client) {
+      if (this.isHost) { this.pub(this.topic('alive'), null, true); if (/^MATCH/.test(this.code)) this.pub(MQTT_BASE + '/match/' + this.code, null, true); }
+      else this.send({ kind: 'bye' });
+      const c = this.client;
+      setTimeout(() => c.end(), 300);
+    }
+    this.closed = true; this.h = null; this.client = null;
+  }
+  // 「だれかと対戦」：相手を待っている待合の部屋のコードを返す（なければ null）
+  static async findOpen(codes, myUid) {
+    const t = new MqttDuelTransport({ uid: myUid, name: '' });
+    await t.connect(undefined, [MQTT_BROKERS[0]]);
+    try {
+      const found = [];
+      await new Promise(resolve => {
+        t.client.on('message', (tp, buf) => {
+          const code = tp.split('/').pop();
+          if (!buf.length || !codes.includes(code) || tp.indexOf(MQTT_BASE + '/match/') !== 0) return;
+          try { const v = JSON.parse(buf.toString()); if (v.host !== myUid) found.push(code); } catch { /* 読めないものは無視 */ }
+        });
+        t.client.subscribe(MQTT_BASE + '/match/+', { qos: 1 });
+        setTimeout(resolve, 1500);
+      });
+      // 本当にいるか（部屋があるしるしで）確かめる
+      for (const code of found) {
+        const alive = await t.peekAlive(code, 1500);
+        if (alive && alive.open && alive.host !== myUid) return code;
+      }
+      return null;
+    } finally { t.closed = true; if (t.client) t.client.end(true); }
+  }
+}
+
 // ---------- 通信（テスト用：同じパソコンの2つの画面） ----------
 function applyPatch(obj, patch) {
   for (const [k, v] of Object.entries(patch)) {
@@ -289,7 +481,7 @@ function feed(text, cls = '') {
 // ---------- 部屋に入る・作る ----------
 async function duelCreate(code, share) {   // code：前回の部屋を作り直すとき。share：作ったらすぐ招待リンクを送る
   Duel.me = duelMe();
-  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new PeerDuelTransport(Duel.me);
+  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new MqttDuelTransport(Duel.me);
   try {
     const newCode = await Duel.t.create(code);
     enterRoom(newCode);
@@ -322,12 +514,12 @@ async function quickMatch() {
   const close = showModal({ title: '相手を探しています…', body: el('div', { class: 'stack' }, el('div', { class: 'spinner' }), el('p', { class: 'muted', text: '待っている人がいるか確かめています（数秒かかります）' })) });
   try {
     Duel.me = duelMe();
-    const open = DUEL_TEST ? null : await PeerDuelTransport.findOpen(MATCH_SLOTS, Duel.me.uid);
+    const open = DUEL_TEST ? null : await MqttDuelTransport.findOpen(MATCH_SLOTS, Duel.me.uid);
     close();
     if (open) { await duelJoin(open); return; }
     // だれも待っていない：空いている番号で部屋を作って待つ
     for (const code of MATCH_SLOTS) {
-      Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new PeerDuelTransport(Duel.me);
+      Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new MqttDuelTransport(Duel.me);
       try {
         await Duel.t.create(code);
         enterRoom(code);
@@ -344,7 +536,7 @@ async function duelJoin(code) {
   code = (code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length !== 6) { toast('部屋コードは6文字です'); return; }
   Duel.me = duelMe();
-  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new PeerDuelTransport(Duel.me);
+  Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new MqttDuelTransport(Duel.me);
   try {
     await Duel.t.join(code);
     enterRoom(code);
@@ -644,7 +836,7 @@ function renderDuelLobby() {
         el('summary', { text: '部屋コードで入る' }),
         el('div', { class: 'row' }, codeInput, el('button', { class: 'btn primary', text: '参加する', onclick: () => duelJoin(codeInput.value) }))),
       last && last.code ? el('button', { class: 'btn', text: `前回の部屋（${last.code}）に戻る`, onclick: () => { Duel.deckId = last.deckId; if (last.host) duelCreate(last.code); else duelJoin(last.code); } }) : null,
-      el('p', { class: 'muted small-note', text: 'ログインしていなくても対戦できます（2人のブラウザを直接つないで対戦します。部屋を作った人がアプリを閉じると部屋はなくなります）。' })));
+      el('p', { class: 'muted small-note', text: 'ログインしていなくても対戦できます（誰でも使える公開の中継サーバーを通して対戦します。部屋を作った人がアプリを閉じると部屋はなくなります）。' })));
     codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') duelJoin(codeInput.value); });
     return;
   }

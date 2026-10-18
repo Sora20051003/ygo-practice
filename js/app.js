@@ -187,7 +187,8 @@ function showAbout(first) {
       li('効果の自動処理のエンジン：', a('https://github.com/n1xx1/ocgcore-wasm', 'ocgcore-wasm'), '（MIT License）。中身は ', a('https://github.com/edo9300/ygopro-core', 'EDOPro の ygopro-core'), '（AGPL-3.0。ライセンスは各リポジトリを参照）'),
       li('カードの効果の処理（カードスクリプト）：', a('https://github.com/ProjectIgnis/CardScripts', 'ProjectIgnis/CardScripts'), '（各リポジトリのライセンスに従います）'),
       li('エンジン用のカードデータ：', a('https://github.com/ProjectIgnis/BabelCDB', 'ProjectIgnis/BabelCDB')),
-      li('ログイン・デッキの同期・対戦：', a('https://supabase.com/', 'Supabase'))),
+      li('ログイン・デッキの同期：', a('https://supabase.com/', 'Supabase')),
+      li('対戦の中継：', a('https://www.emqx.com/en/mqtt/public-mqtt5-broker', 'EMQX の公開 MQTT サーバー'), '、', a('https://www.hivemq.com/mqtt/public-mqtt-broker/', 'HiveMQ の公開 MQTT サーバー'), '（', a('https://github.com/mqttjs/MQTT.js', 'MQTT.js'), '・MIT License）')),
     el('p', null, 'このアプリのソースコードは公開しています：', a(REPO_URL)),
   );
   showModal({
