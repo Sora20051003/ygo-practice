@@ -197,7 +197,7 @@ async function autoStart(handIds) {
   if (opp) {
     try { await autoPrepare(opp); } catch (e) { toast('相手のデッキを準備できませんでした：' + e.message); return; }
   }
-  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value });
+  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked });
   Auto.deckId = deck.id;
   try { Auto.duel.start(); } catch (e) { console.error(e); toast('開始できませんでした：' + e.message); Auto.duel = null; renderBoard(); return; }
   autoAfter();
@@ -217,21 +217,21 @@ const bigReviver = (k, v) => (v && typeof v === 'object' && '__big' in v ? BigIn
 function autoSave() {
   const d = Auto.duel;
   if (!d) return;
-  const picks = d.userMarks.map(i => d.responses[i]);
+  const items = d.history();
   try {
     store.set('ygo.autoBoard', JSON.parse(JSON.stringify({
-      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, picks, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode,
+      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, items, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode, autoTrigger: d.autoTrigger,
     }, bigReplacer)));
   } catch { /* 保存できなくても続けられる */ }
 }
 async function autoResume() {
   let saved = null;
   try { saved = JSON.parse(JSON.stringify(store.get('ygo.autoBoard', null)), bigReviver); } catch { saved = null; }
-  if (!saved || !saved.main) return;
+  if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
   try { await autoPrepare(saved); if (saved.opp) await autoPrepare(saved.opp); } catch { return; }
-  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto' });
+  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: saved.autoTrigger !== false });
   Auto.duel = d; Auto.deckId = saved.deckId;
-  try { d.create(); d.run([...saved.picks]); } catch (e) { console.error(e); Auto.duel = null; return; }
+  try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
   if (autoActive()) autoAfter(true);
 }
 
@@ -275,6 +275,11 @@ function setupAutoPlay() {
   $('#ap-chain').onchange = e => {
     store.set('ygo.chainMode', e.target.value);
     if (Auto.duel) { Auto.duel.chainMode = e.target.value; autoSave(); }
+  };
+  $('#ap-autotrig').checked = store.get('ygo.autoTrigger', true);
+  $('#ap-autotrig').onchange = e => {
+    store.set('ygo.autoTrigger', e.target.checked);
+    if (Auto.duel) { Auto.duel.autoTrigger = e.target.checked; autoSave(); }
   };
   Auto.anim = store.get('ygo.autoAnim', true);
   $('#ap-anim').checked = Auto.anim;

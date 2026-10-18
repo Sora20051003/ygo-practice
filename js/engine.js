@@ -83,6 +83,10 @@ function engineLoad(onStatus) {
     onStatus && onStatus('自動処理の準備中…（ルール処理を読み込んでいます）');
     Engine.ocg = await import(ENGINE_URL);
     Engine.lib = await Engine.ocg.default({ sync: true });
+    // EDOPro のカードデータ（カテゴリ番号が YGOPro と違うので、エンジンにはこちらを渡す。毎日作り直されるので日付を付けて読む）
+    if (typeof EDO_CARDS === 'undefined') {
+      try { await loadScript('data/edo-cards.js?d=' + new Date().toISOString().slice(0, 10)); } catch (e) { console.warn('EDOPro のカードデータを読めませんでした', e); }
+    }
     onStatus && onStatus('自動処理の準備中…（共通スクリプトを読み込んでいます）');
     const texts = await Promise.all(CORE_SCRIPTS.map(n => fetchScript(n, n)));
     CORE_SCRIPTS.forEach((n, i) => { if (texts[i]) Engine.scripts.set(n, texts[i]); });
@@ -140,7 +144,8 @@ const placeText = (con, loc, seq) => {
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto' }) {
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = true }) {
+    this.autoTrigger = autoTrigger;   // 召喚・特殊召喚したときの自分の効果を自動で発動する
     this.main = main; this.extra = extra; this.handIds = handIds || null; this.handSize = handSize;
     this.opp = opp && opp.main && opp.main.length ? opp : null;
     this.chainMode = chainMode;
@@ -155,6 +160,7 @@ class AutoDuel {
     if (this.h) L.destroyDuel(this.h);
     this.log = []; this.pending = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
+    this.justSummoned = new Set();   // 召喚・特殊召喚したばかりのカードの位置（誘発効果を自動で発動するため）
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);   // 相手の判断用（やり直しで同じになるように）
     const team = n => ({ drawCountPerTurn: 1, startingDrawCount: n, startingLP: 8000 });
     this.h = L.createDuel({
@@ -193,7 +199,7 @@ class AutoDuel {
 
   start() { this.create(); this.run(); }
 
-  // 自分の入力が必要になるまで進める
+  // 自分の入力が必要になるまで進める。replay：前に記録した返答（{res, user}）を順に流し直す
   run(replay) {
     const L = Engine.lib;
     for (let guard = 0; guard < 100000; guard++) {
@@ -207,35 +213,42 @@ class AutoDuel {
       if (status === 0) { this.pending = null; return; }   // 対戦終了
       if (status === 2) continue;
       if (!ask) continue;
-      // 相手の番の入力と、選ぶものが無い確認は自動で返す
+      // 自分が次の行動を選ぶ時点で、召喚したばかりのカードの記録は消す（誘発の機会は終わっている）
+      if (ask.player === this.me && (ask.type === MSG.SELECT_IDLECMD || ask.type === MSG.SELECT_BATTLECMD)) this.justSummoned.clear();
+      if (replay && replay.length) { const r = replay.shift(); this.respond(r.res, !r.user, true); continue; }
+      // 相手の番の入力と、聞くまでもない確認は自動で返す
       const auto = ask.player !== this.me ? (this.opp ? cpuAnswer(ask, this) : autoAnswer(ask)) : skippable(ask, this);
-      if (auto) { this.respond(auto, true, replay); continue; }
-      if (replay && replay.length) { this.respond(replay.shift(), false, replay); continue; }
+      if (auto) { this.respond(auto, true, true); continue; }
       this.pending = ask;
       return;
     }
   }
 
-  respond(res, auto, replay) {
+  respond(res, auto, inner) {
     if (!auto) this.userMarks.push(this.responses.length);
     this.responses.push(res);
     this.retry = false;
     if (!auto) this.retries = 0;
     Engine.lib.duelSetResponse(this.h, res);
-    if (!auto && !replay) { this.pending = null; this.run(); }
+    if (!inner) { this.pending = null; this.run(); }
   }
 
-  // 自分の操作を1つ戻す（最後に「召喚する」「発動する」などを選ぶ前まで。最初から流し直す）
+  // これまでの返答（自分が選んだものかどうか付き）
+  history(upto = this.responses.length) {
+    const mine = new Set(this.userMarks);
+    return this.responses.slice(0, upto).map((res, i) => ({ res, user: mine.has(i) }));
+  }
+
+  // 自分の操作を1つ戻す（最後に「召喚する」「発動する」などを選ぶ前まで）。最初から返答を流し直す
   undo() {
     if (!this.userMarks.length) return false;
     const isAction = r => r.type === RES.SELECT_IDLECMD || r.type === RES.SELECT_BATTLECMD;
     let k = this.userMarks.length - 1;
     while (k > 0 && !isAction(this.responses[this.userMarks[k]])) k--;
-    const cut = this.userMarks[k];
-    const keep = this.responses.slice(0, cut).filter((r, i) => this.userMarks.includes(i));
+    const items = this.history(this.userMarks[k]);
     this.responses = []; this.userMarks = [];
     this.create();
-    this.run(keep);
+    this.run(items);
     return true;
   }
   restart() { this.responses = []; this.userMarks = []; this.start(); }
@@ -249,9 +262,9 @@ class AutoDuel {
       case MSG.NEW_TURN: this.turn++; this.turnPlayer = m.player; this.addLog(`---- ${m.player === this.me ? '自分' : '相手'}のターン ----`); break;
       case MSG.NEW_PHASE: this.phase = m.phase; if (this.turnPlayer === this.me) this.addLog(PHASE_NAME[m.phase] || 'フェイズ'); break;
       case MSG.DRAW: if (m.player === this.me) this.addLog(`ドロー：${m.drawn.map(d => cardName(d.code & 0x7fffffff)).join('、')}`); break;
-      case MSG.SUMMONING: this.addLog(`${this.who(m.controller)}${cardName(m.code)} を通常召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
-      case MSG.SPSUMMONING: this.addLog(`${this.who(m.controller)}${cardName(m.code)} を特殊召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
-      case MSG.FLIPSUMMONING: this.addLog(`${this.who(m.controller)}${cardName(m.code)} を反転召喚`); break;
+      case MSG.SUMMONING: this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を通常召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
+      case MSG.SPSUMMONING: this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を特殊召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
+      case MSG.FLIPSUMMONING: this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を反転召喚`); break;
       case MSG.CHAINING: {
         const link = { code: m.code, con: m.controller, loc: m.location, seq: m.sequence, desc: descText(m.description), n: m.chain_size };
         this.chain.push(link); this.events.push({ t: 'chain', ...link });
@@ -312,6 +325,16 @@ class AutoDuel {
 
 // カードの情報（ocgcore 用）
 function engineCardData(code) {
+  const e = typeof EDO_CARDS !== 'undefined' && EDO_CARDS.d[code];
+  if (e) {
+    const [alias, setcodes, type, lv, race, attribute, atk, def] = e;
+    const link = (type & T.LINK) !== 0;
+    return {
+      code, alias, setcodes: setcodes || [], type, level: lv & 0xff, attribute, race: BigInt(race),
+      attack: atk, defense: link ? 0 : def, lscale: (lv >>> 24) & 0xff, rscale: (lv >>> 16) & 0xff, link_marker: link ? def : 0,
+    };
+  }
+  // EDOPro のデータに無いカード（ごく新しいカードなど）は、アプリのカードデータで代用する（カテゴリ番号は合わないことがある）
   const c = DB.byId.get(code);
   if (!c) return null;
   const setcodes = [];
@@ -332,14 +355,27 @@ const isSelectMsg = m => SELECT_TYPES.has(m.type);
 // 自分の入力でも、聞くまでもないもの（発動できるものが無いチェーン確認・並び替え）は自動で返す
 // チェーン確認（マスターデュエルと同じ考え方）
 //   always：発動できるものがあれば毎回聞く
-//   auto  ：相手が発動したとき・自分の誘発効果があるときだけ聞く
-//   off   ：誘発効果があるときだけ聞く
+//   auto  ：相手が発動したとき・相手のターン・自分のターンの場や墓地の効果だけ聞く（自分の効果に自分でチェーンするかは聞かない）
+//   off   ：必ず答える場面（強制効果など）だけ聞く
+const locKey = (con, loc, seq) => `${con}-${loc}-${seq}`;
+
 function skippable(m, duel) {
+  // 召喚・特殊召喚したカード自身の「召喚・特殊召喚した場合」の効果は、聞かずに発動する（対象などは自分で選ぶ）
+  if (duel && duel.autoTrigger && duel.justSummoned.size) {
+    const fresh = c => duel.justSummoned.has(locKey(c.controller, c.location, c.sequence));
+    if (m.type === MSG.SELECT_EFFECTYN && fresh(m)) return { type: RES.SELECT_EFFECTYN, yes: true };
+    if (m.type === MSG.SELECT_CHAIN && !m.forced && m.spe_count > 0 && m.selects.length && m.selects.every(fresh)) return { type: RES.SELECT_CHAIN, index: 0 };
+  }
   if (m.type === MSG.SELECT_CHAIN && !m.forced) {
     if (!m.selects.length) return { type: RES.SELECT_CHAIN, index: null };
     const mode = duel ? duel.chainMode : 'always';
     const last = duel && duel.chain[duel.chain.length - 1];
-    const ask = mode === 'always' || m.spe_count > 0 || (mode === 'auto' && last && last.con !== duel.me);
+    let ask = mode === 'always';
+    if (mode === 'auto') {
+      if (last) ask = last.con !== duel.me;   // 相手の発動にはチェーンを聞く。自分の効果に自分でチェーンするかは聞かない
+      else if (duel.turnPlayer !== duel.me) ask = true;   // 相手のターン（相手の召喚などに手札誘発を使う機会）
+      else ask = !m.selects.every(c => c.location === LOC.HAND);   // 自分のターンで何も起きていないときの手札誘発は聞かない（場・墓地の誘発などは聞く）
+    }
     if (!ask) return { type: RES.SELECT_CHAIN, index: null };
   }
   if (m.type === MSG.SORT_CHAIN) return { type: RES.SORT_CARD, order: null };

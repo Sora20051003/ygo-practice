@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261019-000652">
+<link rel="stylesheet" href="style.css?v=20261019-001500">
 </head>
 <body>
 <header class="topbar">
@@ -204,10 +204,11 @@
           <select id="ap-opp" title="次に開始したときから使われます"></select>
           <label class="muted">チェーン確認</label>
           <select id="ap-chain">
-            <option value="auto">自動（相手が発動したときなど）</option>
+            <option value="auto">自動（相手が発動したとき・相手のターン）</option>
             <option value="always">常に確認</option>
-            <option value="off">確認しない（誘発効果だけ）</option>
+            <option value="off">確認しない（必ず答える場面だけ）</option>
           </select>
+          <label class="check" title="召喚・特殊召喚したモンスター自身の「召喚・特殊召喚した場合」の効果を、確認なしで発動します。対象などは自分で選びます"><input type="checkbox" id="ap-autotrig"> 召喚・特殊召喚したときの効果を自動で発動</label>
           <label class="check"><input type="checkbox" id="ap-anim"> 動きの演出</label>
           <p class="muted small-note">カードをクリックすると、今できる操作が出ます。効果の処理には EDOPro のカードスクリプトを使っています（まれに未対応のカードがあります）。</p>
         </div>
@@ -293,19 +294,19 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261019-000652"></script>
-<script src="js/consts.js?v=20261019-000652"></script>
-<script src="js/ui.js?v=20261019-000652"></script>
-<script src="js/data.js?v=20261019-000652"></script>
-<script src="js/firebase-config.js?v=20261019-000652"></script>
-<script src="js/auth.js?v=20261019-000652"></script>
-<script src="js/deck.js?v=20261019-000652"></script>
-<script src="js/board.js?v=20261019-000652"></script>
-<script src="js/engine.js?v=20261019-000652"></script>
-<script src="js/autoplay.js?v=20261019-000652"></script>
-<script src="js/glow.js?v=20261019-000652"></script>
-<script src="js/duel.js?v=20261019-000652"></script>
-<script src="js/imgdeck.js?v=20261019-000652"></script>
-<script src="js/app.js?v=20261019-000652"></script>
+<script src="js/version.js?v=20261019-001500"></script>
+<script src="js/consts.js?v=20261019-001500"></script>
+<script src="js/ui.js?v=20261019-001500"></script>
+<script src="js/data.js?v=20261019-001500"></script>
+<script src="js/firebase-config.js?v=20261019-001500"></script>
+<script src="js/auth.js?v=20261019-001500"></script>
+<script src="js/deck.js?v=20261019-001500"></script>
+<script src="js/board.js?v=20261019-001500"></script>
+<script src="js/engine.js?v=20261019-001500"></script>
+<script src="js/autoplay.js?v=20261019-001500"></script>
+<script src="js/glow.js?v=20261019-001500"></script>
+<script src="js/duel.js?v=20261019-001500"></script>
+<script src="js/imgdeck.js?v=20261019-001500"></script>
+<script src="js/app.js?v=20261019-001500"></script>
 </body>
 </html>
