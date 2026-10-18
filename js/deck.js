@@ -324,45 +324,119 @@ function toTextList(deck) {
 }
 
 // YDK形式 か「カード名 ×3」形式のテキストを読む
+// ---------- YDKE（デッキを1行の文字列にした形式。EDOPro・Duelingbook・拡張機能などで使われる） ----------
+// ydke://<メイン>!<EX>!<サイド>!  それぞれカードのパスワード（4バイト・リトルエンディアン）を並べて Base64 にしたもの
+function decodeYdkePart(b64) {
+  if (!b64) return [];
+  const bin = atob(b64);
+  const out = [];
+  for (let i = 0; i + 3 < bin.length; i += 4) {
+    out.push((bin.charCodeAt(i) | (bin.charCodeAt(i + 1) << 8) | (bin.charCodeAt(i + 2) << 16) | (bin.charCodeAt(i + 3) << 24)) >>> 0);
+  }
+  return out;
+}
+function encodeYdkePart(ids) {
+  let bin = '';
+  for (const id of ids) bin += String.fromCharCode(id & 0xff, (id >>> 8) & 0xff, (id >>> 16) & 0xff, (id >>> 24) & 0xff);
+  return btoa(bin);
+}
+const toYdke = deck => `ydke://${encodeYdkePart(deck.main)}!${encodeYdkePart(deck.extra)}!${encodeYdkePart(deck.side)}!`;
+
 function parseDeckText(text) {
   const result = { main: [], extra: [], side: [] }, unknown = [];
+
+  // YDKE が含まれていればそれを読む
+  const y = text.match(/ydke:\/\/([A-Za-z0-9+/=]*)!([A-Za-z0-9+/=]*)!([A-Za-z0-9+/=]*)!?/);
+  if (y) {
+    ['main', 'extra', 'side'].forEach((sec, i) => {
+      for (const id of decodeYdkePart(y[i + 1])) {
+        if (DB.byId.has(id)) result[sec].push(id); else unknown.push(`パスワード ${id}`);
+      }
+    });
+    return { result, unknown };
+  }
+
   let sec = 'main';
   const isYdk = /^\s*#main/m.test(text);
+  let last = null;   // 直前に読んだカード（次の行が枚数だけのとき用）
+  const add = (c, n, explicit) => {
+    const target = isExtraType(c) && sec === 'main' ? 'extra' : (!isExtraType(c) && sec === 'extra' ? 'main' : sec);
+    for (let i = 0; i < Math.min(n, MAX_COPIES); i++) result[target].push(c.id);
+    last = { c, target, explicit };
+  };
+  // 見出しなどの、カードではない行（公式データベースのページをコピーしたときに混ざるもの）
+  const ignorable = l => /^(モンスター|魔法|罠|monster|spell|trap|カード名|枚数|合計|total|レアリティ|種類)/i.test(l) || /^[\d\s()（）枚:：/／-]+$/.test(l);
+
   for (let line of text.split(/\r?\n/)) {
     line = line.trim();
     if (!line) continue;
-    const isHeader = /^[【\[#!]/.test(line) || /^(メイン|エクストラ|EX|サイド)(デッキ)?\s*[:：]?\s*(\d+\s*枚?)?$/i.test(line);
-    if (isHeader) {
-      if (/side|サイド/i.test(line)) sec = 'side';
-      else if (/extra|ex|エクストラ/i.test(line)) sec = 'extra';
-      else if (/main|メイン/i.test(line)) sec = 'main';
+
+    // 枚数だけの行 → 直前のカードの枚数
+    const lone = line.match(/^[×xX]?\s*([1-3])\s*枚?$/);
+    if (lone && last && !last.explicit) {
+      for (let i = 1; i < +lone[1]; i++) result[last.target].push(last.c.id);
+      last.explicit = true;
       continue;
     }
-    if (isYdk || /^\d{4,9}$/.test(line)) {
+    // YDK の見出し（#main / #extra / !side）やコメント行
+    if (/^[#!]/.test(line)) {
+      if (/side/i.test(line)) sec = 'side';
+      else if (/extra/i.test(line)) sec = 'extra';
+      else if (/main/i.test(line)) sec = 'main';
+      last = null;
+      continue;
+    }
+    if (isYdk || /^\d{5,9}$/.test(line)) {
       const id = parseInt(line, 10);
       if (DB.byId.has(id)) result[sec].push(id); else unknown.push(line);
       continue;
     }
+    // そのままカード名と一致する行（「デッキ破壊ウイルス」のように見出しと紛らわしい名前もあるので先に調べる）
+    const exact = findCardByName(line);
+    if (exact && normalizeText(line) === exact.nkey) { add(exact, 1, false); continue; }
+
+    // 見出し（メイン／EX／サイド）
+    if (line.length <= 24 && /(デッキ|deck|^【|^\[|^#|^!)/i.test(line)) {
+      if (/side|サイド/i.test(line)) { sec = 'side'; last = null; continue; }
+      if (/extra|ＥＸ|ex|エクストラ/i.test(line)) { sec = 'extra'; last = null; continue; }
+      if (/main|メイン/i.test(line)) { sec = 'main'; last = null; continue; }
+    }
+    if (ignorable(line)) continue;
+
+    // タブ区切り（表をコピーしたとき）：カード名の列と枚数の列を探す
+    const cells = line.split(/\t|\s{2,}|\s*[|｜]\s*/).map(s => s.trim()).filter(Boolean);
+    if (cells.length > 1) {
+      const nameCell = cells.map(s => findCardByName(s)).find(Boolean);
+      const numCell = cells.map(s => s.match(/^[×xX]?\s*([1-3])\s*枚?$/)).find(Boolean);
+      if (nameCell) { add(nameCell, numCell ? +numCell[1] : 1, !!numCell); continue; }
+    }
+
     // 「カード名 ×3」「3 カード名」「カード名 3枚」
-    let name = line, n = 1, m;
-    if ((m = line.match(/^(.*?)\s*[×xX＊*]\s*(\d+)\s*枚?$/)) || (m = line.match(/^(.*?)\s+(\d+)\s*枚?$/))) { name = m[1]; n = +m[2]; }
-    else if ((m = line.match(/^(\d+)\s*[×xX枚]?\s+(.*)$/))) { name = m[2]; n = +m[1]; }
+    let name = line, n = 1, m, explicit = false;
+    if ((m = line.match(/^(.*?)\s*[×xX＊*]\s*(\d+)\s*枚?$/)) || (m = line.match(/^(.*?)\s+(\d+)\s*枚?$/))) { name = m[1]; n = +m[2]; explicit = true; }
+    else if ((m = line.match(/^(\d+)\s*[×xX枚]?\s+(.*)$/))) { name = m[2]; n = +m[1]; explicit = true; }
     const c = findCardByName(name);
     if (!c) { unknown.push(line); continue; }
-    const target = isExtraType(c) && sec === 'main' ? 'extra' : sec;
-    for (let i = 0; i < Math.min(n, MAX_COPIES); i++) result[target].push(c.id);
+    add(c, n, explicit);
   }
   return { result, unknown };
 }
 
 function openImport() {
-  const ta = el('textarea', { class: 'full', rows: 14, placeholder: 'YDKファイルの中身、または\n灰流うらら ×3\n増殖するG 3\nのようなカード名の一覧を貼り付けてください。' });
+  const ta = el('textarea', { class: 'full', rows: 12, placeholder: '次のどれでも貼り付けられます\n・YDKファイルの中身\n・ydke:// で始まる文字列\n・公式カードデータベースのデッキページからコピーした文字\n・「灰流うらら ×3」のようなカード名の一覧' });
+  const neuronHelp = el('details', { class: 'import-help' },
+    el('summary', { text: 'ニューロン／マスターデュエルのデッキを取り込むには' }),
+    el('ol', null,
+      el('li', { text: 'ニューロンを KONAMI ID と連携すると、デッキが公式カードデータベース（db.yugioh-card.com）の「マイデッキ」に表示されます。' }),
+      el('li', { text: 'パソコンのブラウザでそのデッキのページを開き、カード一覧の部分を選択してコピーし、下の欄に貼り付けます。' }),
+      el('li', { text: 'うまく読めない場合は、ブラウザ拡張「Deck transfer for Master Duel」を入れると、デッキのページに書き出しボタンが付きます。YDKファイルか ydke:// の文字列で書き出して、ここで読み込んでください。' })),
+    el('p', { class: 'muted', text: '※ニューロンの「デッキコード」は KONAMI のサーバーに保存されたデッキの番号なので、コードそのものからは読み取れません。' }));
   const file = el('input', { type: 'file', accept: '.ydk,.txt' });
   file.addEventListener('change', async () => { if (file.files[0]) ta.value = await file.files[0].text(); });
   const asNew = el('input', { type: 'checkbox', checked: true });
   showModal({
     title: 'デッキを読み込む', wide: true,
-    body: el('div', { class: 'stack' }, el('div', null, 'ファイルから：', file), ta,
+    body: el('div', { class: 'stack' }, neuronHelp, el('div', null, 'ファイルから：', file), ta,
       el('label', { class: 'check' }, asNew, '新しいデッキとして追加する（オフにすると今のデッキを上書き）')),
     buttons: [{
       label: '読み込む', primary: true, onClick: () => {
@@ -400,6 +474,7 @@ function openExport() {
     body: el('pre', { class: 'card-text', text: text || '（空のデッキです）' }),
     buttons: [
       { label: 'テキストをコピー', onClick: () => { navigator.clipboard.writeText(text).then(() => toast('コピーしました')); return false; } },
+      { label: 'ydke:// をコピー', onClick: () => { navigator.clipboard.writeText(toYdke(deck)).then(() => toast('ydke:// の文字列をコピーしました（EDOPro・拡張機能などに貼り付けられます）')); return false; } },
       {
         label: 'YDKファイルを保存', primary: true, onClick: () => {
           const a = el('a', { href: URL.createObjectURL(new Blob([toYdk(deck)], { type: 'text/plain' })), download: deck.name + '.ydk' });

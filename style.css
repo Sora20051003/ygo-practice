@@ -145,6 +145,13 @@ textarea { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 .qty { min-width: 1.5em; text-align: center; }
 
 .deck-panel { overflow-y: auto; }
+/* 読み込み画面のニューロン取り込みの説明 */
+.import-help { background: var(--panel-2); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
+.import-help summary { margin: 4px 0; color: var(--accent); font-weight: 700; }
+.import-help ol { margin: 6px 0; padding-left: 20px; }
+.import-help li { margin-bottom: 4px; }
+.import-help p { margin: 4px 0; font-size: 12px; }
+
 /* 新しいバージョンのお知らせ */
 .update-banner {
   position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 350;
