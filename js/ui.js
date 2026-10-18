@@ -143,7 +143,13 @@ function rowMark(c) {
   return box;
 }
 
+// カードの見た目。表向きのカードには data-cid を付け、押したときに詳細（スマホは最後に触ったカード）を出せるようにする
 function cardFace(c, opts = {}) {
+  const n = cardFaceInner(c, opts);
+  if (c && c.id && !opts.faceDown && n && n.dataset) n.dataset.cid = c.id;
+  return n;
+}
+function cardFaceInner(c, opts = {}) {
   const { faceDown = false, small = false } = opts;
   if (faceDown) {
     return el('div', { class: 'cardface back' + (small ? ' small' : '') },

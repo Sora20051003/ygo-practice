@@ -339,7 +339,7 @@ function showBoardDetail(loc) {
       el('ul', null, inst.mats.map(m => el('li', { text: cardOf(m).name }))));
   }
   if (inst.tokenCard) {
-    const box = $('#board-detail');
+
     box.innerHTML = '';
     box.append(el('div', { class: 'detail-head f-token' }, el('div', { class: 'd-name', text: c.name })),
       el('div', { class: 'd-stats', text: `${ATTR[c.attr] || ''} ${levelText(c)}　${statText(c)}` }));
@@ -805,3 +805,32 @@ function setupBoardView() {
   }
   renderBoard();
 }
+
+// ---------- 押したカードの表示 ----------
+// パソコン：右の詳細欄に、クリックしたカードを出す。スマホ：盤面の上の帯に、最後に触ったカードを出す（押すと詳細）
+function previewCard(c) {
+  if (!c) return;
+  if (!isMobile()) {
+
+    renderDetail($('#board-detail'), c);
+    return;
+  }
+  const bar = $('#m-preview');
+  bar.hidden = false;
+  bar.innerHTML = '';
+  const text = (c.jaText || '').replace(/\s+/g, ' ');
+  bar.append(
+    el('div', { class: 'mp-face' }, cardFace(c, { small: true })),
+    el('div', { class: 'mp-main' },
+      el('div', { class: 'mp-name', text: c.name }),
+      el('div', { class: 'mp-info muted', text: isMonster(c) ? `${levelText(c)} ${ATTR[c.attr] || ''} ${RACE[c.race] || ''}　${statText(c)}` : typeLine(c) }),
+      el('div', { class: 'mp-text', text })),
+    el('span', { class: 'mp-more muted', text: '詳細 ›' }));
+  bar.onclick = () => showCardDetail(c, '#board-detail');
+}
+document.addEventListener('pointerdown', e => {
+  if ($('#view-board').hidden) return;
+  if (e.target.closest('#board-detail, .detail-sheet, #m-preview')) return;
+  const n = e.target.closest('[data-cid]');
+  if (n) previewCard(DB.byId.get(+n.dataset.cid));
+}, true);

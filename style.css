@@ -779,3 +779,14 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
 .ap-traphand { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .ap-traphand .chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, #ff5a5a 22%, var(--panel)); border: 1px solid color-mix(in srgb, #ff5a5a 45%, transparent); }
 #ap-oppmode button { flex: 1; padding: 6px 4px; font-size: 13px; }
+/* スマホ：最後に触ったカード */
+.m-preview { display: none; }
+@media (max-width: 720px) {
+  .m-preview:not([hidden]) { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); position: sticky; top: 0; z-index: 6; cursor: pointer; }
+  .mp-face { width: 40px; flex: none; }
+  .mp-main { min-width: 0; flex: 1; }
+  .mp-name { font-weight: 700; font-size: 14px; }
+  .mp-info { font-size: 11px; }
+  .mp-text { font-size: 11px; line-height: 1.35; max-height: 2.7em; overflow: hidden; }
+  .mp-more { font-size: 12px; flex: none; }
+}
