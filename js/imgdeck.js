@@ -230,6 +230,17 @@ async function readDeckImage(file) {
   return { canvas, cards: rects.map(r => ({ rect: r, section: r.section, candidates: matchCard(cardFeature(canvas, r), r.section) })) };
 }
 
+// カード1枚を切り抜いて画像にする（表示用。小さい画像は少し大きめにして文字のつぶれを防ぐ）
+function cropCardPic(canvas, r) {
+  const w = Math.max(120, Math.min(240, Math.round(r.w))), h = Math.round(w * r.h / r.w);
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const g = cv.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(canvas, r.x, r.y, r.w, r.h, 0, 0, w, h);
+  return cv.toDataURL('image/jpeg', 0.85);
+}
+
 // ---------- 確認画面 ----------
 // 読み取った結果を、切り抜いた画像と並べて表示し、違うものは候補から選び直してもらう
 async function openImageImport(file) {
@@ -255,15 +266,23 @@ async function openImageImport(file) {
       el('div', { class: 'imgdeck-sec', text: { main: 'メイン', extra: 'EX', side: 'サイド' }[c.section] }), sel));
   });
   const count = s => res.cards.filter(c => c.section === s).length;
+  const usePics = el('input', { type: 'checkbox', checked: true });
   showModal({
     title: 'デッキ画像の読み取り結果', wide: true,
     body: el('div', { class: 'stack' },
       el('p', { text: `メイン${count('main')}枚・EX${count('extra')}枚・サイド${count('side')}枚を見つけました。カード名が違うものは選び直してください（黄色の枠は自信がないカードです）。` }),
+      el('label', { class: 'check' }, usePics, 'この画像のカードを、アプリのカード表示に使う（この端末に保存）'),
       grid),
     buttons: [{
       label: 'このデッキを追加', primary: true, onClick: () => {
         const deck = Decks.blank(file.name.replace(/\.\w+$/, '') || '画像から読み込んだデッキ');
         res.cards.forEach((c, i) => { if (choice[i]) deck[c.section].push(choice[i]); });
+        if (usePics.checked) {
+          const pics = new Map();
+          res.cards.forEach((c, i) => { if (choice[i] && !pics.has(choice[i])) pics.set(choice[i], cropCardPic(res.canvas, c.rect)); });
+          saveUserPics(pics).then(() => { renderDeck(); renderResults(); if (typeof renderBoard === 'function') renderBoard(); })
+            .catch(e => toast('カード画像を保存できませんでした：' + e.message));
+        }
         Decks.list.push(deck); Decks.currentId = deck.id; Decks.save();
         renderDeck(); renderResults(); switchView('deck');
         toast(`「${deck.name}」を追加しました（メイン${deck.main.length}・EX${deck.extra.length}・サイド${deck.side.length}）`);

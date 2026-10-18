@@ -177,12 +177,38 @@ const JP_ARROWS = { 0x40: '◤', 0x80: '▲', 0x100: '◥', 0x08: '◀', 0x20: '
 // 日本版カード画像（tools/download-jp-cards.bat で pics/jp に保存）があればそれを、無ければアプリで描いたカードを出す
 const missingJp = new Set();
 function jpPhotoOrDrawn(c, big) {
-  if (!LOCAL_FILES || !c.id || missingJp.has(c.id)) return jpCard(c, big);
+  const mine = c.id && UserPics.get(c.id);
+  if (!LOCAL_FILES || !c.id || missingJp.has(c.id)) {
+    if (!mine) return jpCard(c, big);
+    return el('div', { class: 'cardface photo jpphoto ' + frameClass(c), title: c.name },
+      el('img', { src: mine, alt: c.name, draggable: 'false' }));
+  }
   const node = el('div', { class: 'cardface photo jpphoto ' + frameClass(c), title: c.name });
   const img = el('img', { src: `pics/jp/${c.id}.jpg`, loading: 'lazy', alt: c.name, draggable: 'false' });
-  img.addEventListener('error', () => { missingJp.add(c.id); node.replaceWith(jpCard(c, big)); });
+  img.addEventListener('error', () => {
+    missingJp.add(c.id);
+    const m = UserPics.get(c.id);
+    if (m) img.src = m; else node.replaceWith(jpCard(c, big));
+  });
   node.append(img);
   return node;
+}
+
+// デッキ画像から切り抜いたカード画像（この端末のブラウザにだけ保存。カードid → 画像のdata URL）
+const UserPics = new Map();
+async function loadUserPics() {
+  try {
+    const saved = await idbGet('userpics');
+    if (saved) for (const [id, url] of Object.entries(saved)) UserPics.set(+id, url);
+  } catch { /* 読めなくても描いたカードで表示できる */ }
+}
+async function saveUserPics(pics) {
+  for (const [id, url] of pics) UserPics.set(id, url);
+  await idbSet('userpics', Object.fromEntries(UserPics));
+}
+async function clearUserPics() {
+  UserPics.clear();
+  await idbSet('userpics', {});
 }
 
 // 長い名前ほど文字を小さくして枠に収める（本物のカードと同じ考え方）

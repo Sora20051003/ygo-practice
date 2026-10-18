@@ -83,6 +83,7 @@ async function init() {
   if (!LOCAL_FILES) { delete CARD_STYLES.image; delete CARD_STYLES.art; if (!CARD_STYLES[cardStyle]) cardStyle = 'jp'; }
   try {
     await loadCards(showLoading);
+    await loadUserPics();   // デッキ画像から切り抜いたカード画像
     await loadBanlists();   // 禁止・制限リスト（取れなくてもアプリは使える）
     loadRegDates().then(() => { if (typeof renderDeck === 'function' && Decks.list.length) renderDeck(); });   // 過去のリストの一覧は裏で
   } catch (e) {
