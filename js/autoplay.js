@@ -241,7 +241,7 @@ async function autoResume() {
   try { saved = JSON.parse(JSON.stringify(store.get('ygo.autoBoard', null)), bigReviver); } catch { saved = null; }
   if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
   try { await autoPrepare(saved); if (saved.opp) await autoPrepare(saved.opp); } catch { return; }
-  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: saved.autoTrigger !== false });
+  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: !!saved.autoTrigger && store.get('ygo.autoTrigger', false) });
   Auto.duel = d; Auto.deckId = saved.deckId;
   try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
   if (autoActive()) autoAfter(true);
@@ -291,7 +291,9 @@ function setupAutoPlay() {
     store.set('ygo.chainMode', e.target.value);
     if (Auto.duel) { Auto.duel.chainMode = e.target.value; autoSave(); }
   };
-  $('#ap-autotrig').checked = store.get('ygo.autoTrigger', true);
+  // 任意の効果は聞くのが標準（前に自動にしていた設定は1回だけオフに戻す）
+  if (!store.get('ygo.autoTrigger2', false)) { store.set('ygo.autoTrigger2', true); store.set('ygo.autoTrigger', false); }
+  $('#ap-autotrig').checked = store.get('ygo.autoTrigger', false);
   $('#ap-autotrig').onchange = e => {
     store.set('ygo.autoTrigger', e.target.checked);
     if (Auto.duel) { Auto.duel.autoTrigger = e.target.checked; autoSave(); }

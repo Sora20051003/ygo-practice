@@ -144,8 +144,8 @@ const placeText = (con, loc, seq) => {
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = true }) {
-    this.autoTrigger = autoTrigger;   // 召喚・特殊召喚したときの自分の効果を自動で発動する
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false }) {
+    this.autoTrigger = autoTrigger;   // オンなら、召喚・特殊召喚したカード自身の任意の効果も聞かずに発動する（強制の効果はいつも自動）
     this.main = main; this.extra = extra; this.handIds = handIds || null; this.handSize = handSize;
     this.opp = opp && opp.main && opp.main.length ? opp : null;
     this.chainMode = chainMode;
