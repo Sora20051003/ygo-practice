@@ -579,14 +579,11 @@ function chooseCards(cards, { min, max, canCancel, extra, onDone, onCancel, note
   const grid = el('div', { class: 'ap-grid' });
   const info = el('p', { class: 'muted' });
   const ok = el('button', { class: 'btn primary', text: '決定' });
-  // 同じ名前のカードをまとめる。デッキ・手札・墓地・除外・EXデッキの同名カードは1つの札（×枚数）にし、
-  // フィールドのカードはどれを選ぶかで違うので別の札のまま、同じ名前どうしを隣に並べる
-  const PILE = LOC.DECK | LOC.HAND | LOC.GRAVE | LOC.REMOVED | LOC.EXTRA;
+  // 同じ名前のカードを隣どうしに並べる（1枚ずつ別の札）
   const groups = [];
   const byKey = new Map();
   cards.forEach((c, i) => {
-    const pile = (c.location & PILE) && !(c.location & LOC.OVERLAY);
-    const key = pile ? `${c.code}|${c.controller}|${c.location}|${extra ? extra(c, i) : ''}` : `field|${i}`;
+    const key = `card|${i}`;   // 同じカードも1枚ずつ別の札にして、名前ごとに隣へ並べる
     let g = byKey.get(key);
     if (!g) { g = { key, code: c.code, idx: [] }; byKey.set(key, g); groups.push(g); }
     g.idx.push(i);
