@@ -1043,6 +1043,13 @@ function updateLandscape() {
   // 横画面として使える幅と高さ（回したときは入れ替わる）
   b.style.setProperty('--lw', (rotated ? innerHeight : innerWidth) + 'px');
   b.style.setProperty('--lh', (rotated ? innerWidth : innerHeight) + 'px');
+  // 横画面では、相手の帯とフェイズの帯を左の欄へ移して、盤面の高さを広く使う
+  const top = $('#land-top'), center = $('#view-board .board-center'), fieldEl = $('#field');
+  if (top && center && fieldEl) {
+    const opp = $('#opp-bar'), ph = $('#phase-bar');
+    if (land && opp.parentNode !== top) top.append(opp, ph);
+    if (!land && opp.parentNode === top) center.insertBefore(opp, fieldEl), center.insertBefore(ph, fieldEl);
+  }
 }
 function setupRotateHint() {
   addEventListener('resize', updateLandscape);

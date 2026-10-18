@@ -989,3 +989,24 @@ body.land .ap-sheet .ap-sheet-body p { margin: 2px 0; font-size: 12px; }
 .ap-sheet-foot { flex: none; border-top: 1px solid var(--line); }
 .ap-sheet-foot > .row { display: flex; gap: 8px; justify-content: center; margin: 0; width: 100%; }
 .ap-sheet-foot > .row .btn { min-width: 120px; }
+/* ---------- 横画面：盤面を大きく ---------- */
+.land-top { display: none; }
+body.land .land-top { display: flex; flex-direction: column; gap: 6px; }
+/* 相手の帯（左の欄の一番上） */
+body.land .land-top .opp-bar { flex-wrap: wrap; padding: 4px 6px; gap: 4px; font-size: 12px; }
+body.land .land-top .opp-bar .lp-box { margin-left: 0; }
+/* フェイズの帯：左の欄で縦に。フェイズは3つずつ2段 */
+body.land .land-top .phase-bar { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 4px; padding: 5px; }
+body.land .land-top .ph-turn { text-align: center; font-size: 13px; }
+body.land .land-top .ph-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+body.land .land-top .ph-chip { min-height: 32px; padding: 4px 0; }
+body.land .land-top .ph-chip b { font-size: 12px; }
+body.land .land-top .ph-end { padding: 8px; font-size: 14px; min-height: 38px; }
+/* 手札の見出し（枚数・時間・ライフ）は手札の上に重ねて、高さを使わない */
+body.land #view-board .hand-wrap { position: relative; padding: 3px 6px; }
+body.land #view-board .hand-title { position: absolute; top: 2px; right: 6px; left: auto; z-index: 3; margin: 0; gap: 6px; pointer-events: none; }
+body.land #view-board .hand-title > * { pointer-events: auto; }
+body.land #view-board .hand-title > span:first-child { background: rgba(0,0,0,.55); color: #fff; border-radius: 6px; padding: 0 6px; }
+/* カードの大きさ：盤面（相手ありは6段・なしは3段）＋手札1段が画面の高さに収まる最大 */
+body.land #view-board .board-center { --cw: min(calc((var(--lh) - 48px) / 6.3), calc((var(--lw) - 400px) / 7.6)); }
+body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 58px) / 9.3), calc((var(--lw) - 400px) / 7.6)); }
