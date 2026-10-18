@@ -115,6 +115,8 @@ class PeerDuelTransport {
   // 部屋を作った人：参加しに来た相手を受け付ける
   accept(c) {
     c.on('data', m => {
+      // 「だれかと対戦」の下見：相手を待っている部屋かどうかだけ答える
+      if (m.kind === 'probe') { c.send({ kind: 'probe', open: !this.room.guest && this.room.status === 'waiting' && m.uid !== this.me.uid }); return; }
       if (m.kind === 'join') {
         const r = this.room;
         if (r.guest && r.guest !== m.me.uid) { c.send({ kind: 'full' }); setTimeout(() => c.close(), 500); return; }
@@ -155,6 +157,26 @@ class PeerDuelTransport {
     else if (m.kind === 'patch' && this.room) { applyPatch(this.room, m.patch); this.emitRoom(); }
     else if (m.kind === 'state' && this.h) this.h.opp(JSON.parse(m.json));
     else if (m.kind === 'event' && this.h) this.h.event(m.ev);
+  }
+  // 「だれかと対戦」：待合の部屋を全部下見して、相手を待っている部屋の部屋コードを返す（なければ null）
+  static async findOpen(codes, myUid) {
+    if (typeof Peer === 'undefined') await loadScript(PEERJS_URL);
+    const t = new PeerDuelTransport({ uid: myUid, name: '' });
+    const peer = await t.openPeer(null);
+    try {
+      return await new Promise(resolve => {
+        let left = codes.length, done = false;
+        const finish = v => { if (!done) { done = true; resolve(v); } };
+        const miss = () => { if (--left <= 0) finish(null); };
+        peer.on('error', e => { if (e.type === 'peer-unavailable') miss(); });
+        for (const code of codes) {
+          const c = peer.connect(PEER_PREFIX + code, { reliable: true, serialization: 'json' });
+          c.on('open', () => c.send({ kind: 'probe', uid: myUid }));
+          c.on('data', m => { if (m.kind === 'probe') { if (m.open) finish(code); else miss(); } });
+        }
+        setTimeout(() => finish(null), 6000);   // 返事がない部屋は待たない
+      });
+    } finally { t.leave(); }
   }
   listen(code, h) { this.h = h; this.emitRoom(); }
   async updateRoom(patch) { applyPatch(this.room, patch); this.send({ kind: 'patch', patch }); this.emitRoom(); }
@@ -265,13 +287,57 @@ function feed(text, cls = '') {
 }
 
 // ---------- 部屋に入る・作る ----------
-async function duelCreate(code) {   // code：前回の部屋を作り直すとき
+async function duelCreate(code, share) {   // code：前回の部屋を作り直すとき。share：作ったらすぐ招待リンクを送る
   Duel.me = duelMe();
   Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new PeerDuelTransport(Duel.me);
   try {
     const newCode = await Duel.t.create(code);
     enterRoom(newCode);
+    if (share) shareInvite();
   } catch (e) { toast(e.message); }
+}
+
+// 招待リンクを送る。スマホは共有画面（LINE など）を出す。パソコンはリンクをコピーする
+function shareInvite() {
+  if (!Duel.code || !location.protocol.startsWith('http')) return;
+  const url = `${location.origin}${location.pathname}#room=${Duel.code}`;
+  const text = `遊戯王 展開練習で対戦しよう！ 部屋コード：${Duel.code}`;
+  if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+    navigator.share({ title: '対戦の招待', text, url }).catch(e => { if (e.name !== 'AbortError') copyInvite(text, url); });   // 閉じただけなら何もしない
+    return;
+  }
+  copyInvite(text, url);
+}
+function copyInvite(text, url) {
+  navigator.clipboard.writeText(`${text}\n${url}`).then(() => toast('招待リンクをコピーしました。LINE や Discord などに貼り付けて送ってください'), () => toast('招待リンク：' + url));
+}
+
+// ---------- だれかと対戦（相手を自動で探す） ----------
+// 決まった数の「待合の部屋」（部屋コード MATCH1〜MATCHC）を使う。空いて待っている部屋があれば入り、なければ空いている番号で部屋を作って待つ
+const MATCH_SLOTS = '123456789ABC'.split('').map(s => 'MATCH' + s);
+let matching = false;
+async function quickMatch() {
+  if (matching) return;
+  matching = true;
+  const close = showModal({ title: '相手を探しています…', body: el('div', { class: 'stack' }, el('div', { class: 'spinner' }), el('p', { class: 'muted', text: '待っている人がいるか確かめています（数秒かかります）' })) });
+  try {
+    Duel.me = duelMe();
+    const open = DUEL_TEST ? null : await PeerDuelTransport.findOpen(MATCH_SLOTS, Duel.me.uid);
+    close();
+    if (open) { await duelJoin(open); return; }
+    // だれも待っていない：空いている番号で部屋を作って待つ
+    for (const code of MATCH_SLOTS) {
+      Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new PeerDuelTransport(Duel.me);
+      try {
+        await Duel.t.create(code);
+        enterRoom(code);
+        toast('だれかが来るまで、この画面で待っていてください');
+        return;
+      } catch (e) { if (!/使われています/.test(e.message)) throw e; }
+    }
+    toast('今は混んでいます。少し待ってからもう一度お試しください');
+  } catch (e) { close(); toast(e.message || '相手を探せませんでした'); }
+  finally { matching = false; }
 }
 
 async function duelJoin(code) {
@@ -563,14 +629,22 @@ function renderDuelLobby() {
     const last = store.get('ygo.duel.current', null);
     box.append(el('div', { class: 'panel duel-card' },
       el('h2', { text: '対戦' }),
-      el('p', { class: 'muted', text: '部屋を作って部屋コードを相手に伝えるか、相手から聞いた部屋コードで参加してください。ログインしていなくても対戦できます（2人のブラウザを直接つないで対戦します）。' }),
-      el('label', { class: 'auth-field' }, 'あなたの名前（相手に表示されます）', nameIn),
-      el('label', { class: 'auth-field' }, '使うデッキ', deckSel),
-      el('div', { class: 'duel-actions' },
-        el('div', { class: 'duel-box' }, el('h3', { text: '部屋を作る' }), el('button', { class: 'btn primary', text: '＋ 新しい部屋を作る', onclick: duelCreate })),
-        el('div', { class: 'duel-box' }, el('h3', { text: '部屋に入る' }), codeInput,
-          el('button', { class: 'btn primary', text: '参加する', onclick: () => duelJoin(codeInput.value) }))),
-      last && last.code ? el('button', { class: 'btn', text: `前回の部屋（${last.code}）に戻る`, onclick: () => { Duel.deckId = last.deckId; if (last.host) duelCreate(last.code); else duelJoin(last.code); } }) : null));
+      el('div', { class: 'duel-quick' },
+        el('label', { class: 'auth-field' }, 'あなたの名前（相手に表示されます）', nameIn),
+        el('label', { class: 'auth-field' }, '使うデッキ', deckSel)),
+      // ボタン1つで始められる2つの方法
+      el('div', { class: 'duel-big' },
+        el('button', { class: 'duel-big-btn primary', onclick: () => duelCreate(null, true) },
+          el('b', { text: '📨 友達と対戦' }),
+          el('small', { text: '押すと部屋ができて、招待リンクを送る画面が出ます（LINE などで送るだけ）。友達はリンクを開くだけで参加できます。' })),
+        el('button', { class: 'duel-big-btn', onclick: quickMatch },
+          el('b', { text: '🎲 だれかと対戦' }),
+          el('small', { text: '待っている人がいればすぐ対戦。いなければ部屋を作って、だれかが来るのを待ちます。' }))),
+      el('details', { class: 'duel-more' },
+        el('summary', { text: '部屋コードで入る' }),
+        el('div', { class: 'row' }, codeInput, el('button', { class: 'btn primary', text: '参加する', onclick: () => duelJoin(codeInput.value) }))),
+      last && last.code ? el('button', { class: 'btn', text: `前回の部屋（${last.code}）に戻る`, onclick: () => { Duel.deckId = last.deckId; if (last.host) duelCreate(last.code); else duelJoin(last.code); } }) : null,
+      el('p', { class: 'muted small-note', text: 'ログインしていなくても対戦できます（2人のブラウザを直接つないで対戦します。部屋を作った人がアプリを閉じると部屋はなくなります）。' })));
     codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') duelJoin(codeInput.value); });
     return;
   }
@@ -585,7 +659,8 @@ function renderDuelLobby() {
     el('h2', null, '部屋コード ', el('span', { class: 'room-code', text: Duel.code })),
     el('div', { class: 'row' },
       el('button', { class: 'btn small', text: 'コードをコピー', onclick: () => navigator.clipboard.writeText(Duel.code).then(() => toast('コピーしました')) }),
-      shareUrl ? el('button', { class: 'btn small', text: '招待リンクをコピー', onclick: () => navigator.clipboard.writeText(shareUrl).then(() => toast('招待リンクをコピーしました')) }) : null),
+      shareUrl && !/^MATCH/.test(Duel.code) ? el('button', { class: 'btn small primary', text: '📨 招待リンクを送る', onclick: shareInvite }) : null),
+    /^MATCH/.test(Duel.code) && r && !r.guest ? el('p', { class: 'duel-wait', text: '🎲 だれかが来るのを待っています…（この画面のままお待ちください）' }) : null,
     el('ul', { class: 'duel-players' }, r ? [player(r.host, r.hostName), player(r.guest, r.guestName)] : el('li', { text: '接続中…' })),
     r && r.status === 'playing' ? el('button', { class: 'btn primary', text: '▶ 対戦の盤面を開く', onclick: () => { if (!Duel.active) beginDuelBoard(); else switchView('board'); } })
       : el('div', { class: 'stack' },

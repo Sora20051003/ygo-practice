@@ -1093,3 +1093,17 @@ body.land .opp-zone .stat-badge { top: -6px; bottom: auto; }
 .auth-pick.primary small { color: inherit; opacity: .85; }
 .auth-pick:hover { filter: brightness(1.08); }
 .auth-back { align-self: flex-start; }
+/* 対戦：ボタン1つで始める */
+.duel-quick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.duel-big { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 6px 0; }
+.duel-big-btn { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer; }
+.duel-big-btn b { font-size: 18px; }
+.duel-big-btn small { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.duel-big-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.duel-big-btn.primary small { color: inherit; opacity: .85; }
+.duel-big-btn:hover { filter: brightness(1.08); }
+.duel-more summary { cursor: pointer; color: var(--muted); font-size: 13px; margin: 4px 0; }
+.duel-more .row { gap: 8px; margin-top: 6px; }
+.duel-more .room-input { flex: 1; }
+.duel-wait { padding: 10px; border-radius: 10px; background: var(--panel-2); text-align: center; font-weight: 700; }
+@media (max-width: 720px) { .duel-quick, .duel-big { grid-template-columns: 1fr; } }
