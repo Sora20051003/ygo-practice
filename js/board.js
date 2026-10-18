@@ -834,7 +834,7 @@ function setupBoardView() {
       // ポーズ画面の開け閉め（選択中・メニューや窓が開いているときはそちらを閉じるだけ）
       if (pauseOpen()) closePause();
       else if (Board.pick) cancelPick();
-      else if ($('#menu').hidden && !$('#modal-root').children.length && !document.body.classList.contains('dueling')) openPause();
+      else if ($('#menu').hidden && !$('#modal-root').children.length) openPause();
       return;
     }
     if (pauseOpen()) return;
@@ -1003,12 +1003,14 @@ function timerHold(hold) {
   if (!hold && Timer.since == null) Timer.since = performance.now();
 }
 function tickTimer() {
+  if (typeof Duel !== 'undefined' && Duel.active) return;   // 対戦中は対戦の持ち時間を出す（duel.js）
   if (!Timer.running) return;
   renderTimer();
   const lim = timeLimit();
   if (lim && !Timer.over && timerElapsed() >= lim) { Timer.over = true; timeUp(); }
 }
 function renderTimer() {
+  if (typeof Duel !== 'undefined' && Duel.active) { renderDuelClock(); return; }
   const box = $('#b-timer');
   if (!box) return;
   const lim = timeLimit();
@@ -1101,11 +1103,20 @@ function renderPhaseBar() {
   if (!bar) return;
   const S = Board.S;
   const dueling = typeof Duel !== 'undefined' && Duel.active;
-  bar.hidden = !S || dueling;
+  bar.hidden = !S || (dueling && !(Duel.room && Duel.room.turn));
   if (bar.hidden) return;
   bar.innerHTML = '';
   let turn, mine = true, cur, can = {}, endOk, endLabel = 'ターン終了 ▶';
-  if (S.auto) {
+  if (dueling) {
+    // 対戦：ターンとフェイズは部屋で共有する。自分のターンだけ進められる
+    const r = Duel.room;
+    turn = r.turn; mine = myTurn(); cur = r.phase || 'DP';
+    const i = PHASES.findIndex(x => x[0] === cur);
+    const noBattle = r.turn === 1;
+    can = { SP: cur === 'DP', M1: i < 2, BP: i < 3 && !noBattle, M2: cur === 'BP', EP: cur !== 'EP' };
+    endOk = mine && r.status === 'playing';
+    if (r.status === 'ended') endLabel = '対戦終了';
+  } else if (S.auto) {
     const d = Auto.duel, p = d && d.pending;
     if (!d) { bar.hidden = true; return; }
     turn = d.turn; mine = d.turnPlayer === d.me; cur = enginePhase(d.phase);
@@ -1138,6 +1149,7 @@ function renderPhaseBar() {
 function goPhase(k) {
   const S = Board.S;
   if (!S) return;
+  if (typeof Duel !== 'undefined' && Duel.active) { duelGoPhase(k); return; }
   if (S.auto) { autoPhase(k === 'EP' ? 'ep' : 'bp'); return; }
   commit();
   S.phase = k;
@@ -1148,6 +1160,7 @@ function goPhase(k) {
 function endTurn() {
   const S = Board.S;
   if (!S) return;
+  if (typeof Duel !== 'undefined' && Duel.active) { duelEndTurn(); return; }
   if (S.auto) { autoPhase('ep'); return; }
   // 手動：相手のターンは飛ばして、自分の次のターンのドローフェイズへ（1枚ドロー）
   commit();

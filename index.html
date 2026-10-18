@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261019-081859">
+<link rel="stylesheet" href="style.css?v=20261019-082851">
 </head>
 <body>
 <header class="topbar">
@@ -168,6 +168,7 @@
           <div class="row">
             <button class="btn small" id="dp-coin">コイン</button>
             <button class="btn small" id="dp-dice">サイコロ</button>
+            <button class="btn small" id="dp-pause" title="手動の設定など（Escキー）">⏸ 設定</button>
             <button class="btn small danger" id="dp-surrender">降参</button>
           </div>
           <ol id="dp-feed" class="log dp-feed"></ol>
@@ -227,10 +228,10 @@
         <div id="m-preview" class="m-preview" hidden></div>
         <div id="pick-banner" class="pick-banner" hidden></div>
         <div id="opp-bar" class="opp-bar" hidden></div>
-        <div id="phase-bar" class="phase-bar solo-only" hidden></div>
+        <div id="phase-bar" class="phase-bar" hidden></div>
         <div class="field" id="field"></div>
         <div class="hand-wrap">
-          <div class="hand-title"><span>手札 <span id="hand-count">0</span>枚</span><span id="b-timer" class="board-timer solo-only" hidden></span><span id="my-lp" class="lp-box me" hidden></span></div>
+          <div class="hand-title"><span>手札 <span id="hand-count">0</span>枚</span><span id="b-timer" class="board-timer" hidden></span><span id="my-lp" class="lp-box me" hidden></span></div>
           <div id="hand" class="hand dropzone" data-zone="hand"></div>
         </div>
       </div>
@@ -244,7 +245,7 @@
       <div class="pause-box">
         <div class="row between pause-head"><b>⏸ ポーズ</b><span class="pause-nav"><button class="btn" data-go="deck">デッキ作成へ</button><button class="btn" data-go="duel">対戦へ</button></span><span class="muted small-note" id="pause-ver"></span><button class="btn primary" id="pause-close">▶ 再開</button></div>
         <div class="pause-grid">
-          <div class="pause-sec">
+          <div class="pause-sec solo-only">
             <h4>ゲーム</h4>
             <div class="seg full" id="b-mode">
               <button data-mode="manual">手動</button>
@@ -365,20 +366,20 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261019-081859"></script>
-<script src="js/consts.js?v=20261019-081859"></script>
-<script src="js/ui.js?v=20261019-081859"></script>
-<script src="js/data.js?v=20261019-081859"></script>
-<script src="js/cloud-config.js?v=20261019-081859"></script>
-<script src="js/auth.js?v=20261019-081859"></script>
-<script src="js/admin.js?v=20261019-081859"></script>
-<script src="js/deck.js?v=20261019-081859"></script>
-<script src="js/board.js?v=20261019-081859"></script>
-<script src="js/engine.js?v=20261019-081859"></script>
-<script src="js/autoplay.js?v=20261019-081859"></script>
-<script src="js/glow.js?v=20261019-081859"></script>
-<script src="js/duel.js?v=20261019-081859"></script>
-<script src="js/imgdeck.js?v=20261019-081859"></script>
-<script src="js/app.js?v=20261019-081859"></script>
+<script src="js/version.js?v=20261019-082851"></script>
+<script src="js/consts.js?v=20261019-082851"></script>
+<script src="js/ui.js?v=20261019-082851"></script>
+<script src="js/data.js?v=20261019-082851"></script>
+<script src="js/cloud-config.js?v=20261019-082851"></script>
+<script src="js/auth.js?v=20261019-082851"></script>
+<script src="js/admin.js?v=20261019-082851"></script>
+<script src="js/deck.js?v=20261019-082851"></script>
+<script src="js/board.js?v=20261019-082851"></script>
+<script src="js/engine.js?v=20261019-082851"></script>
+<script src="js/autoplay.js?v=20261019-082851"></script>
+<script src="js/glow.js?v=20261019-082851"></script>
+<script src="js/duel.js?v=20261019-082851"></script>
+<script src="js/imgdeck.js?v=20261019-082851"></script>
+<script src="js/app.js?v=20261019-082851"></script>
 </body>
 </html>

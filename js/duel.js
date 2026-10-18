@@ -549,6 +549,8 @@ function enterRoom(code) {
   Duel.deckId = Duel.deckId || Decks.currentId;
   store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
   Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => toast('通信エラー：' + e.message) });
+  // 部屋を作った人：持ち時間を部屋に書く（最初は一人回しの制限時間の設定と同じ）
+  if (Duel.t.isHost && Duel.t.room && Duel.t.room.timeLimit === undefined) Duel.t.updateRoom({ timeLimit: typeof timeLimit === 'function' ? timeLimit() : 0, clock: {} });
   renderDuelLobby();
 }
 
@@ -574,11 +576,13 @@ function onDuelRoom(r) {
     Duel.t.updateRoom({ status: 'playing', turn: 1, turnPlayer: first, phase: 'DP' });
     return;   // 開始の変更が届いたときに、もう一度ここが呼ばれる（古い情報で処理を続けないように）
   }
-  if (r.status === 'playing' && !Duel.active) beginDuelBoard();
+  if (r.status === 'playing' && !Duel.active) { Duel.timeoutSent = false; beginDuelBoard(); }
   if (Duel.active) {
     // ターンが変わったら、自分の盤面のターン数・通常召喚・使用済みを更新
     const key = r.turn + ':' + r.turnPlayer;
     if (key !== Duel.turnKey && Board.S) {
+      // 持ち時間：ターンが始まった時刻（この端末の時計）
+      if (r.turnPlayer === me) Duel.myTurnStart = Date.now(); else Duel.oppTurnStart = Date.now();
       Duel.turnKey = key;
       Board.S.turn = r.turn;
       if (r.turnPlayer === me) {
@@ -589,7 +593,8 @@ function onDuelRoom(r) {
     }
     if (r.status === 'ended' && !Duel.endedShown) {
       Duel.endedShown = true;
-      const text = r.winner === me ? 'あなたの勝ちです！' : r.winner ? `${oppName()} の勝ちです` : '対戦が終了しました';
+      const why = r.endReason === 'timeout' ? (r.winner === me ? '相手の持ち時間がなくなりました。' : 'あなたの持ち時間がなくなりました。') : '';
+      const text = why + (r.winner === me ? 'あなたの勝ちです！' : r.winner ? `${oppName()} の勝ちです` : '対戦が終了しました');
       showModal({ title: '対戦終了', body: el('p', { text }), buttons: [{ label: '盤面を閉じて部屋を出る', primary: true, onClick: () => leaveRoom() }] });
     }
   }
@@ -856,6 +861,7 @@ function renderDuelLobby() {
     el('ul', { class: 'duel-players' }, r ? [player(r.host, r.hostName), player(r.guest, r.guestName)] : el('li', { text: '接続中…' })),
     r && r.status === 'playing' ? el('button', { class: 'btn primary', text: '▶ 対戦の盤面を開く', onclick: () => { if (!Duel.active) beginDuelBoard(); else switchView('board'); } })
       : el('div', { class: 'stack' },
+        duelTimeSetting(r),
         el('p', { text: `使うデッキ：${deck ? deck.name : '（未選択）'}（メイン${deck ? deck.main.length : 0}・EX${deck ? deck.extra.length : 0}）` }),
         el('button', {
           class: 'btn ' + (amReady ? '' : 'primary'), text: amReady ? '準備OKを取り消す' : '準備OK', disabled: !r || !deck || deck.main.length < 1,
@@ -903,15 +909,13 @@ function setupDuel() {
   $('#dp-next').onclick = () => {
     const i = PHASES.findIndex(x => x[0] === Duel.room.phase);
     if (i >= PHASES.length - 1) { toast('エンドフェイズです。「ターン終了」を押してください'); return; }
-    const next = PHASES[i + 1];
-    Duel.t.updateRoom({ phase: next[0] });
-    Duel.t.sendEvent({ type: 'phase', text: `${next[1]}フェイズへ` });
+    let next = PHASES[i + 1][0];
+    if (next === 'BP' && Duel.room.turn === 1) next = 'EP';   // 先攻の最初のターンはバトルフェイズに入れない
+    if (next === 'M2' && Duel.room.phase !== 'BP') next = 'EP';
+    duelGoPhase(next);
   };
-  $('#dp-end').onclick = () => {
-    const r = Duel.room;
-    Duel.t.updateRoom({ turn: r.turn + 1, turnPlayer: oppUid(), phase: 'DP' });
-    Duel.t.sendEvent({ type: 'phase', text: `ターン終了 → T${r.turn + 1} ${oppName()}のターン` });
-  };
+  $('#dp-end').onclick = duelEndTurn;
+  $('#dp-pause').onclick = openPause;
   $('#dp-coin').onclick = () => Duel.t.sendEvent({ type: 'coin', result: crypto.getRandomValues(new Uint8Array(1))[0] % 2 ? '表' : '裏' });
   $('#dp-dice').onclick = () => Duel.t.sendEvent({ type: 'dice', result: (crypto.getRandomValues(new Uint8Array(1))[0] % 6) + 1 });
   $('#dp-surrender').onclick = () => showModal({
@@ -941,4 +945,71 @@ function oppStatBadge(p) {
   if (!p || !p.faceUp) return null;
   const card = p.token ? { type: T.MONSTER | T.TOKEN, atk: p.token.atk, def: p.token.def } : (p.id ? DB.byId.get(p.id) : null);
   return card ? statBadge(card, p) : null;
+}
+
+// ---------- 対戦のフェイズ・ターン（一人回しと同じフェイズの帯から操作する） ----------
+function duelGoPhase(k) {
+  if (!Duel.room || !myTurn()) return;
+  const p = PHASES.find(x => x[0] === k);
+  Duel.t.updateRoom({ phase: k });
+  Duel.t.sendEvent({ type: 'phase', text: `${p ? p[1] : k}フェイズへ` });
+}
+function duelEndTurn() {
+  const r = Duel.room;
+  if (!r || !myTurn() || r.status !== 'playing') return;
+  // 自分の持ち時間を使った分を記録してから、相手のターンにする
+  Duel.t.updateRoom({ turn: r.turn + 1, turnPlayer: oppUid(), phase: 'DP', ['clock.' + Duel.me.uid]: Math.round(myClockUsed()) });
+  Duel.t.sendEvent({ type: 'phase', text: `ターン終了 → T${r.turn + 1} ${oppName()}のターン` });
+}
+
+// ---------- 対戦の持ち時間 ----------
+// 部屋を作った人が部屋の最初に決める（30秒〜900秒・無限）。1人ずつの持ち時間で、自分のターンの間だけ減る。0になったら負け
+const duelLimit = () => (Duel.room && Duel.room.timeLimit) || 0;
+function myClockUsed() {
+  const r = Duel.room;
+  const base = (r && r.clock && r.clock[Duel.me.uid]) || 0;
+  return base + (r && r.status === 'playing' && myTurn() && Duel.myTurnStart ? (Date.now() - Duel.myTurnStart) / 1000 : 0);
+}
+function oppClockUsed() {
+  const r = Duel.room;
+  const base = (r && r.clock && r.clock[oppUid()]) || 0;
+  return base + (r && r.status === 'playing' && !myTurn() && Duel.oppTurnStart ? (Date.now() - Duel.oppTurnStart) / 1000 : 0);
+}
+function renderDuelClock() {
+  const box = $('#b-timer');
+  if (!box || !Duel.active) return;
+  const lim = duelLimit();
+  box.hidden = !lim || !Duel.room || !Duel.room.turn;
+  if (box.hidden) return;
+  const mine = Math.max(0, lim - myClockUsed()), theirs = Math.max(0, lim - oppClockUsed());
+  box.textContent = `⏱ 自分 ${fmtTime(Math.ceil(mine))} ／ ${oppName()} ${fmtTime(Math.ceil(theirs))}`;
+  const left = myTurn() ? mine : theirs;
+  box.classList.toggle('warn', left <= 60 && left > 10);
+  box.classList.toggle('danger', left <= 10);
+}
+function tickDuelClock() {
+  if (!Duel.active || !Duel.room) return;
+  renderDuelClock();
+  const r = Duel.room, lim = duelLimit();
+  // 自分の持ち時間がなくなったら負け（自分の画面で判定して、部屋に知らせる）
+  if (lim && r.status === 'playing' && myTurn() && myClockUsed() >= lim && !Duel.timeoutSent) {
+    Duel.timeoutSent = true;
+    Duel.t.sendEvent({ type: 'sys', text: `${Duel.me.name} の持ち時間がなくなりました` });
+    Duel.t.updateRoom({ status: 'ended', winner: oppUid(), endReason: 'timeout', ['clock.' + Duel.me.uid]: lim });
+  }
+}
+setInterval(tickDuelClock, 500);
+
+// 部屋の画面：持ち時間の設定（部屋を作った人だけが変えられる）
+function duelTimeSetting(r) {
+  const lim = (r && r.timeLimit) || 0;
+  const isHost = r && r.host === Duel.me.uid;
+  if (!isHost) return el('p', { class: 'muted', text: `持ち時間：${timeLabel(lim)}（部屋を作った人が決めます）` });
+  const label = el('b', { text: timeLabel(lim) });
+  const range = el('input', { type: 'range', min: 30, max: 930, step: 30, value: lim || 930, class: 'full' });
+  const val = () => (+range.value > 900 ? 0 : +range.value);
+  range.addEventListener('input', () => { label.textContent = timeLabel(val()); });
+  range.addEventListener('change', () => Duel.t.updateRoom({ timeLimit: val() }));
+  return el('div', { class: 'duel-time' }, el('label', { class: 'muted' }, '1人ずつの持ち時間：', label), range,
+    el('p', { class: 'muted small-note', text: '自分のターンの間だけ減ります。なくなったら負けです。右端は無限（時間制限なし）。' }));
 }
