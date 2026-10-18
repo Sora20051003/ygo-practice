@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261019-065526">
+<link rel="stylesheet" href="style.css?v=20261019-070352">
 </head>
 <body>
 <header class="topbar">
@@ -329,21 +329,34 @@
 <div id="auth-screen" class="auth-screen" hidden>
   <div class="auth-box">
     <h1>遊戯王 展開練習 <span class="unofficial" title="KONAMI とは関係のない非公式のファンツールです">非公式</span></h1>
-    <p class="muted">ログインすると、デッキがアカウントに保存され、どの端末からでも使えます。</p>
-    <button id="auth-google" class="btn auth-google">
-      <span class="g-mark">G</span> Googleでログイン
-    </button>
-    <div class="auth-or" id="auth-google-or"><span>または メールアドレスで</span></div>
-    <label class="auth-field">メールアドレス<input id="auth-email" type="email" autocomplete="email"></label>
-    <label class="auth-field">パスワード（6文字以上）<input id="auth-pass" type="password" autocomplete="current-password"></label>
-    <label class="auth-field">表示名（新規登録のときだけ・なくても可）<input id="auth-name" type="text" autocomplete="nickname" maxlength="20" placeholder="対戦相手や管理ページに出る名前"></label>
-    <div class="auth-buttons">
-      <button id="auth-login" class="btn primary">ログイン</button>
-      <button id="auth-signup" class="btn">新規登録</button>
+    <!-- 最初に、ログインして使うか、ゲストで使うかを選ぶ -->
+    <div id="auth-choice" class="auth-choice">
+      <p class="muted">どちらで使いますか？</p>
+      <button id="auth-pick-login" class="auth-pick primary">
+        <b>ログインして使う</b>
+        <small>デッキがアカウントに保存され、スマホ・パソコンどの端末からでも同じデッキが使えます。対戦もできます。</small>
+      </button>
+      <button id="auth-guest" class="auth-pick">
+        <b>ゲストで使う</b>
+        <small>登録なしですぐ使えます。デッキはこの端末だけに保存されます（あとからログインして引き継げます）。</small>
+      </button>
     </div>
-    <button id="auth-reset" class="auth-link">パスワードを忘れた場合</button>
+    <div id="auth-form" class="auth-form" hidden>
+      <button id="auth-back" class="auth-link auth-back">← 戻る（ゲストで使う場合はこちら）</button>
+      <button id="auth-google" class="btn auth-google">
+        <span class="g-mark">G</span> Googleでログイン
+      </button>
+      <div class="auth-or" id="auth-google-or"><span>または メールアドレスで</span></div>
+      <label class="auth-field">メールアドレス<input id="auth-email" type="email" autocomplete="email"></label>
+      <label class="auth-field">パスワード（6文字以上）<input id="auth-pass" type="password" autocomplete="current-password"></label>
+      <label class="auth-field">表示名（新規登録のときだけ・なくても可）<input id="auth-name" type="text" autocomplete="nickname" maxlength="20" placeholder="対戦相手や管理ページに出る名前"></label>
+      <div class="auth-buttons">
+        <button id="auth-login" class="btn primary">ログイン</button>
+        <button id="auth-signup" class="btn">新規登録</button>
+      </div>
+      <button id="auth-reset" class="auth-link">パスワードを忘れた場合</button>
+    </div>
     <p id="auth-msg" class="auth-msg"></p>
-    <button id="auth-guest" class="auth-link">ログインしないで使う（デッキはこの端末だけに保存されます）</button>
   </div>
 </div>
 
@@ -352,20 +365,20 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261019-065526"></script>
-<script src="js/consts.js?v=20261019-065526"></script>
-<script src="js/ui.js?v=20261019-065526"></script>
-<script src="js/data.js?v=20261019-065526"></script>
-<script src="js/cloud-config.js?v=20261019-065526"></script>
-<script src="js/auth.js?v=20261019-065526"></script>
-<script src="js/admin.js?v=20261019-065526"></script>
-<script src="js/deck.js?v=20261019-065526"></script>
-<script src="js/board.js?v=20261019-065526"></script>
-<script src="js/engine.js?v=20261019-065526"></script>
-<script src="js/autoplay.js?v=20261019-065526"></script>
-<script src="js/glow.js?v=20261019-065526"></script>
-<script src="js/duel.js?v=20261019-065526"></script>
-<script src="js/imgdeck.js?v=20261019-065526"></script>
-<script src="js/app.js?v=20261019-065526"></script>
+<script src="js/version.js?v=20261019-070352"></script>
+<script src="js/consts.js?v=20261019-070352"></script>
+<script src="js/ui.js?v=20261019-070352"></script>
+<script src="js/data.js?v=20261019-070352"></script>
+<script src="js/cloud-config.js?v=20261019-070352"></script>
+<script src="js/auth.js?v=20261019-070352"></script>
+<script src="js/admin.js?v=20261019-070352"></script>
+<script src="js/deck.js?v=20261019-070352"></script>
+<script src="js/board.js?v=20261019-070352"></script>
+<script src="js/engine.js?v=20261019-070352"></script>
+<script src="js/autoplay.js?v=20261019-070352"></script>
+<script src="js/glow.js?v=20261019-070352"></script>
+<script src="js/duel.js?v=20261019-070352"></script>
+<script src="js/imgdeck.js?v=20261019-070352"></script>
+<script src="js/app.js?v=20261019-070352"></script>
 </body>
 </html>

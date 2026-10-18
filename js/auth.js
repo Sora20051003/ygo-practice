@@ -147,7 +147,7 @@ function renderUserBox() {
     // ログインしないで使っている：ログインに切り替えられるようにする
     box.hidden = !Online.enabled;
     box.innerHTML = '';
-    if (Online.enabled) box.append(el('button', { class: 'btn small', text: 'ログイン', title: 'ログインすると、デッキがアカウントに保存され、どの端末からでも使えます', onclick: () => { localStorage.removeItem('ygo.guest'); location.reload(); } }));
+    if (Online.enabled) box.append(el('button', { class: 'btn small', text: 'ログイン', title: 'ログインすると、デッキがアカウントに保存され、どの端末からでも使えます', onclick: () => { localStorage.removeItem('ygo.guest'); try { sessionStorage.setItem('ygo.wantLogin', '1'); } catch { /* 使えなくてもよい */ } location.reload(); } }));
     return;
   }
   const u = Online.user;
@@ -208,6 +208,13 @@ function showLoginScreen(done) {
     say('パスワード再設定のメールを送りました。メールのリンクを開くと、新しいパスワードを決められます。', 'ok');
   });
   pass.onkeydown = e => { if (e.key === 'Enter') $('#auth-login').click(); };
+  // 最初は「ログインして使う」「ゲストで使う」を選ぶ画面。ログインを選んだら入力欄を出す
+  const showForm = on => { $('#auth-choice').hidden = on; $('#auth-form').hidden = !on; say(''); if (on) setTimeout(() => email.focus(), 50); };
+  // 右上の「ログイン」から来たときは、すぐ入力欄を出す
+  let want = false; try { want = sessionStorage.getItem('ygo.wantLogin') === '1'; sessionStorage.removeItem('ygo.wantLogin'); } catch { /* 使えなくてもよい */ }
+  showForm(want);
+  $('#auth-pick-login').onclick = () => showForm(true);
+  $('#auth-back').onclick = () => showForm(false);
   $('#auth-guest').onclick = () => { localStorage.setItem('ygo.guest', '1'); hideLoginScreen(); done(null); };
 }
 function hideLoginScreen() { $('#auth-screen').hidden = true; }

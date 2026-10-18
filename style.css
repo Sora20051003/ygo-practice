@@ -1082,3 +1082,14 @@ body.land .opp-zone .stat-badge { top: -6px; bottom: auto; }
 .adm-table th, .adm-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 .adm-table th { position: sticky; top: 0; background: var(--panel-2); font-weight: 700; }
 .adm-table tr.on td { background: rgba(63, 191, 111, .08); }
+/* 最初の選択：ログインして使う／ゲストで使う */
+.auth-choice, .auth-form { display: flex; flex-direction: column; gap: 10px; }
+.auth-choice[hidden], .auth-form[hidden] { display: none; }
+.auth-choice > p { margin: 0; text-align: center; font-size: 14px; }
+.auth-pick { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer; }
+.auth-pick b { font-size: 17px; }
+.auth-pick small { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.auth-pick.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.auth-pick.primary small { color: inherit; opacity: .85; }
+.auth-pick:hover { filter: brightness(1.08); }
+.auth-back { align-self: flex-start; }
