@@ -106,10 +106,12 @@ function normalizeText(s) {
 function indexCards(cards) {
   DB.cards = cards;
   DB.byId = new Map();
+  DB.byCid = new Map();   // KONAMIのカード番号 → カード（デッキコードで使う）
   for (const c of cards) {
     c.key = normalizeText(c.name) + '|' + normalizeText(c.ruby) + '|' + normalizeText(c.en);
     c.nkey = normalizeText(c.name);
     DB.byId.set(c.id, c);
+    if (c.cid && !DB.byCid.has(c.cid)) DB.byCid.set(c.cid, c);
   }
 }
 

@@ -342,8 +342,85 @@ function encodeYdkePart(ids) {
 }
 const toYdke = deck => `ydke://${encodeYdkePart(deck.main)}!${encodeYdkePart(deck.extra)}!${encodeYdkePart(deck.side)}!`;
 
+// ---------- このアプリのデッキコード（YGO1-…） ----------
+// 中身：版(1) / デッキ名(UTF-8) / メイン・EX・サイドの「カードの種類数, (前のカード番号との差×4＋枚数)…」を
+// 可変長の数値で並べ、URLに使える Base64 にしたもの。サーバー不要で、コードだけでデッキを再現できる。
+const DECK_CODE_PREFIX = 'YGO1-';
+
+function pushVarint(arr, n) {
+  while (n >= 0x80) { arr.push((n & 0x7f) | 0x80); n = Math.floor(n / 128); }
+  arr.push(n);
+}
+function readVarint(bytes, pos) {
+  let n = 0, mul = 1, b;
+  do {
+    if (pos.i >= bytes.length) throw new Error('コードが途中で切れています');
+    b = bytes[pos.i++];
+    n += (b & 0x7f) * mul; mul *= 128;
+  } while (b & 0x80);
+  return n;
+}
+const b64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), ch => ch.charCodeAt(0));
+
+function encodeDeckCode(deck) {
+  const bytes = [1];
+  const name = new TextEncoder().encode(deck.name).slice(0, 60);
+  pushVarint(bytes, name.length); bytes.push(...name);
+  for (const sec of ['main', 'extra', 'side']) {
+    // 同じカードはまとめて「何枚か」で表す（並び順は最初に出てきた順）
+    const counts = new Map();
+    for (const id of deck[sec]) { const c = DB.byId.get(id); if (c && c.cid) counts.set(c.cid, (counts.get(c.cid) || 0) + 1); }
+    // カード番号を小さい順に並べ、前の番号との差だけを書く（数が小さくなりコードが短くなる）
+    const entries = [...counts].sort((a, b) => a[0] - b[0]);
+    pushVarint(bytes, entries.length);
+    let prev = 0;
+    for (const [cid, n] of entries) { pushVarint(bytes, (cid - prev) * 4 + Math.min(n, 3)); prev = cid; }
+  }
+  return DECK_CODE_PREFIX + b64url(bytes);
+}
+
+function decodeDeckCode(code) {
+  const bytes = unb64url(code.replace(DECK_CODE_PREFIX, '').trim());
+  const pos = { i: 0 };
+  if (bytes[pos.i++] !== 1) throw new Error('このアプリでは読めない形式のコードです');
+  const nameLen = readVarint(bytes, pos);
+  const name = new TextDecoder().decode(bytes.slice(pos.i, pos.i + nameLen)); pos.i += nameLen;
+  const deck = { name, main: [], extra: [], side: [] }, unknown = [];
+  for (const sec of ['main', 'extra', 'side']) {
+    const kinds = readVarint(bytes, pos);
+    let prev = 0;
+    for (let k = 0; k < kinds; k++) {
+      const v = readVarint(bytes, pos);
+      const cid = prev + Math.floor(v / 4);
+      prev = cid;
+      const c = DB.byCid.get(cid);
+      if (!c) { unknown.push(`カード番号 ${cid}`); continue; }
+      for (let i = 0; i < (v % 4); i++) deck[sec].push(c.id);
+    }
+  }
+  return { deck, unknown };
+}
+
+// 文章やリンクの中からデッキコードを探す（共有リンクの #deck=… にも対応）
+function findDeckCode(text) {
+  const m = (text || '').match(/YGO1-[A-Za-z0-9_-]+/);
+  return m ? m[0] : null;
+}
+
 function parseDeckText(text) {
   const result = { main: [], extra: [], side: [] }, unknown = [];
+
+  // このアプリのデッキコード
+  const code = findDeckCode(text);
+  if (code) {
+    try {
+      const d = decodeDeckCode(code);
+      return { result: { main: d.deck.main, extra: d.deck.extra, side: d.deck.side }, unknown: d.unknown, name: d.deck.name };
+    } catch (e) {
+      return { result, unknown: ['デッキコードを読めませんでした：' + e.message] };
+    }
+  }
 
   // YDKE が含まれていればそれを読む
   const y = text.match(/ydke:\/\/([A-Za-z0-9+/=]*)!([A-Za-z0-9+/=]*)!([A-Za-z0-9+/=]*)!?/);
@@ -440,12 +517,12 @@ function openImport() {
       el('label', { class: 'check' }, asNew, '新しいデッキとして追加する（オフにすると今のデッキを上書き）')),
     buttons: [{
       label: '読み込む', primary: true, onClick: () => {
-        const { result, unknown } = parseDeckText(ta.value);
+        const { result, unknown, name } = parseDeckText(ta.value);
         const total = result.main.length + result.extra.length + result.side.length;
-        if (!total) { toast('カードを読み取れませんでした'); return false; }
+        if (!total) { toast(unknown[0] && unknown[0].startsWith('デッキコード') ? unknown[0] : 'カードを読み取れませんでした'); return false; }
         let deck;
         if (asNew.checked) {
-          deck = Decks.blank(file.files[0] ? file.files[0].name.replace(/\.\w+$/, '') : '読み込んだデッキ');
+          deck = Decks.blank(name || (file.files[0] ? file.files[0].name.replace(/\.\w+$/, '') : '読み込んだデッキ'));
           Decks.list.push(deck);
           Decks.currentId = deck.id;
         } else deck = Decks.current();
@@ -483,6 +560,73 @@ function openExport() {
         },
       },
     ],
+  });
+}
+
+// ---------- デッキコードの発行と共有 ----------
+// ネット版なら、開くだけでデッキを追加できるリンクも作る
+const shareUrl = code => (location.protocol.startsWith('http') ? `${location.origin}${location.pathname}#deck=${code}` : null);
+
+function openDeckCode() {
+  const deck = Decks.current();
+  if (!deck.main.length && !deck.extra.length) { toast('空のデッキはコードにできません'); return; }
+  const code = encodeDeckCode(deck);
+  const url = shareUrl(code);
+  const copy = (text, msg) => navigator.clipboard.writeText(text).then(() => toast(msg), () => toast('コピーできませんでした。手で選択してコピーしてください'));
+  const codeBox = el('textarea', { class: 'full code-box', rows: 3, readonly: true });
+  codeBox.value = code;
+  codeBox.addEventListener('focus', () => codeBox.select());
+  const body = el('div', { class: 'stack' },
+    el('p', { text: `「${deck.name}」（メイン${deck.main.length}・EX${deck.extra.length}・サイド${deck.side.length}）のデッキコードです。` }),
+    codeBox,
+    el('p', { class: 'muted small-note', text: 'このコードを友達に送ると、相手はこのアプリの「デッキコードから追加」に貼るだけで同じデッキを追加できます。' + (url ? 'リンクを送れば、開くだけで追加できます。' : '') }));
+  const buttons = [{ label: 'コードをコピー', primary: !url, onClick: () => { copy(code, 'デッキコードをコピーしました'); return false; } }];
+  if (url) buttons.push({ label: 'リンクをコピー', primary: true, onClick: () => { copy(url, '共有リンクをコピーしました'); return false; } });
+  if (url && navigator.share) {
+    buttons.push({ label: '共有…', onClick: () => { navigator.share({ title: deck.name, text: `遊戯王デッキ「${deck.name}」`, url }).catch(() => {}); return false; } });
+  }
+  showModal({ title: 'デッキコードを発行', body, buttons });
+}
+
+function openCodeImport() {
+  const input = el('textarea', { class: 'full code-box', rows: 3, placeholder: 'YGO1- で始まるデッキコード、または共有リンクを貼り付け' });
+  showModal({
+    title: 'デッキコードから追加', body: input,
+    buttons: [{ label: '追加する', primary: true, onClick: () => addDeckFromCode(input.value) === false ? false : undefined }],
+  });
+  setTimeout(() => input.focus(), 0);
+}
+
+// コード（や共有リンク）から新しいデッキとして追加する。失敗したら false
+function addDeckFromCode(text) {
+  const code = findDeckCode(text);
+  if (!code) { toast('デッキコードが見つかりませんでした'); return false; }
+  let d;
+  try { d = decodeDeckCode(code); } catch (e) { toast('デッキコードを読めませんでした：' + e.message); return false; }
+  const deck = Decks.blank(d.deck.name || '共有されたデッキ');
+  deck.main = d.deck.main.slice(0, LIMITS.main);
+  deck.extra = d.deck.extra.slice(0, LIMITS.extra);
+  deck.side = d.deck.side.slice(0, LIMITS.side);
+  Decks.list.push(deck);
+  Decks.currentId = deck.id;
+  Decks.save();
+  renderDeck();
+  switchView('deck');
+  toast(`「${deck.name}」を追加しました` + (d.unknown.length ? `（見つからないカード${d.unknown.length}種類は除きました）` : ''));
+  return true;
+}
+
+// 共有リンク（…#deck=YGO1-…）で開かれたら、追加するか確認する
+function checkSharedDeckLink() {
+  const code = findDeckCode(decodeURIComponent(location.hash));
+  if (!code) return;
+  history.replaceState(null, '', location.pathname + location.search);   // 再読み込みで何度も聞かないように
+  let d;
+  try { d = decodeDeckCode(code); } catch (e) { toast('共有リンクのデッキを読めませんでした'); return; }
+  showModal({
+    title: '共有されたデッキ',
+    body: el('p', { text: `「${d.deck.name}」（メイン${d.deck.main.length}・EX${d.deck.extra.length}・サイド${d.deck.side.length}）をマイデッキに追加しますか？` }),
+    buttons: [{ label: '追加する', primary: true, onClick: () => { addDeckFromCode(code); } }],
   });
 }
 
@@ -556,6 +700,8 @@ function setupDeckView() {
   $('#deck-import').onclick = openImport;
   $('#deck-export').onclick = openExport;
   $('#deck-backup').onclick = backupAll;
+  $('#deck-code').onclick = openDeckCode;
+  $('#deck-code-import').onclick = openCodeImport;
   $('#deck-restore').onclick = restoreBackup;
   $('#deck-play').onclick = () => {
     if (Decks.current().main.length === 0) { toast('メインデッキが空です'); return; }

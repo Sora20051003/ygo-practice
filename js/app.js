@@ -103,6 +103,8 @@ async function init() {
   setupBoardView();
   switchView(store.get('ygo.view', 'deck'));
   startRemoteSync(applyRemoteDecks);
+  checkSharedDeckLink();
+  window.addEventListener('hashchange', checkSharedDeckLink);
   startUpdateCheck();
   prepareTextSearch(() => loadJaTexts(textStatus));
 
