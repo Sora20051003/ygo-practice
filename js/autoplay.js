@@ -69,7 +69,7 @@ function autoActions(inst) {
   if (p.type === MSG.SELECT_IDLECMD) {
     add(p.activates, actLabel, IDLE.ACTIVATE, 'y');
     add(p.summons, '通常召喚', IDLE.SUMMON, 'b');
-    add(p.special_summons, '特殊召喚', IDLE.SPSUMMON, 'b');
+    add(p.special_summons, summonLabel, IDLE.SPSUMMON, 'b');
     add(p.monster_sets, '裏守備でセット', IDLE.MSET);
     add(p.spell_sets, 'セットする', IDLE.SSET);
     add(p.pos_changes, '表示形式を変更', IDLE.REPOS);
@@ -679,4 +679,29 @@ function choosePlace(p, me) {
       el('button', { class: 'btn full', text: placeText(pl.player, pl.location, pl.sequence), onclick: () => { closePromptModal(); finish(pl); } }))));
   };
   ask();
+}
+
+// 特殊召喚の呼び方（EXデッキのモンスターは召喚方法の名前で出す。素材はこのあと選択画面で選ぶ）
+function summonLabel(c) {
+  const card = DB.byId.get(c.code);
+  if (!card) return '特殊召喚';
+  if (c.location === LOC.EXTRA) {
+    if (has(card, T.LINK)) return 'リンク召喚';
+    if (has(card, T.XYZ)) return 'エクシーズ召喚';
+    if (has(card, T.SYNCHRO)) return 'シンクロ召喚';
+    if (has(card, T.FUSION)) return '融合召喚';
+    if (has(card, T.PENDULUM)) return 'ペンデュラム召喚';
+  }
+  if ((c.location === LOC.SZONE || c.location === LOC.PZONE) && has(card, T.PENDULUM)) return 'ペンデュラム召喚';
+  return '特殊召喚';
+}
+
+// 山札・墓地・EXデッキの一覧の行に、今できる操作のボタンを付ける（自動処理モード）
+function autoRowButtons(inst, onDone) {
+  const acts = autoActions(inst);
+  if (!acts.length) return null;
+  return el('div', { class: 'row-acts' }, acts.map(a => el('button', {
+    class: 'ap-act small' + (a.kind ? ' k-' + a.kind : ''), text: a.label,
+    onclick: e => { e.stopPropagation(); onDone(); autoRespond(a.res); },
+  })));
 }

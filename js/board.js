@@ -373,6 +373,8 @@ function openPile(zone) {
     let items = S[zone].map((inst, i) => ({ inst, i }));
     if (zone === 'deck' && !orderToggle.checked) items.sort((a, b) => compareCards(cardOf(a.inst), cardOf(b.inst)));
     if (zone === 'gy' || zone === 'ban') items.reverse(); // 新しいものを上に
+    // 自動処理モード：今使えるカード（光っているカード）を上に
+    if (S.auto && Board.glow) { const rank = x => ({ y: 0, b: 1 }[Board.glow.get(x.inst.uid)] ?? 2); items.sort((a, b) => rank(a) - rank(b)); }
     if (!items.length) list.append(el('p', { class: 'muted', text: 'カードがありません' }));
     for (const { inst, i } of items) {
       const c = cardOf(inst);
@@ -383,6 +385,7 @@ function openPile(zone) {
         el('div', { class: 'r-main' },
           el('div', { class: 'r-name', text: c.name + (zone === 'ban' && !inst.faceUp ? '（裏）' : '') + (zone === 'extra' && inst.faceUp ? '（表）' : '') }),
           el('div', { class: 'r-info', text: isMonster(c) ? `${levelText(c)} ${ATTR[c.attr] || ''} ${RACE[c.race] || ''}　${statText(c)}` : typeLine(c) })),
+        Board.S.auto ? autoRowButtons(inst, () => closeAllModals()) : null,
       );
       row.addEventListener('click', e => { openCardMenu(inst.uid, e.clientX, e.clientY); });
       row.addEventListener('contextmenu', e => { e.preventDefault(); row.click(); });
