@@ -63,7 +63,7 @@ function autoActions(inst) {
   const same = c => c.controller === con && c.location === loc && c.sequence === seq;
   const out = [];
   const add = (list, label, action, kind) => list.forEach((c, index) => {
-    if (same(c)) out.push({ label: typeof label === 'function' ? label(c) : label, kind, res: { type: p.type === MSG.SELECT_BATTLECMD ? RES.SELECT_BATTLECMD : RES.SELECT_IDLECMD, action, index } });
+    if (same(c)) out.push({ label: typeof label === 'function' ? label(c) : label, kind: typeof kind === 'function' ? kind(c) : kind, res: { type: p.type === MSG.SELECT_BATTLECMD ? RES.SELECT_BATTLECMD : RES.SELECT_IDLECMD, action, index } });
   });
   const actLabel = c => { const t = descText(c.description); return t && !/^発動$/.test(t) ? `効果を発動：${t}` : '効果を発動'; };
   if (p.type === MSG.SELECT_IDLECMD) {
@@ -78,7 +78,8 @@ function autoActions(inst) {
         mset && { label: 'セット（裏側守備表示）', res: mset },
       ].filter(Boolean) });
     }
-    add(p.special_summons, summonLabel, IDLE.SPSUMMON, 'b');
+    // 自分の方法で特殊召喚できる（手札・墓地などから）ものは効果と同じ黄色、EXデッキからの召喚とペンデュラム召喚は青
+    add(p.special_summons, summonLabel, IDLE.SPSUMMON, c => (summonLabel(c) === '特殊召喚' ? 'y' : 'b'));
     add(p.spell_sets, 'セットする', IDLE.SSET);
     add(p.pos_changes, '表示形式を変更', IDLE.REPOS);
   } else if (p.type === MSG.SELECT_BATTLECMD) {
