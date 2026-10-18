@@ -936,3 +936,25 @@ body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh)
 .ph-chip b { font-size: 12px; white-space: nowrap; }
 @media (max-width: 720px) { .ph-chip b { font-size: 10px; letter-spacing: -.5px; } }
 body.land #view-board .ph-chip b { font-size: 10px; letter-spacing: -.5px; }
+/* スマホ横画面：操作部分を大きく（指で押しやすく） */
+body.land #view-board .board-layout { grid-template-columns: 190px minmax(0, 1fr) 170px; }
+body.land #view-board .side-left { font-size: 14px; gap: 8px; }
+body.land #view-board .side-left .btn { padding: 9px 6px; font-size: 14px; min-height: 40px; }
+body.land #view-board .ctrl-group { gap: 6px; }
+body.land #view-board .ap-status { font-size: 13px; }
+body.land #view-board .phase-bar { padding: 3px 6px; }
+body.land #view-board .ph-turn { font-size: 13px; }
+body.land #view-board .ph-chip { padding: 5px 0; min-height: 30px; }
+body.land #view-board .ph-chip b { font-size: 12px; letter-spacing: 0; }
+body.land #view-board .ph-end { padding: 6px 10px; font-size: 13px; }
+body.land .menu-item { padding: 10px 14px; font-size: 15px; }
+body.land .ap-act { padding: 10px 16px; font-size: 15px; }
+body.land .modal-foot .btn, body.land .ap-sheet .btn { padding: 9px 14px; font-size: 15px; }
+body.land #view-board .board-center { --cw: min(calc((var(--lh) - 150px) / 4 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
+body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 182px) / 6 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
+/* 横画面ではタブの帯を隠して盤面を広く（タブの切り替えはポーズ画面から） */
+.pause-nav { display: none; gap: 6px; margin-left: auto; margin-right: 8px; }
+body.land .pause-nav { display: inline-flex; }
+body.land .topbar { display: none; }
+body.land #view-board .board-center { --cw: min(calc((var(--lh) - 118px) / 4 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
+body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 150px) / 6 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
