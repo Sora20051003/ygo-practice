@@ -190,19 +190,21 @@ function deckCardBar(c) {
     const main = isExtraType(c) ? 'extra' : 'main';
     const count = sec => deck[sec].filter(id => id === c.id).length;
     const nMain = count(main), nSide = count('side');
-    // 1枚減らす：メイン（EX）から先に、なければサイドから
-    const removeOne = () => {
-      const sec = nMain ? main : 'side';
+    // 指定した場所から1枚減らす
+    const removeOne = sec => {
       const i = deck[sec].lastIndexOf(c.id);
       if (i >= 0) removeFromDeck(sec, i);
       draw();
     };
+    const label = main === 'extra' ? 'EXデッキ' : 'メインデッキ';
     bar.append(
       el('div', { class: 'd-addcount', text: `今の枚数：${main === 'extra' ? 'EX' : 'メイン'} ${nMain}枚・サイド ${nSide}枚` }),
       el('div', { class: 'd-addbtns' },
-        el('button', { class: 'btn small primary', text: `＋ ${main === 'extra' ? 'EXデッキ' : 'メインデッキ'}に追加`, onclick: () => { addToDeck(c, main); draw(); } }),
-        el('button', { class: 'btn small', text: '＋ サイドに追加', onclick: () => { addToDeck(c, 'side'); draw(); } }),
-        el('button', { class: 'btn small', text: '− 1枚減らす', disabled: !(nMain || nSide), onclick: removeOne })));
+        el('button', { class: 'btn small primary', text: `＋ ${label}に追加`, onclick: () => { addToDeck(c, main); draw(); } }),
+        el('button', { class: 'btn small', text: '＋ サイドに追加', onclick: () => { addToDeck(c, 'side'); draw(); } })),
+      el('div', { class: 'd-addbtns' },
+        el('button', { class: 'btn small', text: `− ${label}から1枚減らす`, disabled: !nMain, onclick: () => removeOne(main) }),
+        el('button', { class: 'btn small', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })));
   };
   draw();
   return bar;
