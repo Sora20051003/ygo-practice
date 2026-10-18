@@ -587,6 +587,7 @@ function promptModal(body, buttons = [], title) {
     buttons.length ? el('div', { class: 'ap-sheet-foot' }, buttons.map(b =>
       el('button', { class: 'btn' + (b.primary ? ' primary' : ''), text: b.label, onclick: () => { if (b.onClick() !== false) closePromptModal(); } }))) : null);
   document.body.append(sheet);
+  fitSheet(sheet);
   const close = () => {
     sheet.remove();
     if (Auto.selectable) { Auto.selectable = null; Auto.pickFromBoard = null; renderBoard(); }
@@ -1003,3 +1004,18 @@ function decorateUsed(box, c, text) {
   box.append(head, body);
   return true;
 }
+
+// 選択の帯が右の詳細欄（カードの説明）と重ならないように、詳細欄の左までにおさめる
+function fitSheet(sheet = $('#ap-sheet')) {
+  if (!sheet) return;
+  const det = $('#board-detail');
+  const shown = det && det.offsetParent && getComputedStyle(det).display !== 'none';
+  const r = shown ? localRect(det.getBoundingClientRect()) : null;
+  // 詳細欄が盤面の右にあるときだけ（スマホ縦画面やPCの狭い画面で下に回っているときはそのまま）
+  if (r && r.left > viewW() * 0.4) {
+    Object.assign(sheet.style, { left: '6px', right: Math.max(0, viewW() - r.left + 6) + 'px', width: 'auto', transform: 'none' });
+  } else {
+    Object.assign(sheet.style, { left: '', right: '', width: '', transform: '' });
+  }
+}
+addEventListener('resize', () => fitSheet());
