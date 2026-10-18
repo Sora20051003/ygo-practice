@@ -808,7 +808,7 @@ function setupBoardView() {
   $('#pause-close').onclick = closePause;
   for (const b of $$('#pause .pause-nav [data-go]')) b.onclick = () => { closePause(); switchView(b.dataset.go); };
   $('#b-quickstart').onclick = () => startGame();
-  $('#pause').addEventListener('mousedown', e => { if (e.target.id === 'pause') closePause(); });
+  $('#pause').addEventListener('click', e => { if (e.target.id === 'pause') closePause(); });
   for (const id of ['#b-deck', '#b-handsize']) $(id).addEventListener('change', renderPauseSummary);
   $('#b-mode').addEventListener('click', () => setTimeout(renderPauseSummary));
   renderPauseSummary();

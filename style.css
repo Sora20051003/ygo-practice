@@ -1027,3 +1027,26 @@ body.land .unofficial { display: none; }
 .cc-empty { padding: 6px 8px; font-size: 12px; color: var(--muted); }
 .imgdeck-item { overflow: visible; }
 @media (max-width: 720px) { .card-combo input { font-size: 16px; } }
+
+/* ---------- iPhone（Safari）向け ---------- */
+/* 古い Safari（iOS 16.1 以前）は color-mix が使えない：背景が透明にならないよう、ふつうの色で代わりに塗る */
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  .ap-sheet { background: var(--panel); }
+  .ap-item.on { background: rgba(63, 182, 255, .2); }
+  .imgdeck-item.unsure, .review-row.unsure { background: rgba(212, 172, 13, .16); }
+  .ap-status.waiting { background: rgba(255, 210, 63, .3); }
+  .deck-chip.current, .dp-turn.mine, .pile-row.chosen { background: rgba(80, 140, 255, .18); }
+  .ap-locks, .ap-traphand .chip { background: rgba(255, 90, 90, .18); }
+  .used-head { background: rgba(63, 191, 111, .2); }
+  .r-snippet mark { background: rgba(255, 211, 77, .55); }
+}
+/* iPhone は文字の大きさが 16px 未満の入力欄を押すと画面が拡大されてしまう（横画面の配置がくずれる）ので、入力欄は 16px にする */
+@supports (-webkit-touch-callout: none) {
+  input, select, textarea { font-size: 16px !important; }
+  /* 長押しで文字選択や拡大鏡が出て、カードの操作のじゃまにならないように */
+  #view-board .bcard, #view-board .zone, .ap-item, .ph-chip, .btn { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  /* ダブルタップでの拡大をしない（素早く2回押したときに画面が拡大されないように） */
+  html { touch-action: manipulation; }
+}
+/* iPhone は横向きにすると文字を勝手に大きくする：配置がくずれないよう、決めた大きさのままにする */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }

@@ -88,10 +88,6 @@ async function prepareTextSearch(task) {
 }
 
 async function init() {
-  if (typeof DecompressionStream === 'undefined') {
-    showLoading('このブラウザは古いため使えません。最新の Chrome / Edge / Firefox / Safari で開いてください。');
-    return;
-  }
   for (const t of $$('.tab')) t.addEventListener('click', () => switchView(t.dataset.view));
   // ネット版ならログインが終わるまで待つ
   try { await initAuth(); } catch (e) {

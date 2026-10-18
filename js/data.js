@@ -65,8 +65,7 @@ async function unzipJson(buf) {
     const data = new Uint8Array(buf, start, compSize);
     if (method === 0) return JSON.parse(dec.decode(data));
     if (method !== 8) throw new Error('未対応の圧縮形式です');
-    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-    return JSON.parse(await new Response(stream).text());
+    return JSON.parse(dec.decode(await inflateRaw(data)));
   }
   throw new Error('zipの中にカードデータがありませんでした');
 }
@@ -562,4 +561,17 @@ function fuzzyCandidates(name, k = 5) {
     if (s >= 0.35) out.push({ c, score: s });
   }
   return out.sort((a, b) => b.score - a.score).slice(0, k);
+}
+
+// zip の中身（deflate）を展開する。ブラウザ標準の DecompressionStream が使えないとき（iPhone の iOS 16.3 以前など）は、
+// 展開用の小さなライブラリ（fflate）を読み込んで使う
+async function inflateRaw(data) {
+  if (typeof DecompressionStream !== 'undefined') {
+    try {
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch (e) { console.warn('DecompressionStream が使えないので別の方法で展開します', e); }
+  }
+  if (typeof fflate === 'undefined') await loadScript('https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js');
+  return fflate.inflateSync(data);
 }

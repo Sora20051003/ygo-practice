@@ -262,7 +262,7 @@ function learnFeatures(list) {   // list: [{ id, feat }]
 // 画像ファイル → [{ rect, section, candidates }]
 async function readDeckImage(file) {
   await loadCardFeatures();
-  const img = await createImageBitmap(file);
+  const img = await decodeImage(file);
   // 幅をそろえる（大きすぎる画像は処理が重いので縮める）
   const scale = Math.min(1, 1600 / img.width);
   const canvas = document.createElement('canvas');
@@ -420,7 +420,7 @@ function cardCombo({ candidates, extra, value, onChange }) {
     items.forEach((it, k) => list.append(el('div', {
       class: 'cc-item' + (it.id === cur ? ' cur' : '') + (k === active ? ' on' : '') + (it.id ? '' : ' none'),
       text: it.label,
-      onmousedown: e => { e.preventDefault(); pick(it.id); },
+      onpointerdown: e => { e.preventDefault(); pick(it.id); },
     })));
     list.hidden = false;
   };
@@ -438,4 +438,16 @@ function cardCombo({ candidates, extra, value, onChange }) {
   box.append(input, list);
   box.classList.toggle('none', !cur);
   return box;
+}
+
+// 画像ファイルを読む。createImageBitmap が読めない形式（iPhone の写真の HEIC など）は、<img> で読む（Safari は HEIC を表示できる）
+async function decodeImage(file) {
+  try { return await createImageBitmap(file); } catch (e) { /* 下の方法で読む */ }
+  const url = URL.createObjectURL(file);
+  try {
+    const im = new Image();
+    im.decoding = 'async';
+    await new Promise((res, rej) => { im.onload = res; im.onerror = () => rej(new Error('この画像の形式は読めませんでした（JPEG か PNG で保存し直してください）')); im.src = url; });
+    return im;   // width / height は naturalWidth と同じ
+  } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
 }

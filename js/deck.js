@@ -302,7 +302,7 @@ const segMode = sel => ($(sel + ' button.on') || {}).dataset?.mode || 'and';
 const getMulti = sel => $$(sel + ' .multi-panel input[type=checkbox]:checked').map(i => i.value);
 
 // 絞り込みパネルの外をクリックしたら閉じる
-document.addEventListener('mousedown', e => {
+document.addEventListener('pointerdown', e => {
   for (const d of $$('details.multi[open]')) if (!d.contains(e.target)) d.open = false;
 });
 
@@ -817,12 +817,13 @@ function openImport() {
       el('li', { text: 'パソコンのブラウザでそのデッキのページを開き、カード一覧の部分を選択してコピーし、下の欄に貼り付けます。' }),
       el('li', { text: 'うまく読めない場合は、ブラウザ拡張「Deck transfer for Master Duel」を入れると、デッキのページに書き出しボタンが付きます。YDKファイルか ydke:// の文字列で書き出して、ここで読み込んでください。' })),
     el('p', { class: 'muted', text: '※ニューロンの「デッキコード」は KONAMI のサーバーに保存されたデッキの番号なので、コードそのものからは読み取れません。' }));
-  const file = el('input', { type: 'file', accept: '.ydk,.txt,.pdf,application/pdf,image/*' });
+  // iPhone は知らない拡張子（.ydk など）を指定すると選べなくなるので、種類をしぼらない
+  const file = el('input', { type: 'file', accept: isIOS ? null : '.ydk,.txt,.pdf,application/pdf,image/*' });
   file.addEventListener('change', async () => {
     const f = file.files[0];
     if (!f) return;
     // 画像（ニューロンのデッキ画像やスクリーンショット）→ カードのイラストで照合する
-    if (/^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)) {
+    if (/^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(f.name)) {
       closeImport();
       openImageImport(f);
       return;
@@ -1023,7 +1024,7 @@ function backupAll() {
 }
 
 function restoreBackup() {
-  const input = el('input', { type: 'file', accept: '.json' });
+  const input = el('input', { type: 'file', accept: isIOS ? null : '.json' });
   input.addEventListener('change', async () => {
     try {
       const data = JSON.parse(await input.files[0].text());
@@ -1047,7 +1048,7 @@ function restoreBackup() {
       toast('バックアップを読めませんでした：' + e.message);
     }
   });
-  input.click();
+  openFilePicker(input);
 }
 
 function setupDeckView() {
@@ -1125,7 +1126,7 @@ function setupDeckView() {
         catch (e) { toast('PDFを読めませんでした：' + e.message); }
       } else openImageImport(f);
     });
-    input.click();
+    openFilePicker(input);
   };
   $('#deck-restore').onclick = restoreBackup;
   $('#deck-play').onclick = () => {

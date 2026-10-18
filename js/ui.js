@@ -56,7 +56,10 @@ function showModal({ title, body, buttons = [], wide = false, onClose }) {
   openModals.add(close);
   const onKey = e => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
-  back.addEventListener('mousedown', e => { if (e.target === back) close(); });
+  // 背景を押したら閉じる（押した所と離した所が両方背景のときだけ。iPhone でも動くよう pointer を使う）
+  let downOnBack = false;
+  back.addEventListener('pointerdown', e => { downOnBack = e.target === back; });
+  back.addEventListener('click', e => { if (e.target === back && downOnBack) close(); });
   box.append(
     el('div', { class: 'modal-head' }, el('h2', { text: title }), el('button', { class: 'btn small', text: '閉じる', onclick: close })),
     el('div', { class: 'modal-body' }, body),
@@ -107,7 +110,7 @@ function showMenu(x, y, items) {
   m.style.top = Math.max(4, Math.min(y, vh - h - 4)) + 'px';
 }
 function hideMenu() { $('#menu').hidden = true; }
-document.addEventListener('mousedown', e => { if (!e.target.closest('#menu')) hideMenu(); });
+document.addEventListener('pointerdown', e => { if (!e.target.closest('#menu')) hideMenu(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideMenu(); });
 
 // カードの小さな表示（デッキ・盤面共通）
@@ -375,6 +378,8 @@ function detailImage(c) {
 
 // スマホ幅かどうか（CSSの切り替えと同じ幅）
 const isMobile = () => !document.body.classList.contains('land') && window.matchMedia('(max-width: 720px)').matches;
+// iPhone・iPad（iPadOS は Mac と名乗るので、タッチの有無でも見分ける）
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // カードの詳細を出す。パソコンは右の欄、スマホは画面下から出る窓
 function showCardDetail(c, panelSel, extra) {
@@ -445,4 +450,12 @@ function renderDetail(box, c, extra) {
     }
     enBox.textContent = (t && t.en) || '英語テキストが見つかりませんでした（日本先行のカードなど）。';
   });
+}
+
+// ファイル選択を開く。iPhone の Safari は、ページに置いていない <input type=file> だと選んだあとの知らせが来ないことがあるので、一度ページに置く
+function openFilePicker(input) {
+  input.style.display = 'none';
+  document.body.append(input);
+  input.addEventListener('change', () => setTimeout(() => input.remove(), 0), { once: true });
+  input.click();
 }
