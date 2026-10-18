@@ -122,6 +122,7 @@ const isPrompt = p => p && p.type !== MSG.SELECT_IDLECMD && p.type !== MSG.SELEC
 function autoRespond(res) {
   const d = Auto.duel;
   if (!d) return;
+  Auto.redoLog = null;   // 新しい手を選んだら「1手進む」はできなくなる
   try { d.respond(res); } catch (e) { console.error(e); toast('処理中にエラーが起きました：' + e.message); }
   autoAfter();
 }
@@ -169,7 +170,7 @@ function autoPanel() {
   if (p && p.type === MSG.SELECT_BATTLECMD) { bp.textContent = 'メインフェイズ2へ'; bp.disabled = !p.to_m2; ep.disabled = !p.to_ep; }
   else { bp.textContent = 'バトルフェイズへ'; bp.disabled = !(p && p.type === MSG.SELECT_IDLECMD && p.to_bp); ep.disabled = !(p && p.type === MSG.SELECT_IDLECMD && p.to_ep); }
   $('#ap-undo').disabled = !d.userMarks.length;
-  $('#ap-rewind').disabled = !d.userMarks.length;
+  $('#ap-rewind').disabled = !(Auto.redoLog && Auto.redoLog.length > d.responses.length);
   $('#ap-open').disabled = !isPrompt(p);
   renderChainBox();
   const locks = $('#ap-locks');
@@ -190,7 +191,27 @@ function autoUndo() {
   if (!d || !d.userMarks.length) { toast('これ以上戻せません'); return; }
   closePromptModal();
   Auto.selQueue = null;
+  // 戻す前の手順を覚えておく（「1手進む」でやり直せるように）
+  if (!Auto.redoLog || Auto.redoLog.length < d.responses.length) Auto.redoLog = d.history();
   try { d.undo(); } catch (e) { toast('戻せませんでした：' + e.message); }
+  autoAfter(true);
+}
+
+// 1手進む：戻した手順を、次の行動1つ分だけやり直す
+function autoRedo() {
+  const d = Auto.duel, log = Auto.redoLog;
+  if (!d || !log || log.length <= d.responses.length) { toast('進める手がありません'); return; }
+  const isAction = x => x.user && (x.res.type === RES.SELECT_IDLECMD || x.res.type === RES.SELECT_BATTLECMD);
+  // 今の位置から先の、次の行動の始まり（ここから1手）と、その次の行動の始まり（ここまで流す）
+  let from = d.responses.length;
+  while (from < log.length && !isAction(log[from])) from++;
+  if (from >= log.length) { toast('進める手がありません'); return; }
+  let to = from + 1;
+  while (to < log.length && !isAction(log[to])) to++;
+  closePromptModal();
+  Auto.selQueue = null;
+  try { d.responses = []; d.userMarks = []; d.labels = {}; d.create(); d.run(log.slice(0, to).map(x => ({ ...x }))); } catch (e) { toast('進められませんでした：' + e.message); }
+  if (d.responses.length >= log.length) Auto.redoLog = null;
   autoAfter(true);
 }
 
@@ -213,6 +234,7 @@ async function autoStart(handIds) {
   if (opp) {
     try { await autoPrepare(opp); } catch (e) { toast('相手のデッキを準備できませんでした：' + e.message); return; }
   }
+  Auto.redoLog = null;
   Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked });
   Auto.deckId = deck.id;
   try { Auto.duel.start(); } catch (e) { console.error(e); toast('開始できませんでした：' + e.message); Auto.duel = null; renderBoard(); return; }
@@ -222,6 +244,7 @@ async function autoStart(handIds) {
 function autoRestart() {
   if (!Auto.duel) { toast('まだ開始していません'); return; }
   closePromptModal();
+  Auto.redoLog = null;
   Auto.duel.restart();
   autoAfter(true);
   toast('最初の状態に戻しました');
@@ -273,7 +296,7 @@ function setupAutoPlay() {
   $('#ap-bp').onclick = () => autoPhase('bp');
   $('#ap-ep').onclick = () => autoPhase('ep');
   $('#ap-undo').onclick = autoUndo;
-  $('#ap-rewind').onclick = openRewind;
+  $('#ap-rewind').onclick = autoRedo;
   $('#ap-open').onclick = () => { if (Auto.duel && isPrompt(Auto.duel.pending)) openPrompt(); };
   $('#mb-auto').onclick = e => {
     const p = Auto.duel && Auto.duel.pending;
@@ -283,7 +306,8 @@ function setupAutoPlay() {
       { label: '選択画面を開く', disabled: !isPrompt(p), onClick: () => openPrompt() },
       { label: p && p.type === MSG.SELECT_BATTLECMD ? 'メインフェイズ2へ' : 'バトルフェイズへ', disabled: $('#ap-bp').disabled, onClick: () => autoPhase('bp') },
       { label: 'ターン終了', disabled: $('#ap-ep').disabled, onClick: () => autoPhase('ep') },
-      { label: '⏪ 巻き戻し', disabled: $('#ap-rewind').disabled, onClick: () => openRewind() },
+      { label: '⏪ 1手戻す', disabled: $('#ap-undo').disabled, onClick: () => autoUndo() },
+      { label: '1手進む ⏩', disabled: $('#ap-rewind').disabled, onClick: () => autoRedo() },
     ]);
   };
   // 設定（相手・チェーン確認・演出）

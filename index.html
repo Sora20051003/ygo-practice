@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261019-023506">
+<link rel="stylesheet" href="style.css?v=20261019-023835">
 </head>
 <body>
 <header class="topbar">
@@ -197,11 +197,11 @@
             <button class="btn" id="ap-ep">ターン終了</button>
           </div>
           <div class="row">
-            <button class="btn" id="ap-undo" title="Ctrl+Z">元に戻す</button>
+            <button class="btn" id="ap-undo" title="1手前に戻す（Ctrl+Z）">⏪ 1手戻す</button>
             <button class="btn" id="ap-open">選択画面を開く</button>
           </div>
           <div class="row">
-            <button class="btn" id="ap-rewind" title="前の好きな時点まで戻す">⏪ 巻き戻し</button>
+            <button class="btn" id="ap-rewind" title="戻した手を1手やり直す（Ctrl+Y）">1手進む ⏩</button>
           </div>
           <label class="muted">相手</label>
           <div class="seg full" id="ap-oppmode" title="次に開始したときから使われます">
@@ -236,11 +236,11 @@
             <button class="btn" id="b-shuffle">シャッフル</button>
           </div>
           <div class="row">
-            <button class="btn" id="b-undo" title="Ctrl+Z">元に戻す</button>
+            <button class="btn" id="b-undo" title="1手前に戻す（Ctrl+Z）">⏪ 1手戻す</button>
             <button class="btn" id="b-token">トークン</button>
           </div>
           <div class="row solo-only">
-            <button class="btn" id="b-rewind" title="前の好きな時点まで戻す">⏪ 巻き戻し</button>
+            <button class="btn" id="b-rewind" title="戻した手を1手やり直す（Ctrl+Y）">1手進む ⏩</button>
           </div>
           <div class="row">
             <button class="btn" id="b-ns">通常召喚：未使用</button>
@@ -316,19 +316,19 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261019-023506"></script>
-<script src="js/consts.js?v=20261019-023506"></script>
-<script src="js/ui.js?v=20261019-023506"></script>
-<script src="js/data.js?v=20261019-023506"></script>
-<script src="js/firebase-config.js?v=20261019-023506"></script>
-<script src="js/auth.js?v=20261019-023506"></script>
-<script src="js/deck.js?v=20261019-023506"></script>
-<script src="js/board.js?v=20261019-023506"></script>
-<script src="js/engine.js?v=20261019-023506"></script>
-<script src="js/autoplay.js?v=20261019-023506"></script>
-<script src="js/glow.js?v=20261019-023506"></script>
-<script src="js/duel.js?v=20261019-023506"></script>
-<script src="js/imgdeck.js?v=20261019-023506"></script>
-<script src="js/app.js?v=20261019-023506"></script>
+<script src="js/version.js?v=20261019-023835"></script>
+<script src="js/consts.js?v=20261019-023835"></script>
+<script src="js/ui.js?v=20261019-023835"></script>
+<script src="js/data.js?v=20261019-023835"></script>
+<script src="js/firebase-config.js?v=20261019-023835"></script>
+<script src="js/auth.js?v=20261019-023835"></script>
+<script src="js/deck.js?v=20261019-023835"></script>
+<script src="js/board.js?v=20261019-023835"></script>
+<script src="js/engine.js?v=20261019-023835"></script>
+<script src="js/autoplay.js?v=20261019-023835"></script>
+<script src="js/glow.js?v=20261019-023835"></script>
+<script src="js/duel.js?v=20261019-023835"></script>
+<script src="js/imgdeck.js?v=20261019-023835"></script>
+<script src="js/app.js?v=20261019-023835"></script>
 </body>
 </html>

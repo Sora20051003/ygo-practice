@@ -42,11 +42,13 @@ function shuffleArr(a) {
 // ---------- 状態の保存・元に戻す ----------
 function commit() {
   Board.history.push(JSON.stringify(Board.S));
+  Board.future = [];   // 新しく動かしたら「1手進む」はできなくなる
   if (Board.history.length > 300) Board.history.shift();
 }
 function undo() {
   if (Board.S && Board.S.auto) { autoUndo(); return; }
   if (!Board.history.length) { toast('これ以上戻せません'); return; }
+  (Board.future = Board.future || []).push(JSON.stringify(Board.S));   // 「1手進む」で戻れるように
   Board.S = JSON.parse(Board.history.pop());
   Board.pick = null;
   renderBoard();
@@ -470,7 +472,7 @@ function startGame(handIds) {
   closeAllModals();
   Board.S = buildState(deck, handIds);
   Board.initial = JSON.stringify(Board.S);
-  Board.history = [];
+  Board.history = []; Board.future = [];
   Board.pick = null;
   persist();
   renderBoard();
@@ -481,7 +483,7 @@ function restartSame() {
   if (!Board.initial) { toast('まだ開始していません'); return; }
   closeAllModals();
   Board.S = JSON.parse(Board.initial);
-  Board.history = [];
+  Board.history = []; Board.future = [];
   Board.pick = null;
   persist();
   renderBoard();
@@ -771,7 +773,7 @@ function setupBoardView() {
   $('#b-draw').onclick = () => { if (Board.S) drawCard(); };
   $('#b-shuffle').onclick = () => { if (Board.S) shuffleDeck(); };
   $('#b-undo').onclick = () => { if (Board.S) undo(); };
-  $('#b-rewind').onclick = () => { if (Board.S) openRewind(); };
+  $('#b-rewind').onclick = () => { if (Board.S) redo(); };
   $('#b-token').onclick = () => { if (Board.S) openToken(); };
   setupAutoPlay();
   $('#b-glow').checked = Glow.on;
@@ -799,6 +801,7 @@ function setupBoardView() {
     if (e.target.matches('input, textarea, select')) return;
     if (e.key === 'Escape') cancelPick();
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (Board.S) undo(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); if (Board.S) redo(); }
     if (e.key === 'd' && Board.S && !$('#modal-root').children.length) drawCard();
   });
 
@@ -861,30 +864,15 @@ function renderMyLp() {
   slot.replaceChildren(...box.childNodes);
 }
 
-// ---------- 巻き戻し（一人回しだけ） ----------
-// これまでの行動を一覧にして、選んだ行動の直前まで戻す
-function openRewind() {
-  if (typeof Duel !== 'undefined' && Duel.active) return;   // 対戦では使えない
-  const auto = Board.S && Board.S.auto && Auto.duel;
-  let points;   // { label, go }（新しい順）
-  if (auto) {
-    points = Auto.duel.actions().reverse().map(a => ({ label: a.label, go: () => { closePromptModal(); Auto.selQueue = null; Auto.duel.rewindTo(a.at); autoAfter(true); } }));
-  } else {
-    const h = Board.history;
-    points = [];
-    for (let k = h.length - 1; k >= 0; k--) {
-      const s = JSON.parse(h[k]);
-      const next = k + 1 < h.length ? JSON.parse(h[k + 1]).log : Board.S.log;
-      const label = (next[s.log.length] || '操作').replace(/^\[T(\d+)\] /, 'T$1 ');
-      points.push({ label, go: () => { Board.S = s; Board.history = h.slice(0, k); Board.pick = null; persist(); renderBoard(); } });
-    }
-  }
-  if (!points.length) { toast('まだ戻せる行動がありません'); return; }
-  const list = el('div', { class: 'pile-list rewind-list' }, points.map((p, i) =>
-    el('div', { class: 'pile-row rewind-row' },
-      el('span', { class: 'muted', text: `${points.length - i}.` }),
-      el('div', { class: 'r-main' }, el('div', { class: 'r-name', text: p.label })),
-      el('button', { class: 'btn small', text: 'この前に戻す', onclick: () => { closeRw(); p.go(); toast('「' + p.label + '」の前まで戻しました'); } }))));
-  const closeRw = showModal({ title: '巻き戻し（行動の前の状態に戻します）', wide: true,
-    body: el('div', { class: 'stack' }, el('p', { class: 'muted', text: '新しい行動が上です。戻したい行動の「この前に戻す」を押してください。' }), list) });
+
+// 1手進む（戻した手をやり直す。一人回しだけ）
+function redo() {
+  if (typeof Duel !== 'undefined' && Duel.active) return;
+  if (Board.S && Board.S.auto) { autoRedo(); return; }
+  if (!Board.future || !Board.future.length) { toast('進める手がありません'); return; }
+  Board.history.push(JSON.stringify(Board.S));
+  Board.S = JSON.parse(Board.future.pop());
+  Board.pick = null;
+  persist();
+  renderBoard();
 }
