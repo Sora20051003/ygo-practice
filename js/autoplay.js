@@ -593,8 +593,8 @@ function renderChainBox() {
   box.classList.toggle('solving', !!solving);
   box.append(el('b', { text: solving ? `⛓ チェーン解決中（チェーン${d.solving}）` : '⛓ チェーン（積んでいるところ）' }));
   const who = c => (c.con === d.me ? '' : (Auto.net ? oppName() : 'CPU') + '：');
-  for (const c of [...chain].reverse()) box.append(el('div', { class: 'ap-link' + (c.con === d.me ? '' : ' opp') + (solving && c.n === d.solving ? ' now' : '') }, `${c.n}. ${who(c)}${cardName(c.code)}`));
-  box.append(el('div', { class: 'muted small-note', text: solving ? '解決中は新しく効果を発動できません（「〜できる」の確認や対象の選択だけ）' : '新しい番号が上。最後に積んだものから順に解決します' }));
+  for (const c of chain) box.append(el('div', { class: 'ap-link' + (c.con === d.me ? '' : ' opp') + (solving && c.n === d.solving ? ' now' : '') }, `${c.n}. ${who(c)}${cardName(c.code)}`));
+  box.append(el('div', { class: 'muted small-note', text: solving ? '解決中は新しく効果を発動できません（「〜できる」の確認や対象の選択だけ）' : 'チェーン1が上、新しく積んだものが下。下（最後に積んだもの）から順に解決します' }));
 }
 
 // ---------- 盤面の上で、チェーンのカードどうしを鎖でつなぐ ----------
