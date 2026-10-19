@@ -702,73 +702,119 @@ function describeAction(res, src, duel) {
 // ---------- 「デッキで対戦」の相手の先読み ----------
 // 今できる手を1つずつ、裏で複製した対戦で試す（そのあとのターンの残りは簡単な動きで進める）。
 // 進めたあとの盤面を点数にして、一番よくなる手を選ぶ。どの手も今より良くならなければ null（簡単な動きに任せる）
+// 今の場面で打てる手の一覧
+function cpuCandidates(m, kind) {
+  const cands = [];
+  const desc = (list, i) => ({ code: list[i].code, loc: list[i].location, d: String(list[i].description || '') });
+  if (kind === 'idle') {
+    (m.activates || []).forEach((c, i) => { if (!(c.location === LOC.HAND && isHandTrap(c.code))) cands.push({ res: { type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index: i }, id: { list: 'activates', ...desc(m.activates, i) } }); });
+    (m.special_summons || []).forEach((c, i) => cands.push({ res: { type: RES.SELECT_IDLECMD, action: IDLE.SPSUMMON, index: i }, id: { list: 'special_summons', ...desc(m.special_summons, i) } }));
+    (m.summons || []).forEach((c, i) => cands.push({ res: { type: RES.SELECT_IDLECMD, action: IDLE.SUMMON, index: i }, id: { list: 'summons', ...desc(m.summons, i) } }));
+    // 伏せるのは罠と速攻魔法だけ（通常魔法などを伏せても意味がない）
+    (m.spell_sets || []).forEach((c, i) => { const d = DB.byId.get(c.code); if (d && (has(d, T.TRAP) || has(d, T.QUICKPLAY))) cands.push({ res: { type: RES.SELECT_IDLECMD, action: IDLE.SSET, index: i }, id: { list: 'spell_sets', ...desc(m.spell_sets, i) } }); });
+  } else {
+    (m.attacks || []).forEach((c, i) => cands.push({ res: { type: RES.SELECT_BATTLECMD, action: BATTLE.ATTACK, index: i }, id: { list: 'attacks', ...desc(m.attacks, i) } }));
+  }
+  return cands;
+}
+// 予定していた手を、今の場面の一覧の中から探す（見つからなければ null）
+function cpuFindPlanned(m, id) {
+  const list = m[id.list] || [];
+  const i = list.findIndex(c => c.code === id.code && c.location === id.loc && String(c.description || '') === id.d);
+  if (i < 0) return null;
+  const action = { activates: IDLE.ACTIVATE, special_summons: IDLE.SPSUMMON, summons: IDLE.SUMMON, spell_sets: IDLE.SSET, attacks: BATTLE.ATTACK }[id.list];
+  return { type: id.list === 'attacks' ? RES.SELECT_BATTLECMD : RES.SELECT_IDLECMD, action, index: i };
+}
+
+// 先読み：2〜3手先まで（良い候補だけを残して広げていく）。一番良い手順の最初の手を返し、残りは予定として覚える
+const CPU_DEPTH = 3, CPU_WIDTH = 3, CPU_MAXCANDS = 12, CPU_TIME = 4000;
 function cpuThink(m, duel, kind) {
   const t0 = performance.now();
   const cpu = 1 - duel.me;
-  const cands = [];
-  if (kind === 'idle') {
-    (m.activates || []).forEach((c, i) => { if (!(c.location === LOC.HAND && isHandTrap(c.code))) cands.push({ type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index: i }); });
-    (m.special_summons || []).forEach((c, i) => cands.push({ type: RES.SELECT_IDLECMD, action: IDLE.SPSUMMON, index: i }));
-    (m.summons || []).forEach((c, i) => cands.push({ type: RES.SELECT_IDLECMD, action: IDLE.SUMMON, index: i }));
-    // 伏せるのは罠と速攻魔法だけ（通常魔法などを伏せても意味がない）
-    (m.spell_sets || []).forEach((c, i) => { const d = DB.byId.get(c.code); if (d && (has(d, T.TRAP) || has(d, T.QUICKPLAY))) cands.push({ type: RES.SELECT_IDLECMD, action: IDLE.SSET, index: i }); });
-  } else {
-    (m.attacks || []).forEach((c, i) => cands.push({ type: RES.SELECT_BATTLECMD, action: BATTLE.ATTACK, index: i }));
-  }
   // 何もしないとき（メイン：攻撃できるならバトルへ、なければ終わり。バトル：メイン2かエンドへ）
   const fallback = () => {
+    duel.cpuPlan = null;
     if (kind === 'idle') {
-      const canAttack = m.to_bp && duel.turn > 1 && !duel.cpuBattled;
+      const canAttack = m.to_bp && duel.turn > 1 && duel.cpuBattled !== duel.turn;
       if (canAttack) { duel.cpuBattled = duel.turn; return { type: RES.SELECT_IDLECMD, action: IDLE.TO_BP, index: null }; }
       return { type: RES.SELECT_IDLECMD, action: m.to_ep ? IDLE.TO_EP : IDLE.TO_BP, index: null };
     }
     return { type: RES.SELECT_BATTLECMD, action: m.to_m2 ? BATTLE.TO_M2 : BATTLE.TO_EP, index: null };
   };
-  if (duel.cpuBattled && duel.cpuBattled !== duel.turn) duel.cpuBattled = 0;
-  if (!cands.length) return fallback();
+  // 前に立てた予定があり、その手が今も打てるなら、考え直さずに打つ
+  const plan = duel.cpuPlan;
+  if (plan && plan.turn === duel.turn && plan.kind === kind && plan.steps.length) {
+    const res = cpuFindPlanned(m, plan.steps[0]);
+    if (res) { plan.steps.shift(); return res; }
+  }
+  duel.cpuPlan = null;
+  const first = cpuCandidates(m, kind);
+  if (!first.length) return fallback();
   const hist = duel.history();
-  let best = null, bestScore = -Infinity, base = null;
-  const clone = () => {
+  // 手順 path を打ったあとの複製（CPU が次の手を選ぶ場面、または相手の番まで進めたもの）
+  const play = path => {
     const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true });
     t.noThink = true;
     t.create();
     t.stopAtCpu = true;   // 流し直したあと、今の判断の場面（CPU の番）で止める
     t.run(hist.slice());  // run は渡した一覧を使い切るので、複製ごとに写しを渡す
-    return t.pending && t.pending.player === cpu ? t : (Engine.lib.destroyDuel(t.h), null);
+    if (!t.pending || t.pending.player !== cpu) { Engine.lib.destroyDuel(t.h); return null; }
+    for (const step of path) {
+      if (!t.pending || t.pending.player !== cpu) break;
+      cpuStep(t, step.res, cpu);
+    }
+    return t;
   };
-  // 今の盤面の点数（何もしない場合の基準）
-  try { const t = clone(); if (t) { base = cpuScore(t, cpu); Engine.lib.destroyDuel(t.h); } } catch (e) { /* 比べられない */ }
+  let base = null;
+  try { const t = play([]); if (t) { base = cpuScore(t, cpu); Engine.lib.destroyDuel(t.h); } } catch (e) { /* 比べられない */ }
   if (base == null) return null;
-  for (const res of cands) {
-    if (performance.now() - t0 > 2500) break;   // 考えすぎない（画面が止まらないように）
-    let t = null;
-    try {
-      t = clone();
-      if (!t) continue;
-      const s = cpuEvalAfter(t, res, cpu);
-      if (s > bestScore) { bestScore = s; best = res; }
-    } catch (e) { /* 試せない手は使わない */ }
-    finally { if (t && t.h) Engine.lib.destroyDuel(t.h); }
+  // 1段目
+  let beam = [], bestPath = null, bestScore = -Infinity;
+  const consider = (path, t) => {
+    const s = cpuScore(t, cpu);
+    if (s > bestScore) { bestScore = s; bestPath = path; }
+    return s;
+  };
+  let level = first.slice(0, CPU_MAXCANDS).map(c => [c]);
+  for (let depth = 1; depth <= CPU_DEPTH && level.length; depth++) {
+    const scored = [];
+    for (const path of level) {
+      if (performance.now() - t0 > CPU_TIME) break;   // 考えすぎない（画面が止まらないように）
+      let t = null;
+      try {
+        t = play(path);
+        if (!t) continue;
+        const s = consider(path, t);
+        // 次の手を広げられる場面（CPU のメインで、同じターン）なら、候補として残す
+        const p = t.pending;
+        const next = p && p.player === cpu && p.type === MSG.SELECT_IDLECMD && kind === 'idle' ? cpuCandidates(p, 'idle') : [];
+        scored.push({ path, s, next });
+      } catch (e) { /* 試せない手順は使わない */ }
+      finally { if (t && t.h) Engine.lib.destroyDuel(t.h); }
+    }
+    // 良い順に CPU_WIDTH 個だけ残して、次の段を作る
+    beam = scored.sort((a, b) => b.s - a.s).slice(0, CPU_WIDTH);
+    level = [];
+    for (const b of beam) for (const c of b.next.slice(0, CPU_MAXCANDS)) level.push([...b.path, c]);
   }
-  // 今より良くなる手があれば打つ。なければ（メインなら）バトルへ・終わる
-  if (best && bestScore > base + 0.5) return best;
-  return fallback();
+  // 今より良くなる手順があれば、その最初の手を打つ（残りは予定にする）
+  if (!bestPath || bestScore <= base + 0.5) return fallback();
+  duel.cpuPlan = { turn: duel.turn, kind, steps: bestPath.slice(1).map(c => c.id) };
+  return bestPath[0].res;
 }
-// 手を打って、その先（CPU のターンの残り）を簡単な動きで進めてから、盤面の点数を出す
-// 手を打って、その手の処理が終わったところ（CPU が次の手を選ぶ場面、または練習する人の番）の盤面の点数を出す
-function cpuEvalAfter(t, res, cpu) {
-  const r = res;
+// 複製の中で1手打って、その処理が終わるところ（CPU が次の手を選ぶ場面、または相手の番）まで進める
+function cpuStep(t, res, cpu) {
   t.stopAtCpu = true;
-  t.respond(r);
+  t.respond(res);
   for (let i = 0; i < 60 && t.pending && !t.ended; i++) {
     const p = t.pending;
-    if (p.type === MSG.SELECT_IDLECMD || p.type === MSG.SELECT_BATTLECMD) break;   // 次の手を選ぶ場面（どちらの番でも）
+    if (p.type === MSG.SELECT_IDLECMD || p.type === MSG.SELECT_BATTLECMD) break;
     // 処理の途中の選択：CPU はいつもの答え、練習する人は「しない」で進める
     t.stopAtCpu = true;
     t.respond(p.player === cpu ? cpuAnswer(p, t) : autoAnswer(p));
   }
-  return cpuScore(t, cpu);
 }
+// 手を打って、その先（CPU のターンの残り）を簡単な動きで進めてから、盤面の点数を出す
 // 盤面の点数（CPU から見て）。モンスターの強さ・数、伏せカード、手札、相手のライフを数える
 function cpuScore(t, cpu) {
   if (t.ended) return t.ended.startsWith(cpu === t.me ? '自分の勝ち' : '相手の勝ち') ? 1e6 : -1e6;
