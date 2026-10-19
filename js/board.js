@@ -636,7 +636,7 @@ function cardEl(inst, zone) {
 function slotEl(zone, idx) {
   const S = Board.S;
   const inst = S[zone][idx];
-  const label = { p: idx === 0 ? 'Pゾーン（左）' : 'Pゾーン（右）', m: 'モンスター', emz: 'EXモンスター', s: (idx === 0 || idx === 4) && S.rule !== 'mr3' ? '魔法・罠 / P' : '魔法・罠', f: 'フィールド' }[zone];
+  const label = { p: idx === 0 ? 'Pゾーン（左）' : 'Pゾーン（右）', m: 'モンスター', emz: 'EXモンスター', s: (idx === 0 || idx === 4) && ruleHasEmz(S.rule) ? '魔法・罠 / P' : '魔法・罠', f: 'フィールド' }[zone];
   const slot = el('div', { class: `zone slot z-${zone}`, dataset: { zone, idx } }, el('span', { class: 'zone-label', text: label }));
   if (inst) slot.append(cardEl(inst, zone));
   if (inst && (zone === 'm' || zone === 'emz')) { const b = statBadge(inst.tokenCard || cardOf(inst), inst); if (b) slot.append(b); }
@@ -738,10 +738,12 @@ function renderBoard() {
     if (S.auto && S.opp) $('#opp-bar').append(lpBox(Auto.duel ? Auto.duel.lp[1 - Auto.duel.me] : S.opp.lp, 'opp'));
     // マスタールール3：EXモンスターゾーンは無く、真ん中の段にペンデュラムゾーン（自分は外側、相手は内側。相手は左右が逆）
     if (S.rule === 'mr3') field.append(oppPileEl('ban'), slotEl('p', 0), oppSlotEl('p', 1), blank(), oppSlotEl('p', 0), slotEl('p', 1), banWithPhase());
+    else if (!ruleHasEmz(S.rule)) field.append(oppPileEl('ban'), blank(), blank(), blank(), blank(), blank(), banWithPhase());   // マスタールール・2：EXモンスターゾーンもペンデュラムゾーンも無い
     else field.append(oppPileEl('ban'), blank(), emzSharedEl(0), blank(), emzSharedEl(1), blank(), banWithPhase());
   } else {
     // 1段目：EXモンスターゾーン・除外
     if (S.rule === 'mr3') field.append(slotEl('p', 0), blank(), blank(), blank(), blank(), slotEl('p', 1), banWithPhase());   // マスタールール3：両端にペンデュラムゾーン
+    else if (!ruleHasEmz(S.rule)) field.append(blank(), blank(), blank(), blank(), blank(), blank(), banWithPhase());
     else field.append(blank(), blank(), slotEl('emz', 0), blank(), slotEl('emz', 1), blank(), banWithPhase());
   }
   // 2段目：フィールド・モンスター・墓地
@@ -811,8 +813,10 @@ function setupBoardView() {
   setupTimer();
   $('#b-firstdraw').value = firstTurnDraw() ? '1' : '0';
   $('#b-firstdraw').onchange = e => { store.set('ygo.firstDraw', e.target.value === '1'); toast('次に開始したときから使われます'); };
+  $('#b-rule').innerHTML = '';
+  for (const [k, r] of Object.entries(MASTER_RULES)) $('#b-rule').append(el('option', { value: k, text: r.label }));
   $('#b-rule').value = masterRule();
-  $('#b-rule').onchange = e => { store.set('ygo.masterRule', e.target.value); toast('次に開始したときから使われます（効果を自動処理）'); };
+  $('#b-rule').onchange = e => { store.set('ygo.masterRule', e.target.value); toast(MASTER_RULES[e.target.value].note + '（次に開始したときから。効果を自動処理）'); };
   setupRotateHint();
   // ポーズ画面（設定・デッキ選択・やり直し）
   for (const id of ['#b-start', '#b-pickhand', '#b-restart']) $(id).addEventListener('click', closePause, true);
@@ -1218,7 +1222,9 @@ function endTurn() {
 // 先攻1ターン目のドロー（今のルールはしない。昔のルールなどで「する」にできる）
 const firstTurnDraw = () => store.get('ygo.firstDraw', false);
 // マスタールール（効果を自動処理するとき）：mr5＝今のルール／mr3＝EXモンスターゾーンなし・ペンデュラムゾーンは両端
-const masterRule = () => (store.get('ygo.masterRule', 'mr5') === 'mr3' ? 'mr3' : 'mr5');
+const masterRule = () => { const r = store.get('ygo.masterRule', 'mr5'); return MASTER_RULES[r] ? r : 'mr5'; };
+// そのルールに EXモンスターゾーンがあるか（手動モードなど、ルールの決まりが無い盤面は今のルール）
+const ruleHasEmz = rule => !rule || !MASTER_RULES[rule] || MASTER_RULES[rule].emz;
 
 // ---------- 勝ち負け（一人回し） ----------
 // 手動：デッキが0枚のときにドローしようとしたら負け。自動処理：エンジンの判定（デッキ切れ・ライフ0など）

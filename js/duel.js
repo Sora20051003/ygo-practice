@@ -1145,17 +1145,15 @@ function netGameOver(result, reason) {
 // 部屋の画面：対戦のしかた（部屋を作った人だけが変えられる）
 // マスタールール（効果を自動処理する対戦）：部屋を作った人が決める
 function duelRuleSetting(r) {
-  const rule = (r && r.rule) || 'mr5';
+  const rule = MASTER_RULES[r && r.rule] ? r.rule : 'mr5';
   const isHost = r && r.host === Duel.me.uid;
-  const label = { mr5: '新マスタールール（今のルール）', mr3: 'マスタールール3（EXモンスターゾーンなし・ペンデュラムゾーンは両端）' };
   if ((r && r.mode) !== 'auto') return null;   // 手動の対戦では、ゾーンを自分で使い分けるので選ばない
-  if (!isHost) return el('p', { class: 'muted', text: `ルール：${label[rule]}（部屋を作った人が決めます）` });
-  return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: 'ルール（マスタールール）' }),
-    el('div', { class: 'seg full' }, ['mr5', 'mr3'].map(k => el('button', {
-      class: rule === k ? 'on' : '', text: k === 'mr5' ? '新マスタールール' : 'マスタールール3',
-      onclick: () => Duel.t.updateRoom({ rule: k, ready: {} }),
-    }))),
-    el('p', { class: 'muted small-note', text: rule === 'mr3' ? 'EXモンスターゾーンが無く、EXデッキのモンスターはどのメインモンスターゾーンにも出せます。ペンデュラムゾーンは魔法・罠ゾーンとは別（両端）です。' : '今のルール（EXモンスターゾーンあり）です。' }));
+  if (!isHost) return el('p', { class: 'muted', text: `ルール：${MASTER_RULES[rule].label}（部屋を作った人が決めます）` });
+  const sel = el('select', { class: 'full' }, Object.entries(MASTER_RULES).map(([k, x]) => el('option', { value: k, text: x.label, selected: k === rule })));
+  // 変えたら2人とも準備OKをやり直す
+  sel.addEventListener('change', () => Duel.t.updateRoom({ rule: sel.value, ready: {} }));
+  return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: 'ルール（マスタールール）' }), sel,
+    el('p', { class: 'muted small-note', text: MASTER_RULES[rule].note }));
 }
 
 function duelModeSetting(r) {

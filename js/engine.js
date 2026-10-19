@@ -124,6 +124,16 @@ async function loadCardScripts(codes, onStatus) {
 // ---------- 練習ツール（効果を自動処理するときの「1枚ドロー」などのボタン用） ----------
 // エンジンは返答でしか進まないので、除外ゾーンに見えないカードを1枚置き、その「起動効果」としてドローなどを行う。
 // こうすると「1手戻す」や保存からの再開でも、ほかの操作と同じように流し直せる。画面にはこのカードを出さない
+// ---------- マスタールール（ルールだけ。禁止・制限は別） ----------
+// エンジン（ocgcore）の MODE_MR1〜MODE_MR5 をそのまま使う。emz：EXモンスターゾーンがある、pzone：ペンデュラムゾーンがある（sep：魔法・罠ゾーンとは別）
+const MASTER_RULES = {
+  mr5: { label: 'マスタールール2020（今のルール）', short: 'MR2020', note: '2020年4月〜。EXデッキから出すリンク・ペンデュラムモンスターだけ、EXモンスターゾーンかリンク先に出します。', emz: true, pzone: true },
+  mr4: { label: '新マスタールール（2017〜2020）', short: '新MR', note: '2017年3月〜2020年3月。EXデッキから出すモンスターは、すべてEXモンスターゾーンかリンク先に出します。ペンデュラムゾーンは魔法・罠ゾーンの両端です。', emz: true, pzone: true },
+  mr3: { label: 'マスタールール3（2014〜2017）', short: 'MR3', note: '2014年4月〜2017年3月。EXモンスターゾーンはありません。ペンデュラムゾーンは魔法・罠ゾーンとは別（両端）です。', emz: false, pzone: true, sep: true },
+  mr2: { label: 'マスタールール2（2011〜2014）', short: 'MR2', note: '2011年3月〜2014年3月。EXモンスターゾーン・ペンデュラムゾーンはありません。先攻1ターン目もドローします。', emz: false, pzone: false },
+  mr1: { label: 'マスタールール（2008〜2011）', short: 'MR1', note: '2008年3月〜2011年2月。EXモンスターゾーン・ペンデュラムゾーンはありません。先攻1ターン目もドローするなど、当時の処理になります。', emz: false, pzone: false },
+};
+
 const TOOL_CODE = 999990001;
 const TOOL_LABELS = ['1枚ドロー', 'デッキから手札に加える', 'デッキから墓地へ送る', '手札をデッキに戻す', 'デッキをシャッフル'];
 const TOOL_LUA = `local s,id=GetID()
@@ -191,7 +201,7 @@ const placeText = (con, loc, seq) => {
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
   constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false, rule = 'mr5' }) {
-    this.rule = rule === 'mr3' ? 'mr3' : 'mr5';   // マスタールール：mr5＝今のルール／mr3＝EXモンスターゾーンなし・ペンデュラムゾーンは別（魔法・罠ゾーンの6・7番）
+    this.rule = MASTER_RULES[rule] ? rule : 'mr5';   // マスタールール mr1〜mr5（mr3 はペンデュラムゾーンが別＝魔法・罠ゾーンの6・7番）
     this.tools = tools && !net;   // 練習ツール（ドローなどのボタン）を使う。前に保存した盤面（ツールなし）と並びが変わらないよう、新しく始めたときだけ
     // net：対戦（2人がそれぞれ同じエンジンを動かす）。{ me: 自分の番号（0＝先攻）, decks: [[先攻のmain, extra], [後攻のmain, extra]] }
     this.net = net;
@@ -219,7 +229,7 @@ class AutoDuel {
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);   // 相手の判断用（やり直しで同じになるように）
     const team = n => ({ drawCountPerTurn: 1, startingDrawCount: n, startingLP: 8000 });
     this.h = L.createDuel({
-      flags: (this.rule === 'mr3' ? O.OcgDuelMode.MODE_MR3 : O.OcgDuelMode.MODE_MR5) | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
+      flags: O.OcgDuelMode['MODE_' + this.rule.toUpperCase()] | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
       seed: this.seed,
       team1: team(this.me === 0 ? (this.handIds ? 0 : this.handSize) : this.oppDraw()),
       team2: team(this.me === 1 ? (this.handIds ? 0 : 5) : this.oppDraw()),
@@ -298,7 +308,7 @@ class AutoDuel {
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
     const team = { drawCountPerTurn: 1, startingDrawCount: 5, startingLP: 8000 };
     this.h = L.createDuel({
-      flags: (this.rule === 'mr3' ? O.OcgDuelMode.MODE_MR3 : O.OcgDuelMode.MODE_MR5) | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
+      flags: O.OcgDuelMode['MODE_' + this.rule.toUpperCase()] | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
       seed: this.seed, team1: team, team2: team,
       cardReader: code => engineCardData(code),
       scriptReader: name => Engine.scripts.get(name) || null,
