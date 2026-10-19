@@ -105,6 +105,8 @@ async function loadCardScripts(codes, onStatus) {
     const name = `c${code}.lua`;
     let text = await fetchScript(name, `official/${name}`);
     if (!text) text = await fetchScript(name, `pre-release/${name}`);
+    // OCG でエラッタ（効果の変更）があったカードの一部は、今の OCG 版が pre-errata フォルダにある（レッドアイズ・ダークネスメタルドラゴンなど）
+    if (!text) text = await fetchScript(name, `pre-errata/${name}`);
     Engine.scripts.set(name, text || '');
     onStatus && onStatus(`カードの効果を読み込み中…（${++done}／${want.length}）`);
     // 別のスクリプトの読み込み（Duel.LoadScript / Duel.LoadCardScript）
@@ -118,6 +120,16 @@ async function loadCardScripts(codes, onStatus) {
   };
   // 同時に取りすぎないよう 8 件ずつ
   for (let i = 0; i < want.length; i += 8) await Promise.all(want.slice(i, i + 8).map(one));
+  // 効果の処理（スクリプト）が見つからなかったカードを知らせる（通常モンスターなど、効果の無いカードは除く）
+  const missing = want.filter(code => {
+    if (Engine.scripts.get(`c${code}.lua`)) return false;
+    const c = DB.byId.get(code);
+    return c && !(isMonster(c) && has(c, T.NORMAL) && !has(c, T.EFFECT)) && !isToken(c);
+  });
+  if (missing.length && typeof toast === 'function') {
+    const names = missing.slice(0, 5).map(cardName).join('、') + (missing.length > 5 ? ` ほか${missing.length - 5}枚` : '');
+    setTimeout(() => toast(`効果の処理が見つからなかったカード：${names}（このカードの効果は自動処理されません）`), 1500);
+  }
 }
 
 // ---------- 表示用の文字 ----------
