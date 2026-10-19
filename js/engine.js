@@ -643,7 +643,10 @@ function cpuAnswer(m, duel) {
   // 選ぶカード：相手（練習する人）のフィールドのカードを優先
   const prefer = list => {
     const idx = list.map((c, i) => i);
-    const score = c => (theirs(c) ? 10 : 0) + (c.location & LOC.ONFIELD_ALL ? 5 : 0);
+    // 自分のカードを選ぶ（サーチなど）ときは、手札にまだ無いカード・攻撃力の高いモンスターを優先する
+    let inHand = null;
+    const fresh = c => { if (!inHand) { try { inHand = new Set(duel.query()[1 - me].hand.filter(x => x && x.code).map(x => x.code)); } catch { inHand = new Set(); } } return !inHand.has(c.code); };
+    const score = c => (theirs(c) ? 10 : 0) + (c.location & LOC.ONFIELD_ALL ? 5 : 0) + (!theirs(c) && c.location & (LOC.DECK | LOC.GRAVE | LOC.REMOVED) && fresh(c) ? 2 : 0) + ((DB.byId.get(c.code) || {}).atk || 0) / 10000;
     return idx.sort((a, b) => score(list[b]) - score(list[a]));
   };
   switch (m.type) {
@@ -662,9 +665,14 @@ function cpuAnswer(m, duel) {
     case MSG.SELECT_CHAIN:
       // 練習ツール（ドローなどのボタン）には何もしない
       if (!m.forced && duel.chain.length && duel.chain[duel.chain.length - 1].code === TOOL_CODE) return { type: RES.SELECT_CHAIN, index: null };
-      if (m.selects.length && (m.forced || (duel.turnPlayer === me && duel.chain.length && duel.chain[duel.chain.length - 1].con === me) || (duel.turnPlayer === me && !duel.chain.length && rnd() < 0.5)))
-        return { type: RES.SELECT_CHAIN, index: Math.floor(rnd() * m.selects.length) };
-      return { type: RES.SELECT_CHAIN, index: m.forced ? 0 : null };
+      if (!m.selects.length) return { type: RES.SELECT_CHAIN, index: null };
+      // 先読み：発動する／しない、どれを発動するかを試して、いちばん得になるものを選ぶ（先読みの中では簡単に決める）
+      if (!duel.noThink && !duel.probing) { const best = cpuChainThink(m, duel); if (best) return best; }
+      if (m.forced) return { type: RES.SELECT_CHAIN, index: 0 };
+      if (duel.noThink) return { type: RES.SELECT_CHAIN, index: null };   // 先読みの中では温存する（読みがぶれないように）
+      // 先読みできないとき：相手（練習する人）が発動したものへの妨害としてだけ使う
+      if (duel.chain.length && duel.chain[duel.chain.length - 1].con === me) return { type: RES.SELECT_CHAIN, index: Math.floor(rnd() * m.selects.length) };
+      return { type: RES.SELECT_CHAIN, index: null };
     case MSG.SELECT_BATTLECMD: if (duel.opp && duel.opp.plays) return cpuPlayBattle(m, duel); return autoAnswer(m);
     case MSG.SELECT_EFFECTYN: return { type: RES.SELECT_EFFECTYN, yes: true };
     case MSG.SELECT_YESNO: return { type: RES.SELECT_YESNO, yes: true };
@@ -674,7 +682,7 @@ function cpuAnswer(m, duel) {
       if (m.can_finish || !m.select_cards.length) return { type: RES.SELECT_UNSELECT_CARD, index: null };
       return { type: RES.SELECT_UNSELECT_CARD, index: prefer(m.select_cards)[0] };
     }
-    case MSG.SELECT_POSITION: return { type: RES.SELECT_POSITION, position: [1, 4, 2, 8].find(p => m.positions & p) };
+    case MSG.SELECT_POSITION: return { type: RES.SELECT_POSITION, position: cpuPosition(m, duel) };
     case MSG.SELECT_OPTION: return { type: RES.SELECT_OPTION, index: Math.floor(rnd() * m.options.length) };
     case MSG.ANNOUNCE_CARD: { const hit = [...duel.main, ...DB.cards.map(c => c.id)].find(id => Engine.ocg.cardMatchesOpcode(engineCardData(id), m.opcodes)); return { type: RES.ANNOUNCE_CARD, card: hit || duel.main[0] }; }
     default: return autoAnswer(m);
@@ -895,6 +903,61 @@ function cpuThink(m, duel, kind) {
   duel.cpuPlan = { turn: duel.turn, kind, steps: bestPath.slice(1).map(c => c.id) };
   return bestPath[0].res;
 }
+// ---------- チェーンの判断（手札誘発・速攻効果・任意の誘発） ----------
+// 「発動しない」と、発動できるそれぞれを複製の中で試し、チェーンを解決して次に誰かが行動を選ぶところまで進めて点数を比べる。
+// 相手（練習する人）の効果を無効にできたら、その分を高く見る（サーチ・展開を止めた価値）
+const LASTING_TRAPS = new Set(['増殖するG', 'ドロール＆ロックバード']);
+function cpuChainThink(m, duel) {
+  const cpu = 1 - duel.me, hist = duel.history(), t0 = performance.now();
+  const opts = [...(m.forced ? [] : [-1]), ...m.selects.map((_, i) => i)];
+  if (opts.length < 2 && !m.forced) return null;
+  let best = null, bestS = -Infinity, passS = null;
+  for (const o of opts) {
+    if (performance.now() - t0 > 3500) break;   // 考えすぎない
+    let t = null;
+    try {
+      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools });
+      t.noThink = true;
+      t.create();
+      t.stopAtCpu = true;
+      t.run(hist.slice());
+      const p = t.pending;
+      if (!p || p.player !== cpu || p.type !== MSG.SELECT_CHAIN) continue;
+      t.events = [];
+      t.stopAtCpu = true;
+      t.respond({ type: RES.SELECT_CHAIN, index: o < 0 ? null : o });
+      for (let i = 0; i < 80 && t.pending && !t.ended; i++) {
+        const q = t.pending;
+        if (q.type === MSG.SELECT_IDLECMD || q.type === MSG.SELECT_BATTLECMD) break;
+        t.stopAtCpu = true;
+        t.respond(q.player === cpu ? cpuAnswer(q, t) : autoAnswer(q));
+      }
+      const denied = t.events.filter(e => e.t === 'negate' && e.con === duel.me).length;
+      // 増殖するG のように、効果がそのターンの間あとから効くカード：相手のメインフェイズに使う価値を足す
+      const lasting = o >= 0 && LASTING_TRAPS.has(cardName(m.selects[o].code)) && duel.turnPlayer === duel.me && (duel.phase === 4 || duel.phase === 256);
+      const s = cpuScore(t, cpu, true) + denied * 4 + (lasting ? 6 : 0);
+      if (o < 0) passS = s;
+      if (s > bestS) { bestS = s; best = o; }
+    } catch (e) { /* 試せない選び方は使わない */ }
+    finally { if (t && t.h) Engine.lib.destroyDuel(t.h); }
+  }
+  if (best === null) return null;
+  // 発動しても大して得にならないなら、温存する
+  if (best >= 0 && passS != null && bestS < passS + 0.8) best = -1;
+  return { type: RES.SELECT_CHAIN, index: best < 0 ? null : best };
+}
+
+// 表示形式：相手の場にいちばん強いモンスターより攻撃力が低く、守備力のほうが高いなら守備表示
+function cpuPosition(m, duel) {
+  const d = DB.byId.get(m.code) || {};
+  const can = p => m.positions & p;
+  let oppMax = 0;
+  try { for (const c of duel.query()[duel.me].m) if (c && c.code && (c.position & 1)) oppMax = Math.max(oppMax, c.attack || 0); } catch { /* 分からなければ攻撃表示 */ }
+  const wantDef = (d.atk || 0) < oppMax && (d.def || 0) > (d.atk || 0);
+  const order = wantDef ? [4, 8, 1, 2] : [1, 4, 2, 8];
+  return order.find(can) || [1, 2, 4, 8].find(can);
+}
+
 // 複製の中で1手打って、その処理が終わるところ（CPU が次の手を選ぶ場面、または相手の番）まで進める
 function cpuStep(t, res, cpu) {
   t.stopAtCpu = true;
@@ -909,7 +972,7 @@ function cpuStep(t, res, cpu) {
 }
 // 手を打って、その先（CPU のターンの残り）を簡単な動きで進めてから、盤面の点数を出す
 // 盤面の点数（CPU から見て）。モンスターの強さ・数、伏せカード、手札、相手のライフを数える
-function cpuScore(t, cpu) {
+function cpuScore(t, cpu, chain = false) {
   if (t.ended) return t.ended.startsWith(cpu === t.me ? '自分の勝ち' : '相手の勝ち') ? 1e6 : -1e6;
   const q = t.query(), you = 1 - cpu;
   const monVal = c => {
@@ -927,9 +990,11 @@ function cpuScore(t, cpu) {
     for (const c of s.m) v += monVal(c);
     for (const c of s.s) if (c && c.code) v += 3;
     v += s.hand.filter(c => c && c.code).length * 2.2;
-    if (p === cpu) v += s.hand.filter(c => c && c.code && isHandTrap(c.code)).length * 4;   // 手札誘発は手札にあるほうが強い
+    // 手札誘発は手札にあるほうが強い（自分のターンに使わないように）。チェーンの判断でも、むだ撃ちしないよう少し残す価値を見る
+    if (p === cpu) v += s.hand.filter(c => c && c.code && isHandTrap(c.code)).length * (chain ? 2 : 4);
     v += s.gy.filter(c => c && c.code).length * 0.2;
     return v;
   };
-  return side(cpu) - side(you) * 0.9 + (8000 - t.lp[you]) / 120 - (8000 - t.lp[cpu]) / 200;
+  // チェーンの判断では、相手が得るもの（サーチ・展開）を重く見る
+  return side(cpu) - side(you) * (chain ? 1.3 : 0.9) + (8000 - t.lp[you]) / 120 - (8000 - t.lp[cpu]) / 200;
 }
