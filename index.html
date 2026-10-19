@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261020-072728">
+<link rel="stylesheet" href="style.css?v=20261020-073456">
 </head>
 <body>
 <header class="topbar">
@@ -304,6 +304,10 @@
               <option value="0">先攻1ターン目はドローしない（今のルール）</option>
               <option value="1">先攻1ターン目もドローする（昔のルールなど）</option>
             </select>
+            <select id="b-rule" class="auto-only" title="効果を自動処理するときのルール。次に開始したときから使われます">
+              <option value="mr5">新マスタールール（今のルール・EXモンスターゾーンあり）</option>
+              <option value="mr3">マスタールール3（EXモンスターゾーンなし・ペンデュラムゾーンは両端）</option>
+            </select>
             <label class="muted">制限時間：<b id="b-timelabel"></b></label>
             <input type="range" id="b-timelimit" min="30" max="930" step="30" title="右端は無限（時間制限なし）">
             <button class="btn primary" id="b-start">シャッフルして開始</button>
@@ -391,20 +395,20 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261020-072728"></script>
-<script src="js/consts.js?v=20261020-072728"></script>
-<script src="js/ui.js?v=20261020-072728"></script>
-<script src="js/data.js?v=20261020-072728"></script>
-<script src="js/cloud-config.js?v=20261020-072728"></script>
-<script src="js/auth.js?v=20261020-072728"></script>
-<script src="js/admin.js?v=20261020-072728"></script>
-<script src="js/deck.js?v=20261020-072728"></script>
-<script src="js/board.js?v=20261020-072728"></script>
-<script src="js/engine.js?v=20261020-072728"></script>
-<script src="js/autoplay.js?v=20261020-072728"></script>
-<script src="js/glow.js?v=20261020-072728"></script>
-<script src="js/duel.js?v=20261020-072728"></script>
-<script src="js/imgdeck.js?v=20261020-072728"></script>
-<script src="js/app.js?v=20261020-072728"></script>
+<script src="js/version.js?v=20261020-073456"></script>
+<script src="js/consts.js?v=20261020-073456"></script>
+<script src="js/ui.js?v=20261020-073456"></script>
+<script src="js/data.js?v=20261020-073456"></script>
+<script src="js/cloud-config.js?v=20261020-073456"></script>
+<script src="js/auth.js?v=20261020-073456"></script>
+<script src="js/admin.js?v=20261020-073456"></script>
+<script src="js/deck.js?v=20261020-073456"></script>
+<script src="js/board.js?v=20261020-073456"></script>
+<script src="js/engine.js?v=20261020-073456"></script>
+<script src="js/autoplay.js?v=20261020-073456"></script>
+<script src="js/glow.js?v=20261020-073456"></script>
+<script src="js/duel.js?v=20261020-073456"></script>
+<script src="js/imgdeck.js?v=20261020-073456"></script>
+<script src="js/app.js?v=20261020-073456"></script>
 </body>
 </html>

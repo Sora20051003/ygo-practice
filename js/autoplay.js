@@ -38,7 +38,9 @@ function autoState() {
   side.ban.forEach((c, i) => { const x = mk(c, LOC.REMOVED, i); if (x) S.ban.push(x); });
   side.extra.forEach((c, i) => { const x = mk(c, LOC.EXTRA, i); if (x) S.extra.push(x); });
   side.m.forEach((c, i) => { const x = mk(c, LOC.MZONE, i); if (i < 5) S.m[i] = x; else if (i < 7) S.emz[i - 5] = x; });
-  side.s.forEach((c, i) => { const x = mk(c, LOC.SZONE, i); if (i < 5) S.s[i] = x; else if (i === 5) S.f[0] = x; });
+  // マスタールール3：ペンデュラムゾーンは魔法・罠ゾーンの6・7番（左・右）
+  S.rule = d.rule; S.p = [null, null];
+  side.s.forEach((c, i) => { const x = mk(c, LOC.SZONE, i); if (i < 5) S.s[i] = x; else if (i === 5) S.f[0] = x; else if (i < 8) S.p[i - 6] = x; });
   // 相手（CPU）の盤面。対戦タブの相手の表示と同じ形にする（裏向きのカードは id を伏せる）
   const op = q[1 - me];
   const pub = (c, loc) => (c && c.code ? {
@@ -54,7 +56,7 @@ function autoState() {
     extraUp: op.extra.filter(c => c && c.position & 5).map(c => c.code),
     gy: op.gy.filter(Boolean).map(c => c.code), ban: op.ban.filter(Boolean).map(c => (c.position & 5 ? c.code : 0)),
     m: op.m.slice(0, 5).map(c => pub(c, LOC.MZONE)), emz: [pub(op.m[5], LOC.MZONE), pub(op.m[6], LOC.MZONE)],
-    s: op.s.slice(0, 5).map(c => pub(c, LOC.SZONE)), f: [pub(op.s[5], LOC.SZONE)],
+    s: op.s.slice(0, 5).map(c => pub(c, LOC.SZONE)), f: [pub(op.s[5], LOC.SZONE)], p: [pub(op.s[6], LOC.SZONE), pub(op.s[7], LOC.SZONE)],
   };
   S.oppText = `${Auto.net ? oppName() : 'CPU'}：LP ${d.lp[1 - me]}　手札${S.opp.hand}枚`;
   return S;
@@ -101,7 +103,7 @@ function autoGlow() {
   const map = new Map();
   const S = Board.S;
   if (!S || !Auto.duel) return map;
-  const all = [...S.hand, ...S.gy, ...S.ban, ...S.extra, ...S.deck, ...S.m, ...S.emz, ...S.s, ...S.f].filter(Boolean);
+  const all = [...S.hand, ...S.gy, ...S.ban, ...S.extra, ...S.deck, ...S.m, ...S.emz, ...S.s, ...S.f, ...(S.p || [])].filter(Boolean);
   for (const inst of all) {
     const acts = autoActions(inst);
     if (acts.some(a => a.kind === 'y')) map.set(inst.uid, 'y');
@@ -334,7 +336,7 @@ async function autoStart(handIds) {
     try { await autoPrepare(opp); } catch (e) { showError('相手のデッキを準備できませんでした', e); return; }
   }
   Auto.redoLog = null;
-  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw(), tools: true });
+  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw(), tools: true, rule: masterRule() });
   Auto.deckId = deck.id;
   Auto.duel.cpuSlow = cpuDelay() > 0;
   try { Auto.duel.start(); } catch (e) { console.error(e); showError('開始できませんでした', e); Auto.duel = null; renderBoard(); return; }
@@ -362,7 +364,7 @@ function autoSave() {
   const items = d.history();
   try {
     store.set('ygo.autoBoard', JSON.parse(JSON.stringify({
-      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, items, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode, autoTrigger: d.autoTrigger, firstDraw: d.firstDraw, tools: d.tools,
+      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, items, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode, autoTrigger: d.autoTrigger, firstDraw: d.firstDraw, tools: d.tools, rule: d.rule,
     }, bigReplacer)));
   } catch { /* 保存できなくても続けられる */ }
 }
@@ -371,7 +373,7 @@ async function autoResume() {
   try { saved = JSON.parse(JSON.stringify(store.get('ygo.autoBoard', null)), bigReviver); } catch { saved = null; }
   if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
   try { await autoPrepare(saved); if (saved.opp) await autoPrepare(saved.opp); } catch { return; }
-  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: !!saved.autoTrigger && store.get('ygo.autoTrigger', false), firstDraw: !!saved.firstDraw, tools: !!saved.tools });
+  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: !!saved.autoTrigger && store.get('ygo.autoTrigger', false), firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5' });
   Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;
   try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
   if (autoActive()) autoAfter(true);
@@ -682,7 +684,7 @@ function chainNodeRect(c) {
     }
   } else {
     if (loc === LOC.MZONE) node = document.querySelector(`#field [data-ozone="${c.seq >= 5 ? 'emz' : 'm'}"][data-oidx="${c.seq >= 5 ? c.seq - 5 : c.seq}"]`);
-    else if (loc === LOC.SZONE) node = document.querySelector(c.seq === 5 ? '#field [data-ozone="f"]' : `#field [data-ozone="s"][data-oidx="${c.seq}"]`);
+    else if (loc === LOC.SZONE) node = document.querySelector(c.seq === 5 ? '#field [data-ozone="f"]' : c.seq >= 6 ? `#field [data-ozone="p"][data-oidx="${c.seq - 6}"]` : `#field [data-ozone="s"][data-oidx="${c.seq}"]`);
     else if (loc === LOC.HAND) node = $('#opp-bar');
     else { const pile = { [LOC.GRAVE]: 'gy', [LOC.REMOVED]: 'ban', [LOC.EXTRA]: 'extra', [LOC.DECK]: 'deck' }[loc]; if (pile) node = document.querySelector(`#field [data-ozone="${pile}"]`); }
   }
@@ -1065,7 +1067,7 @@ function choosePlace(p, me) {
   const toSlot = pl => {
     if (pl.player !== me) return null;
     if (pl.location === LOC.MZONE) return pl.sequence < 5 ? { zone: 'm', idx: pl.sequence } : (pl.sequence < 7 ? { zone: 'emz', idx: pl.sequence - 5 } : null);
-    if (pl.location === LOC.SZONE) return pl.sequence < 5 ? { zone: 's', idx: pl.sequence } : (pl.sequence === 5 ? { zone: 'f', idx: 0 } : null);
+    if (pl.location === LOC.SZONE) return pl.sequence < 5 ? { zone: 's', idx: pl.sequence } : (pl.sequence === 5 ? { zone: 'f', idx: 0 } : pl.sequence < 8 ? { zone: 'p', idx: pl.sequence - 6 } : null);
     return null;
   };
   const chosen = [];

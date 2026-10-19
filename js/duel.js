@@ -764,9 +764,10 @@ function oppCardEl(p) {
 function oppSlotEl(zone, idx) {
   const o = curOpp() || emptyPub;
   const slot = el('div', { class: `zone slot opp-zone z-${zone}`, dataset: { ozone: zone, oidx: idx } });
+  if (zone === 'p') slot.append(el('span', { class: 'zone-label', text: '相手のPゾーン' }));
   const p = o[zone] && o[zone][idx];
   if (p) slot.append(oppCardEl(p));
-  if (p && zone !== 's' && zone !== 'f') { const b = oppStatBadge(p); if (b) slot.append(b); }
+  if (p && zone !== 's' && zone !== 'f' && zone !== 'p') { const b = oppStatBadge(p); if (b) slot.append(b); }
   return slot;
 }
 
@@ -889,6 +890,7 @@ function renderDuelLobby() {
     r && r.status === 'playing' ? el('button', { class: 'btn primary', text: '▶ 対戦の盤面を開く', onclick: () => { if (!Duel.active) beginDuelBoard(); else switchView('board'); } })
       : el('div', { class: 'stack' },
         duelModeSetting(r),
+        duelRuleSetting(r),
         duelTimeSetting(r),
         duelRegSetting(r),
         duelDeckSetting(r, amReady),
@@ -1068,7 +1070,7 @@ async function beginNetDuel() {
     await loadCardScripts([...decks[0][0], ...decks[0][1], ...decks[1][0], ...decks[1][1], OPP_FILLER], showLoading);
   } catch (e) { showLoading(null); showError('自動処理を準備できませんでした', e); return; }
   showLoading(null);
-  const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks },
+  const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5',
     chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: !!r.firstDraw });
   d.onSend = (res, i) => Duel.t.sendEvent({ type: 'eng', i, res: JSON.stringify(res, bigReplacer) });
   Auto.on = true; Auto.net = true; Auto.duel = d; Auto.redoLog = null; Auto.resumed = true;
@@ -1141,6 +1143,21 @@ function netGameOver(result, reason) {
 }
 
 // 部屋の画面：対戦のしかた（部屋を作った人だけが変えられる）
+// マスタールール（効果を自動処理する対戦）：部屋を作った人が決める
+function duelRuleSetting(r) {
+  const rule = (r && r.rule) || 'mr5';
+  const isHost = r && r.host === Duel.me.uid;
+  const label = { mr5: '新マスタールール（今のルール）', mr3: 'マスタールール3（EXモンスターゾーンなし・ペンデュラムゾーンは両端）' };
+  if ((r && r.mode) !== 'auto') return null;   // 手動の対戦では、ゾーンを自分で使い分けるので選ばない
+  if (!isHost) return el('p', { class: 'muted', text: `ルール：${label[rule]}（部屋を作った人が決めます）` });
+  return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: 'ルール（マスタールール）' }),
+    el('div', { class: 'seg full' }, ['mr5', 'mr3'].map(k => el('button', {
+      class: rule === k ? 'on' : '', text: k === 'mr5' ? '新マスタールール' : 'マスタールール3',
+      onclick: () => Duel.t.updateRoom({ rule: k, ready: {} }),
+    }))),
+    el('p', { class: 'muted small-note', text: rule === 'mr3' ? 'EXモンスターゾーンが無く、EXデッキのモンスターはどのメインモンスターゾーンにも出せます。ペンデュラムゾーンは魔法・罠ゾーンとは別（両端）です。' : '今のルール（EXモンスターゾーンあり）です。' }));
+}
+
 function duelModeSetting(r) {
   const mode = (r && r.mode) || 'manual';
   const isHost = r && r.host === Duel.me.uid;

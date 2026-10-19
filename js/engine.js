@@ -182,7 +182,7 @@ function descText(desc) {
 const placeText = (con, loc, seq) => {
   const side = con === Engine.me ? '' : '相手の';
   if (loc === LOC.MZONE) return side + (seq >= 5 ? 'EXモンスターゾーン' : `モンスターゾーン${seq + 1}`);
-  if (loc === LOC.SZONE) return side + (seq === 5 ? 'フィールドゾーン' : `魔法・罠ゾーン${seq + 1}`);
+  if (loc === LOC.SZONE) return side + (seq === 5 ? 'フィールドゾーン' : seq === 6 ? 'ペンデュラムゾーン（左）' : seq === 7 ? 'ペンデュラムゾーン（右）' : `魔法・罠ゾーン${seq + 1}`);
   return side + (LOC_NAME[loc & ~LOC.OVERLAY] || '') + (loc & LOC.OVERLAY ? 'のX素材' : '');
 };
 
@@ -190,7 +190,8 @@ const placeText = (con, loc, seq) => {
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false }) {
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false, rule = 'mr5' }) {
+    this.rule = rule === 'mr3' ? 'mr3' : 'mr5';   // マスタールール：mr5＝今のルール／mr3＝EXモンスターゾーンなし・ペンデュラムゾーンは別（魔法・罠ゾーンの6・7番）
     this.tools = tools && !net;   // 練習ツール（ドローなどのボタン）を使う。前に保存した盤面（ツールなし）と並びが変わらないよう、新しく始めたときだけ
     // net：対戦（2人がそれぞれ同じエンジンを動かす）。{ me: 自分の番号（0＝先攻）, decks: [[先攻のmain, extra], [後攻のmain, extra]] }
     this.net = net;
@@ -218,7 +219,7 @@ class AutoDuel {
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);   // 相手の判断用（やり直しで同じになるように）
     const team = n => ({ drawCountPerTurn: 1, startingDrawCount: n, startingLP: 8000 });
     this.h = L.createDuel({
-      flags: O.OcgDuelMode.MODE_MR5 | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
+      flags: (this.rule === 'mr3' ? O.OcgDuelMode.MODE_MR3 : O.OcgDuelMode.MODE_MR5) | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
       seed: this.seed,
       team1: team(this.me === 0 ? (this.handIds ? 0 : this.handSize) : this.oppDraw()),
       team2: team(this.me === 1 ? (this.handIds ? 0 : 5) : this.oppDraw()),
@@ -258,7 +259,7 @@ class AutoDuel {
   // 試しに発動してみて、何か起きるか（効果が使える・サーチなどの処理がある）を調べる。
   // 今の対戦をそのまま複製して試すので、本当の盤面は変わらない。index は今の SELECT_IDLECMD の activates の番号
   probeActivate(index) {
-    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net, tools: this.tools });
+    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net, tools: this.tools, rule: this.rule });
     try {
       t.create();
       t.run(this.history());
@@ -297,7 +298,7 @@ class AutoDuel {
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
     const team = { drawCountPerTurn: 1, startingDrawCount: 5, startingLP: 8000 };
     this.h = L.createDuel({
-      flags: O.OcgDuelMode.MODE_MR5 | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
+      flags: (this.rule === 'mr3' ? O.OcgDuelMode.MODE_MR3 : O.OcgDuelMode.MODE_MR5) | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
       seed: this.seed, team1: team, team2: team,
       cardReader: code => engineCardData(code),
       scriptReader: name => Engine.scripts.get(name) || null,
@@ -854,7 +855,7 @@ function cpuThink(m, duel, kind) {
   const hist = duel.history();
   // 手順 path を打ったあとの複製（CPU が次の手を選ぶ場面、または相手の番まで進めたもの）
   const play = path => {
-    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools });
+    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule });
     t.noThink = true;
     t.create();
     t.stopAtCpu = true;   // 流し直したあと、今の判断の場面（CPU の番）で止める
@@ -916,7 +917,7 @@ function cpuChainThink(m, duel) {
     if (performance.now() - t0 > 3500) break;   // 考えすぎない
     let t = null;
     try {
-      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools });
+      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule });
       t.noThink = true;
       t.create();
       t.stopAtCpu = true;
