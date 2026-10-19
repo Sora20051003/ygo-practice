@@ -34,10 +34,10 @@ function authMessage(e) {
   const m = (e && (e.message || e.error_description || String(e))) || '';
   if (m === 'ID_FORMAT') return 'ID は半角の英字・数字・_ - で3〜20文字にしてください。';
   if (/Invalid login credentials/i.test(m)) return 'ID かパスワードが違います。';
-  if (/Email not confirmed/i.test(m)) return 'アカウントの確認が終わっていません（サーバーの設定で「Confirm email」をオフにする必要があります）。';
+  if (/Email not confirmed|sending confirmation|confirmation email|not authorized/i.test(m)) return '登録の確認が終わっていません。サーバー（Supabase）の「Authentication」→「Sign In / Providers」→「Email」で「Confirm email」をオフにしてください（管理者の作業です）。';
   if (/already registered|already been registered|User already exists/i.test(m)) return 'この ID はもう使われています。別の ID にするか、「ログイン」してください。';
   if (/Password should be at least|weak/i.test(m)) return 'パスワードは6文字以上にしてください。';
-  if (/valid email|invalid email|Unable to validate email|not authorized/i.test(m)) return 'この ID では登録できませんでした（サーバーの設定を確認してください）：' + m;
+  if (/valid email|invalid email|Unable to validate email/i.test(m)) return 'この ID では登録できませんでした（サーバーの設定を確認してください）：' + m;
   if (/rate limit|too many/i.test(m)) return '試行回数が多すぎます。しばらく待ってからお試しください。';
   if (/Failed to fetch|NetworkError|network/i.test(m)) return 'インターネットに接続できませんでした。';
   if (/provider is not enabled|Unsupported provider/i.test(m)) return 'このログイン方法はまだ使えません（サーバーの設定が必要です）。';

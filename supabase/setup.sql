@@ -217,3 +217,16 @@ grant execute on function public.revoke_device(uuid, text) to authenticated;
 grant execute on function public.admin_signout_all(uuid) to authenticated;
 grant execute on function public.admin_set_password(uuid, text) to authenticated;
 grant execute on function public.admin_users() to authenticated;
+
+-- ========== ID で作ったアカウントは、メールの確認なしで使えるようにする ==========
+-- （ID のアカウントはメールを受け取れない。Supabase の「Confirm email」もオフにすること）
+create or replace function public.confirm_id_account() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  if new.email like '%@sora20051003.github.io' and new.email_confirmed_at is null then new.email_confirmed_at := now(); end if;
+  return new;
+end $$;
+drop trigger if exists confirm_id_account on auth.users;
+create trigger confirm_id_account before insert on auth.users for each row execute function public.confirm_id_account();
+-- 確認待ちのまま止まっている ID のアカウントを、使えるようにする
+update auth.users set email_confirmed_at = now() where email like '%@sora20051003.github.io' and email_confirmed_at is null;
