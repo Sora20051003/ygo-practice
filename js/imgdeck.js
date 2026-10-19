@@ -318,7 +318,7 @@ async function openImageImport(file) {
     title: 'デッキ画像の読み取り結果', wide: true,
     body: el('div', { class: 'stack' },
       el('p', { text: `メイン${count('main')}枚・EX${count('extra')}枚・サイド${count('side')}枚を見つけました。カード名が違うものは選び直してください（黄色の枠は自信がないカードです）。` }),
-      el('label', { class: 'check' }, usePics, 'この画像のカードを、アプリのカード表示に使う（この端末に保存）'),
+      el('label', { class: 'check' }, usePics, 'カードのイラストを覚えておく（ネットからイラストが取れないカードに使う・この端末に保存）'),
       grid),
     buttons: [{
       label: 'このデッキを追加', primary: true, onClick: () => {

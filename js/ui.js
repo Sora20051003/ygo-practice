@@ -197,18 +197,14 @@ const JP_ARROWS = { 0x40: '◤', 0x80: '▲', 0x100: '◥', 0x08: '◀', 0x20: '
 // 日本版カード画像（tools/download-jp-cards.bat で pics/jp に保存）があればそれを、無ければアプリで描いたカードを出す
 const missingJp = new Set();
 function jpPhotoOrDrawn(c, big) {
-  const mine = c.id && UserPics.get(c.id);
-  if (!LOCAL_FILES || !c.id || missingJp.has(c.id)) {
-    if (!mine) return jpCard(c, big);
-    return el('div', { class: 'cardface photo jpphoto ' + frameClass(c), title: c.name },
-      el('img', { src: mine, alt: c.name, draggable: 'false' }));
-  }
+  // デッキ画像から切り抜いた画像はそのまま出さず、アプリのカード（名前・効果文などをアプリで描いたもの）にする。
+  // 切り抜きは、イラストが取れないカードのイラストとしてだけ使う（jpCard）
+  if (!LOCAL_FILES || !c.id || missingJp.has(c.id)) return jpCard(c, big);
   const node = el('div', { class: 'cardface photo jpphoto ' + frameClass(c), title: c.name });
   const img = el('img', { src: `pics/jp/${c.id}.jpg`, loading: 'lazy', alt: c.name, draggable: 'false' });
   img.addEventListener('error', () => {
     missingJp.add(c.id);
-    const m = UserPics.get(c.id);
-    if (m) img.src = m; else node.replaceWith(jpCard(c, big));
+    node.replaceWith(jpCard(c, big));
   });
   node.append(img);
   return node;
@@ -275,7 +271,10 @@ function jpCard(c, big = false) {
   }
 
   const art = el('div', { class: 'jp-art' });
-  if (c.id && cardStyle !== 'text' && !missingImages.has(c.id + 'art')) art.append(cardImg(c.id, 'art', img => img.remove()));   // ネット版でもイラストはネットから読む
+  // イラストはネットから読む。取れないときは、デッキ画像から切り抜いたカードのイラスト部分を使う
+  const userArt = () => { const m = c.id && UserPics.get(c.id); if (m) art.prepend(el('div', { class: 'jp-userart' }, el('img', { src: m, alt: '', draggable: 'false' }))); };
+  if (c.id && cardStyle !== 'text' && !missingImages.has(c.id + 'art')) art.append(cardImg(c.id, 'art', img => { img.remove(); userArt(); }));
+  else userArt();
   if (has(c, T.LINK)) {
     for (const [bit, ch] of Object.entries(JP_ARROWS)) art.append(el('span', { class: `jp-arrow b${bit}` + ((c.def & bit) ? ' on' : ''), text: ch }));
   }
