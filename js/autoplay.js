@@ -149,6 +149,28 @@ function autoAfter(noAnim) {
   if (d.ended && !d.endShown) { d.endShown = true; gameOver(d.ended.startsWith('自分の勝ち') ? 'win' : 'lose', d.endReason || d.ended); }
   if (!d.ended) d.endShown = false;
   if (Auto.net && typeof netAfter === 'function') netAfter();
+  scheduleCpu();
+}
+
+// ---------- 相手（CPU）の行動をゆっくり見せる ----------
+// エンジンは CPU が召喚・発動・攻撃などをする手前で止まる（d.cpuWait）。少し待ってから1手ずつ進める
+const CPU_SPEEDS = { slow: 1600, normal: 900, fast: 350, instant: 0 };
+const cpuDelay = () => CPU_SPEEDS[store.get('ygo.cpuSpeed', 'slow')] ?? 1600;
+function scheduleCpu() {
+  const d = Auto.duel;
+  if (!d) return;
+  d.cpuSlow = cpuDelay() > 0;
+  if (!d.cpuWait || d.cpuTimer) return;
+  const go = () => {
+    // 発動の演出が出ているあいだは、終わるまで待つ
+    if (activationQueue.running && Auto.duel === d) { d.cpuTimer = setTimeout(go, 200); return; }
+    if (!autoActive()) { d.cpuTimer = null; return; }   // 手動モードに切り替えたら止める（戻したときに続きから）
+    d.cpuTimer = null;
+    if (Auto.duel !== d || !d.cpuWait) return;
+    try { d.resumeCpu(); } catch (e) { console.error(e); showError('相手の処理中にエラーが起きました', e); }
+    autoAfter();
+  };
+  d.cpuTimer = setTimeout(go, cpuDelay());
 }
 
 function autoSync() {
@@ -170,6 +192,7 @@ function autoPanel() {
   let text;
   if (d.ended) text = `対戦終了（${d.ended}）`;
   else if (!p && d.remoteAsk) text = `${oppName()}が操作しています…`;
+  else if (!p && d.cpuWait) text = '相手（CPU）が操作しています…';
   else if (!p) text = '処理中…';
   else if (p.type === MSG.SELECT_IDLECMD) text = `T${d.turn} ${phase}：カードをクリックして操作`;
   else if (p.type === MSG.SELECT_BATTLECMD) text = `T${d.turn} バトルフェイズ：攻撃するモンスターや発動する効果をクリック`;
@@ -248,6 +271,7 @@ async function autoStart(handIds) {
   Auto.redoLog = null;
   Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw() });
   Auto.deckId = deck.id;
+  Auto.duel.cpuSlow = cpuDelay() > 0;
   try { Auto.duel.start(); } catch (e) { console.error(e); showError('開始できませんでした', e); Auto.duel = null; renderBoard(); return; }
   autoAfter();
   timerStart();
@@ -283,7 +307,7 @@ async function autoResume() {
   if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
   try { await autoPrepare(saved); if (saved.opp) await autoPrepare(saved.opp); } catch { return; }
   const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: !!saved.autoTrigger && store.get('ygo.autoTrigger', false), firstDraw: !!saved.firstDraw });
-  Auto.duel = d; Auto.deckId = saved.deckId;
+  Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;
   try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
   if (autoActive()) autoAfter(true);
 }
@@ -296,7 +320,7 @@ function setBoardMode(auto) {
   Board.pick = null;
   if (auto) {
     Board.S = null;
-    if (Auto.duel) autoSync(); else { renderBoard(); if (!Auto.resumed) { Auto.resumed = true; autoResume(); } }
+    if (Auto.duel) { autoSync(); scheduleCpu(); } else { renderBoard(); if (!Auto.resumed) { Auto.resumed = true; autoResume(); } }
   } else {
     const saved = store.get('ygo.board', null);
     Board.S = saved && saved.S ? saved.S : null;
@@ -330,6 +354,10 @@ function setupAutoPlay() {
   $('#ap-opp').onchange = e => { store.set('ygo.autoOpp', e.target.value); toast('次に開始したときから、このデッキになります'); };
   $$('#ap-oppmode button').forEach(b => { b.onclick = () => { store.set('ygo.oppMode', b.dataset.v); renderOppSettings(); toast(b.dataset.v === 'trap' ? '誘発練習：次に開始したときから、相手が手札誘発を使ってきます' : b.dataset.v === 'cpu' ? 'デッキで対戦：次に開始したときから、相手が選んだデッキを回してきます' : '次に開始したときから、相手は何もしません'); }; });
   $('#ap-trappick').onclick = openOppHandPicker;
+  // 相手（CPU）の速さ：召喚・発動・攻撃などの1手ごとに待つ時間
+  const paintSpeed = () => { const v = store.get('ygo.cpuSpeed', 'slow'); $$('#ap-cpuspeed button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); };
+  $$('#ap-cpuspeed button').forEach(b => { b.onclick = () => { store.set('ygo.cpuSpeed', b.dataset.v); paintSpeed(); if (Auto.duel) Auto.duel.cpuSlow = cpuDelay() > 0; }; });
+  paintSpeed();
   $('#ap-chain').value = store.get('ygo.chainMode', 'auto');
   const chainNote = { off: 'チェーンの確認をしません（必ず答える場面だけ聞きます）', always: '召喚・発動などのあと、発動できるものがあれば毎回聞きます', auto: '効果が発動したとき、それに対して発動できるものがあるときだけ聞きます' };
   const paintChain = () => { const v = $('#ap-chain').value; $$('#ap-chainseg button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); $('#ap-chainnote').textContent = chainNote[v] || ''; };

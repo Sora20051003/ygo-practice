@@ -243,7 +243,7 @@ class AutoDuel {
   netCreate() {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
-    this.log = []; this.pending = null; this.remoteAsk = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set(); this.justMoved = new Set(); this.used = new Map();
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
@@ -271,6 +271,15 @@ class AutoDuel {
   applyRemote(res) {
     if (!this.remoteAsk) return false;
     this.lastAsk = this.remoteAsk; this.remoteAsk = null;
+    this.respond(res, true);
+    return true;
+  }
+
+  // 止めていた CPU の行動を行って、続きを進める
+  resumeCpu() {
+    const res = this.cpuWait;
+    if (!res) return false;
+    this.cpuWait = null;
     this.respond(res, true);
     return true;
   }
@@ -309,6 +318,8 @@ class AutoDuel {
       if (this.net && ask.player !== this.me) { this.pending = null; this.remoteAsk = ask; return; }
       // 相手の番の入力と、聞くまでもない確認は自動で返す
       const auto = ask.player !== this.me ? (this.opp ? cpuAnswer(ask, this) : autoAnswer(ask)) : skippable(ask, this);
+      // CPU が目に見える行動（召喚・発動・攻撃など）をするときは、一度止めて画面に見せてから進める（cpuSlow のときだけ）
+      if (auto && this.cpuSlow && !this.probing && ask.player !== this.me && this.opp && cpuVisible(ask, auto)) { this.cpuWait = auto; this.pending = null; return; }
       if (auto) { this.respond(auto, true, true); continue; }
       this.pending = ask;
       return;
@@ -738,6 +749,17 @@ function cpuFindPlanned(m, id) {
 
 // 先読み：2〜3手先まで（良い候補だけを残して広げていく）。一番良い手順の最初の手を返し、残りは予定として覚える
 const CPU_DEPTH = 3, CPU_WIDTH = 3, CPU_MAXCANDS = 12, CPU_TIME = 4000;
+// CPU の返答が、画面で見せたい行動か（フェイズを進めるだけ・発動しないだけのときは止めない）
+function cpuVisible(ask, res) {
+  switch (ask.type) {
+    case MSG.SELECT_IDLECMD: return res.action !== IDLE.TO_BP && res.action !== IDLE.TO_EP;
+    case MSG.SELECT_BATTLECMD: return res.action === BATTLE.CHAIN || res.action === BATTLE.ATTACK;
+    case MSG.SELECT_CHAIN: return res.index != null;
+    case MSG.SELECT_EFFECTYN: return !!res.yes;
+    default: return false;
+  }
+}
+
 function cpuThink(m, duel, kind) {
   const t0 = performance.now();
   const cpu = 1 - duel.me;
