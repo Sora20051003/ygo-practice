@@ -303,6 +303,8 @@ class AutoDuel {
         if (probeMeaningful(ask, this.probing)) this.probeHits++;
         this.respond(probeAnswer(ask, this.me), true, true); continue;
       }
+      // 先読み用の複製：相手（CPU）の番で一度止まる（ここから候補の手を試す）
+      if (this.stopAtCpu && ask.player !== this.me) { this.stopAtCpu = false; this.pending = ask; return; }
       // 対戦：相手が選ぶ番は、相手の画面から返答が届くのを待つ
       if (this.net && ask.player !== this.me) { this.pending = null; this.remoteAsk = ask; return; }
       // 相手の番の入力と、聞くまでもない確認は自動で返す
@@ -519,6 +521,7 @@ function seededRandom(seed) {
 // 発動できる効果 → 特殊召喚 → 通常召喚 → 罠を伏せる → 攻撃できるならバトル → 終わり の順に試す。
 // 同じ効果を何度も繰り返さないよう、1ターンの回数に上限をつける
 function cpuPlayIdle(m, duel) {
+  if (!duel.noThink && !duel.probing) { const best = cpuThink(m, duel, 'idle'); if (best) return best; }
   const t = duel.cpuTurn && duel.cpuTurn.turn === duel.turn ? duel.cpuTurn : (duel.cpuTurn = { turn: duel.turn, n: 0, count: new Map(), bp: false });
   const key = (kind, c) => kind + ':' + c.code + ':' + (c.description || '');
   const tryList = (list, kind, action, max) => {
@@ -555,7 +558,8 @@ function cpuPlayIdle(m, duel) {
   return { type: RES.SELECT_IDLECMD, action: m.to_ep ? IDLE.TO_EP : IDLE.TO_BP, index: null };
 }
 // 「デッキで対戦」の相手：バトルフェイズでは、攻撃できるモンスターで順に攻撃する
-function cpuPlayBattle(m) {
+function cpuPlayBattle(m, duel) {
+  if (duel && !duel.noThink && !duel.probing) { const best = cpuThink(m, duel, 'battle'); if (best) return best; }
   if (m.attacks && m.attacks.length) return { type: RES.SELECT_BATTLECMD, action: BATTLE.ATTACK, index: 0 };
   return { type: RES.SELECT_BATTLECMD, action: m.to_m2 ? BATTLE.TO_M2 : BATTLE.TO_EP, index: null };
 }
@@ -588,7 +592,7 @@ function cpuAnswer(m, duel) {
       if (m.selects.length && (m.forced || (duel.turnPlayer === me && duel.chain.length && duel.chain[duel.chain.length - 1].con === me) || (duel.turnPlayer === me && !duel.chain.length && rnd() < 0.5)))
         return { type: RES.SELECT_CHAIN, index: Math.floor(rnd() * m.selects.length) };
       return { type: RES.SELECT_CHAIN, index: m.forced ? 0 : null };
-    case MSG.SELECT_BATTLECMD: if (duel.opp && duel.opp.plays) return cpuPlayBattle(m); return autoAnswer(m);
+    case MSG.SELECT_BATTLECMD: if (duel.opp && duel.opp.plays) return cpuPlayBattle(m, duel); return autoAnswer(m);
     case MSG.SELECT_EFFECTYN: return { type: RES.SELECT_EFFECTYN, yes: true };
     case MSG.SELECT_YESNO: return { type: RES.SELECT_YESNO, yes: true };
     case MSG.SELECT_CARD: return { type: RES.SELECT_CARD, indicies: prefer(m.selects).slice(0, m.min).sort((a, b) => a - b) };
@@ -693,4 +697,100 @@ function describeAction(res, src, duel) {
     }
   }
   return `${t} 操作`;
+}
+
+// ---------- 「デッキで対戦」の相手の先読み ----------
+// 今できる手を1つずつ、裏で複製した対戦で試す（そのあとのターンの残りは簡単な動きで進める）。
+// 進めたあとの盤面を点数にして、一番よくなる手を選ぶ。どの手も今より良くならなければ null（簡単な動きに任せる）
+function cpuThink(m, duel, kind) {
+  const t0 = performance.now();
+  const cpu = 1 - duel.me;
+  const cands = [];
+  if (kind === 'idle') {
+    (m.activates || []).forEach((c, i) => { if (!(c.location === LOC.HAND && isHandTrap(c.code))) cands.push({ type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index: i }); });
+    (m.special_summons || []).forEach((c, i) => cands.push({ type: RES.SELECT_IDLECMD, action: IDLE.SPSUMMON, index: i }));
+    (m.summons || []).forEach((c, i) => cands.push({ type: RES.SELECT_IDLECMD, action: IDLE.SUMMON, index: i }));
+    // 伏せるのは罠と速攻魔法だけ（通常魔法などを伏せても意味がない）
+    (m.spell_sets || []).forEach((c, i) => { const d = DB.byId.get(c.code); if (d && (has(d, T.TRAP) || has(d, T.QUICKPLAY))) cands.push({ type: RES.SELECT_IDLECMD, action: IDLE.SSET, index: i }); });
+  } else {
+    (m.attacks || []).forEach((c, i) => cands.push({ type: RES.SELECT_BATTLECMD, action: BATTLE.ATTACK, index: i }));
+  }
+  // 何もしないとき（メイン：攻撃できるならバトルへ、なければ終わり。バトル：メイン2かエンドへ）
+  const fallback = () => {
+    if (kind === 'idle') {
+      const canAttack = m.to_bp && duel.turn > 1 && !duel.cpuBattled;
+      if (canAttack) { duel.cpuBattled = duel.turn; return { type: RES.SELECT_IDLECMD, action: IDLE.TO_BP, index: null }; }
+      return { type: RES.SELECT_IDLECMD, action: m.to_ep ? IDLE.TO_EP : IDLE.TO_BP, index: null };
+    }
+    return { type: RES.SELECT_BATTLECMD, action: m.to_m2 ? BATTLE.TO_M2 : BATTLE.TO_EP, index: null };
+  };
+  if (duel.cpuBattled && duel.cpuBattled !== duel.turn) duel.cpuBattled = 0;
+  if (!cands.length) return fallback();
+  const hist = duel.history();
+  let best = null, bestScore = -Infinity, base = null;
+  const clone = () => {
+    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true });
+    t.noThink = true;
+    t.create();
+    t.stopAtCpu = true;   // 流し直したあと、今の判断の場面（CPU の番）で止める
+    t.run(hist.slice());  // run は渡した一覧を使い切るので、複製ごとに写しを渡す
+    return t.pending && t.pending.player === cpu ? t : (Engine.lib.destroyDuel(t.h), null);
+  };
+  // 今の盤面の点数（何もしない場合の基準）
+  try { const t = clone(); if (t) { base = cpuScore(t, cpu); Engine.lib.destroyDuel(t.h); } } catch (e) { /* 比べられない */ }
+  if (base == null) return null;
+  for (const res of cands) {
+    if (performance.now() - t0 > 2500) break;   // 考えすぎない（画面が止まらないように）
+    let t = null;
+    try {
+      t = clone();
+      if (!t) continue;
+      const s = cpuEvalAfter(t, res, cpu);
+      if (s > bestScore) { bestScore = s; best = res; }
+    } catch (e) { /* 試せない手は使わない */ }
+    finally { if (t && t.h) Engine.lib.destroyDuel(t.h); }
+  }
+  // 今より良くなる手があれば打つ。なければ（メインなら）バトルへ・終わる
+  if (best && bestScore > base + 0.5) return best;
+  return fallback();
+}
+// 手を打って、その先（CPU のターンの残り）を簡単な動きで進めてから、盤面の点数を出す
+// 手を打って、その手の処理が終わったところ（CPU が次の手を選ぶ場面、または練習する人の番）の盤面の点数を出す
+function cpuEvalAfter(t, res, cpu) {
+  const r = res;
+  t.stopAtCpu = true;
+  t.respond(r);
+  for (let i = 0; i < 60 && t.pending && !t.ended; i++) {
+    const p = t.pending;
+    if (p.type === MSG.SELECT_IDLECMD || p.type === MSG.SELECT_BATTLECMD) break;   // 次の手を選ぶ場面（どちらの番でも）
+    // 処理の途中の選択：CPU はいつもの答え、練習する人は「しない」で進める
+    t.stopAtCpu = true;
+    t.respond(p.player === cpu ? cpuAnswer(p, t) : autoAnswer(p));
+  }
+  return cpuScore(t, cpu);
+}
+// 盤面の点数（CPU から見て）。モンスターの強さ・数、伏せカード、手札、相手のライフを数える
+function cpuScore(t, cpu) {
+  if (t.ended) return t.ended.startsWith(cpu === t.me ? '自分の勝ち' : '相手の勝ち') ? 1e6 : -1e6;
+  const q = t.query(), you = 1 - cpu;
+  const monVal = c => {
+    if (!c || !c.code) return 0;
+    const d = DB.byId.get(c.code) || {};
+    const faceUp = c.position & 5;
+    let v = 6 + (faceUp ? (c.attack || 0) / 250 : 3);
+    if (d.type && has(d, T.LINK)) v += (d.level || 1) * 2;
+    if (d.type && isExtraType(d)) v += 4;   // EXデッキのモンスターは効果も強いことが多い
+    return v;
+  };
+  const side = p => {
+    const s = q[p];
+    let v = 0;
+    for (const c of s.m) v += monVal(c);
+    for (const c of s.s) if (c && c.code) v += 3;
+    v += s.hand.filter(c => c && c.code).length * 2.2;
+    if (p === cpu) v += s.hand.filter(c => c && c.code && isHandTrap(c.code)).length * 4;   // 手札誘発は手札にあるほうが強い
+    v += s.gy.filter(c => c && c.code).length * 0.2;
+    return v;
+  };
+  return side(cpu) - side(you) * 0.9 + (8000 - t.lp[you]) / 120 - (8000 - t.lp[cpu]) / 200;
 }
