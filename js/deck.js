@@ -511,7 +511,7 @@ function renderDeck() {
   $('#deck-banlist').textContent = ctx.custom ? customRegNote(ctx.custom)
     : ctx.none ? '禁止・制限なし'
     : ctx.loading ? '読み込み中…'
-    : ctx.date ? `${ctx.reg.replace(/-/g, '/')} 時点の未発売カードは禁止扱い`
+    : ctx.date ? `${ctx.reg.replace(/-/g, '/')}〜${ctx.endDate.replace(/-/g, '/')} のリスト：${ctx.endDate.replace(/-/g, '/')}（このリストの最後の日）までに発売されたカードが使えます`
     : (ctx.vector ? '' : '（リスト未取得）');
 
   for (const sec of ['main', 'extra', 'side']) {

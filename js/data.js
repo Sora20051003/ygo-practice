@@ -333,12 +333,23 @@ function regContext(deck) {
   }
   return baseContext(fmt, reg, fmt);
 }
+// そのリストが使われた最後の日（次のリストが始まる前の日）。期間の途中で発売されたカードも、そのリストで使える
+// 次のリストが無い（今も使われている）ときは今日
+function regEndDate(listFmt, reg) {
+  const ymd = t => new Date(t).toISOString().slice(0, 10);
+  const dates = DB.regDates[listFmt] || [];
+  if (!dates.length) return reg;   // 一覧がまだ無いときは、前と同じく始まりの日で判定する
+  const next = dates.filter(d => d > reg).sort()[0];
+  if (!next) return ymd(Date.now());
+  return ymd(Date.parse(next + 'T00:00:00Z') - 86400000);
+}
 // listFmt のリスト（日付 reg）を、cardFmt のカードの発売日で使う
 function baseContext(listFmt, reg, cardFmt) {
   if (reg === 'none') return { fmt: cardFmt, reg, none: true };
   if (reg === 'latest') return { fmt: cardFmt, reg, vector: DB.banlists[listFmt] };
   const key = listFmt + ':' + reg;
-  return { fmt: cardFmt, reg, src: [listFmt, reg], vector: DB.regCache[key] || null, date: +reg.replace(/-/g, ''), loading: !DB.regCache[key] || (typeof RELEASE_DATES === 'undefined' && !DB.releaseFailed) };
+  const end = regEndDate(listFmt, reg);
+  return { fmt: cardFmt, reg, src: [listFmt, reg], vector: DB.regCache[key] || null, date: +end.replace(/-/g, ''), endDate: end, loading: !DB.regCache[key] || (typeof RELEASE_DATES === 'undefined' && !DB.releaseFailed) };
 }
 
 // ---------- オリジナルのレギュレーション ----------
