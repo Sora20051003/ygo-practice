@@ -325,6 +325,11 @@ function openCardMenu(uid, x, y) {
   }
   Board.selected = uid;
   const loc = locate(uid);
+  // 対戦：手札・場のカードは、一人回しの自動処理と同じく、カードの上に主な操作のボタンを出す（ほかの操作は「その他の操作…」）
+  if (typeof Duel !== 'undefined' && Duel.active && loc && (loc.zone === 'hand' || FIELD_ZONES.includes(loc.zone))) {
+    if (!isMobile()) showBoardDetail(loc);
+    if (quickActionPopup(uid, x, y)) return;
+  }
   const items = cardMenuItems(uid);
   if (isMobile()) {
     // スマホは詳細欄が画面外なので、メニューの先頭に「カードの詳細」を出す
@@ -1213,4 +1218,40 @@ function statBadge(card, inst) {
     el('span', { class: 'sb-atk' + cls(atk, card.atk), text: fmt(atk) }),
     el('span', { class: 'sb-sep', text: '/' }),
     link ? el('span', { class: 'sb-def', text: 'L' + (card.level || '') }) : el('span', { class: 'sb-def' + cls(def, card.def), text: fmt(def) }));
+}
+
+// ---------- 主な操作だけのボタン（対戦で使う） ----------
+// 手動のメニューから「召喚・セット・発動・表示形式の変更・相手に見せる」を選んでカードの上に出す。残りは「その他の操作…」
+const QUICK_LABELS = [
+  [/^通常召喚$/, '召喚', 'b'], [/^裏守備でセット$/, 'セット', 'b'], [/^特殊召喚（攻撃表示）$/, '特殊召喚', 'b'], [/^特殊召喚（守備表示）$/, '特殊召喚（守備）', 'b'],
+  [/^発動する/, '発動する', 'y'], [/^表にする（発動）$/, '発動する', 'y'], [/^セットする$/, 'セットする', 'b'],
+  [/^守備表示にする$/, '守備表示にする', ''], [/^攻撃表示にする$/, '攻撃表示にする', ''], [/^表側攻撃表示にする/, '表にする（反転召喚）', 'b'],
+  [/^ペンデュラムスケールに置く$/, 'Pスケールに置く', 'y'], [/^👁 相手に見せる/, '👁 相手に見せる', ''],
+];
+function quickActionPopup(uid, x, y) {
+  if (typeof hideActionPopup === 'function') hideActionPopup();
+  const node = document.querySelector(`.bcard[data-uid="${uid}"]`);
+  const loc = locate(uid);
+  if (!node || !loc) return false;
+  const items = cardMenuItems(uid);
+  const acts = [];
+  for (const it of items) {
+    if (!it.label) continue;
+    const q = QUICK_LABELS.find(([re]) => re.test(it.label));
+    if (q) acts.push({ label: q[1], kind: q[2], onClick: it.onClick });
+  }
+  // 「相手に見せる」は最後に
+  acts.sort((a, b) => (a.label.startsWith('👁') ? 1 : 0) - (b.label.startsWith('👁') ? 1 : 0));
+  const box = el('div', { class: 'ap-actions', id: 'ap-actions' },
+    acts.map(a => el('button', { class: 'ap-act' + (a.kind ? ' k-' + a.kind : ''), text: a.label, onclick: e => { e.stopPropagation(); hideActionPopup(); a.onClick(); } })),
+    el('button', { class: 'ap-act k-info', text: 'その他の操作…', onclick: e => { e.stopPropagation(); hideActionPopup(); showMenu(x, y, items); } }),
+    isMobile() ? el('button', { class: 'ap-act k-info', text: '🔍 詳細', onclick: e => { e.stopPropagation(); hideActionPopup(); showBoardDetail(locate(uid) || loc); } }) : null);
+  document.body.append(box);
+  const r = localRect(node.getBoundingClientRect()), b = { width: box.offsetWidth, height: box.offsetHeight };
+  let left = r.left + r.width / 2 - b.width / 2, top = r.top - b.height - 6;
+  if (top < 4) top = r.bottom + 6;
+  left = Math.max(4, Math.min(left, viewW() - b.width - 4));
+  box.style.left = left + 'px'; box.style.top = top + 'px';
+  setTimeout(() => document.addEventListener('pointerdown', onOutsideAction, true), 0);
+  return true;
 }
