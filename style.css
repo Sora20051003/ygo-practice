@@ -1125,3 +1125,48 @@ body.netauto #duel-panel .lp-box, body.netauto #ap-undo, body.netauto #ap-rewind
 @keyframes fx-damage { 0% { opacity: 0; transform: translate(-50%, -20%) scale(.6); } 20% { opacity: 1; transform: translate(-50%, -70%) scale(1.2); } 100% { opacity: 0; transform: translate(-50%, -160%) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .fx { animation-duration: .01s !important; } }
 .fx-negate small { position: relative; z-index: 1; margin-top: 14px; } .fx-negate b { position: relative; z-index: 1; }
+/* チェーンを鎖でつなぐ表示 */
+.chain-links { position: fixed; left: 0; top: 0; z-index: 30; pointer-events: none; overflow: visible; }
+.chain-links .cl-shadow { fill: none; stroke: rgba(0,0,0,.55); stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; }
+.chain-links .cl-chain { fill: none; stroke: #e2b84a; stroke-width: 6; stroke-dasharray: 10 6; stroke-linecap: round; stroke-linejoin: round; }
+.chain-links .cl-chain2 { fill: none; stroke: #fff2c2; stroke-width: 2; stroke-dasharray: 6 10; stroke-dashoffset: 8; stroke-linecap: round; }
+.chain-links.solving .cl-chain { stroke: #ff9b3d; animation: cl-flow 0.8s linear infinite; }
+@keyframes cl-flow { to { stroke-dashoffset: -32; } }
+.chain-links .cl-node circle { fill: #2a64c7; stroke: #fff; stroke-width: 3; }
+.chain-links .cl-node.opp circle { fill: #c0392b; }
+.chain-links .cl-node text { fill: #fff; font-size: 15px; font-weight: 900; font-family: system-ui, sans-serif; }
+.chain-links .cl-node.now circle { fill: #ff9b3d; animation: cl-pulse .9s ease-in-out infinite alternate; }
+@keyframes cl-pulse { to { r: 19; } }
+.ap-chainbox.solving { border-color: #ff9b3d; }
+.ap-link.now { font-weight: 900; color: #ff9b3d; }
+/* チェーンを積んだときの演出（前のカードと新しいカードを鎖でつなぐ） */
+.chain-stack { position: fixed; left: 50%; top: 50%; width: min(560px, 92vw); height: 340px; transform: translate(-50%, -50%); z-index: 90; cursor: pointer; }
+body.land .chain-stack { width: min(520px, calc(var(--lw) * .9)); height: min(320px, calc(var(--lh) * .9)); }
+.chain-stack::before { content: ''; position: absolute; inset: -30px -60px; background: radial-gradient(ellipse at center, rgba(0,0,0,.65), rgba(0,0,0,0) 70%); }
+.cs-card { position: absolute; width: 150px; }
+body.land .cs-card { width: min(130px, calc(var(--lh) * .32)); }
+.cs-card .cs-face { box-shadow: 0 10px 30px rgba(0,0,0,.6), 0 0 0 3px rgba(255,255,255,.85); border-radius: 6px; overflow: hidden; }
+.cs-card.prev { left: 6%; bottom: 4%; transform: rotate(-8deg); filter: brightness(.85); }
+.cs-card.next { right: 6%; top: 0; transform: rotate(8deg); }
+.cs-num { position: absolute; font-size: 72px; font-weight: 900; font-style: italic; line-height: 1; color: #fff; -webkit-text-stroke: 3px #2a64c7; text-shadow: 0 0 18px #6fb4ff, 0 4px 0 #0b2a5c; }
+.cs-card.opp .cs-num { -webkit-text-stroke-color: #c0392b; text-shadow: 0 0 18px #ff8a7a, 0 4px 0 #5c0b0b; }
+.cs-card.prev .cs-num { left: -26px; bottom: -14px; font-size: 56px; }
+.cs-card.next .cs-num { right: -30px; bottom: -10px; }
+.cs-name { position: absolute; left: 0; right: 0; bottom: -26px; text-align: center; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-title { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) skewX(-12deg); font-size: 64px; font-weight: 900; font-style: italic; letter-spacing: .06em; color: #fff;
+  text-shadow: 0 0 6px #fff, 0 0 22px #7fd0ff, 0 0 40px #2a8cff; -webkit-text-stroke: 1px rgba(255,255,255,.6); pointer-events: none; }
+body.land .cs-title { font-size: 46px; }
+.cs-desc { position: absolute; left: 50%; bottom: -34px; transform: translateX(-50%); font-size: 12px; color: #fff; background: rgba(0,0,0,.6); padding: 2px 10px; border-radius: 8px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* 鎖：楕円の輪を互い違いに */
+.cs-rope { position: absolute; left: 50%; top: 52%; display: flex; align-items: center; transform: translate(-50%, -50%) rotate(-28deg); filter: drop-shadow(0 2px 3px rgba(0,0,0,.7)); }
+.cs-rope span { display: block; margin: 0 -7px; border-radius: 50%; border: 5px solid #cfd6de; box-shadow: inset 0 0 0 1px #6c7682, 0 0 0 1px #6c7682; background: transparent; }
+.cs-rope span.h { width: 34px; height: 20px; }
+.cs-rope span.v { width: 34px; height: 8px; border-width: 4px; }
+@media (max-width: 720px) { .chain-stack { height: 280px; } .cs-card { width: 118px; } .cs-title { font-size: 46px; } .cs-num { font-size: 56px; } }
+.cs-rope { top: 56%; transform: translate(-50%, -50%) rotate(-32deg); z-index: 0; }
+.cs-card { z-index: 1; }
+.cs-rope span { border-color: #dfe5ec; }
+.cs-rope span.h { width: 46px; height: 26px; border-width: 7px; }
+.cs-rope span.v { width: 46px; height: 11px; border-width: 5px; margin: 0 -10px; }
+body.land .cs-rope span.h { width: 36px; height: 20px; border-width: 5px; }
+body.land .cs-rope span.v { width: 36px; height: 9px; border-width: 4px; }

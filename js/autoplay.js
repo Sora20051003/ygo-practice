@@ -526,12 +526,16 @@ function queueActivations(events) {
   const me = Auto.duel.me;
   for (const ev of events) {
     if (ev.t !== 'chain') continue;
+    // チェーンの番号ごとに覚えておく（2つ目からは、前のカードと鎖でつないで出す）
+    if (ev.n === 1 || !Auto.chainLinks) Auto.chainLinks = {};
+    Auto.chainLinks[ev.n] = ev;
     if (ev.con !== me) toast(`${Auto.net ? oppName() : 'CPU'} が「${cardName(ev.code)}」を発動しました`);
     if (Auto.anim && !matchMedia('(prefers-reduced-motion: reduce)').matches) activationQueue.push(ev);
   }
   if (activationQueue.length && !activationQueue.running) showNextActivation();
 }
 function showNextActivation() {
+  if (activationQueue[0] && activationQueue[0].n >= 2 && Auto.chainLinks && Auto.chainLinks[activationQueue[0].n - 1]) { showChainStack(); return; }
   const ev = activationQueue.shift();
   if (!ev) { activationQueue.running = false; return; }
   activationQueue.running = true;
@@ -552,12 +556,73 @@ function renderChainBox() {
   let box = $('#ap-chainbox');
   const d = Auto.duel;
   const chain = d && isPrompt(d.pending) ? d.chain : [];
+  requestAnimationFrame(drawChainLinks);   // 盤面を描き終えてから、カードどうしを鎖でつなぐ
   if (!chain.length) { if (box) box.remove(); return; }
   if (!box) { box = el('div', { class: 'ap-chainbox', id: 'ap-chainbox' }); $('.board-center').append(box); }
   box.innerHTML = '';
-  box.append(el('b', { text: 'チェーン' }));
-  for (const c of [...chain].reverse()) box.append(el('div', { class: 'ap-link' + (c.con === d.me ? '' : ' opp') }, `${c.n}. ${c.con === d.me ? '' : 'CPU：'}${cardName(c.code)}`));
+  const solving = d.solving && chain.some(c => c.n === d.solving);
+  box.classList.toggle('solving', !!solving);
+  box.append(el('b', { text: solving ? `⛓ チェーン解決中（チェーン${d.solving}）` : '⛓ チェーン（積んでいるところ）' }));
+  const who = c => (c.con === d.me ? '' : (Auto.net ? oppName() : 'CPU') + '：');
+  for (const c of [...chain].reverse()) box.append(el('div', { class: 'ap-link' + (c.con === d.me ? '' : ' opp') + (solving && c.n === d.solving ? ' now' : '') }, `${c.n}. ${who(c)}${cardName(c.code)}`));
+  box.append(el('div', { class: 'muted small-note', text: solving ? '解決中は新しく効果を発動できません（「〜できる」の確認や対象の選択だけ）' : '新しい番号が上。最後に積んだものから順に解決します' }));
 }
+
+// ---------- 盤面の上で、チェーンのカードどうしを鎖でつなぐ ----------
+// チェーンの番号の丸をカードの上に置き、1→2→3… の順に鎖の線でつなぐ。解決中は解決しているカードを光らせる
+function chainNodeRect(c) {
+  const d = Auto.duel, mine = c.con === d.me;
+  const loc = c.loc & ~LOC.OVERLAY;
+  let node = null;
+  if (mine) {
+    if (loc === LOC.MZONE || loc === LOC.SZONE || loc === LOC.HAND) node = document.querySelector(`.bcard[data-uid="${autoKey(c.con, loc, c.seq)}"]`);
+    if (!node) {
+      const pile = { [LOC.GRAVE]: 'gy', [LOC.REMOVED]: 'ban', [LOC.EXTRA]: 'extra', [LOC.DECK]: 'deck' }[loc];
+      if (pile) node = document.querySelector(`#field .pile[data-zone="${pile}"]`);
+      if (!node && loc === LOC.HAND) node = $('#hand');
+    }
+  } else {
+    if (loc === LOC.MZONE) node = document.querySelector(`#field [data-ozone="${c.seq >= 5 ? 'emz' : 'm'}"][data-oidx="${c.seq >= 5 ? c.seq - 5 : c.seq}"]`);
+    else if (loc === LOC.SZONE) node = document.querySelector(c.seq === 5 ? '#field [data-ozone="f"]' : `#field [data-ozone="s"][data-oidx="${c.seq}"]`);
+    else if (loc === LOC.HAND) node = $('#opp-bar');
+    else { const pile = { [LOC.GRAVE]: 'gy', [LOC.REMOVED]: 'ban', [LOC.EXTRA]: 'extra', [LOC.DECK]: 'deck' }[loc]; if (pile) node = document.querySelector(`#field [data-ozone="${pile}"]`); }
+  }
+  if (!node || !node.offsetParent) return null;
+  const r = localRect(node.getBoundingClientRect());
+  // 画面の外（スクロールして見えない手札など）にあるカードは、線を引かない
+  if (r.bottom < 0 || r.top > viewH() || r.right < 0 || r.left > viewW()) return null;
+  return r;
+}
+function drawChainLinks() {
+  const old = $('#chain-links');
+  if (old) old.remove();
+  const d = Auto.duel;
+  if (!d || !autoActive() || !d.chain || !d.chain.length || $('#view-board').hidden) return;
+  const pts = d.chain.map(c => ({ c, r: chainNodeRect(c) })).filter(p => p.r).map(p => ({ c: p.c, x: p.r.left + p.r.width / 2, y: p.r.top + p.r.height / 2 }));
+  if (!pts.length) return;
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.id = 'chain-links';
+  svg.setAttribute('class', 'chain-links' + (d.solving ? ' solving' : ''));
+  svg.setAttribute('width', viewW()); svg.setAttribute('height', viewH());
+  const mk = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); svg.append(n); return n; };
+  if (pts.length > 1) {
+    const path = pts.map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+    mk('path', { d: path, class: 'cl-shadow' });
+    mk('path', { d: path, class: 'cl-chain' });      // 鎖の輪（太い点線）
+    mk('path', { d: path, class: 'cl-chain2' });     // 輪の重なり（ずらした細い点線）
+  }
+  for (const p of pts) {
+    const now = d.solving && p.c.n === d.solving;
+    const g = mk('g', { class: 'cl-node' + (p.c.con === d.me ? '' : ' opp') + (now ? ' now' : ''), transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})` });
+    svg.removeChild(g);
+    const c1 = document.createElementNS(NS, 'circle'); c1.setAttribute('r', 15); g.append(c1);
+    const t = document.createElementNS(NS, 'text'); t.setAttribute('text-anchor', 'middle'); t.setAttribute('dy', '5'); t.textContent = p.c.n; g.append(t);
+    svg.append(g);
+  }
+  document.body.append(svg);
+}
+addEventListener('resize', () => requestAnimationFrame(drawChainLinks));
 
 // ---------- 選択画面 ----------
 function closePromptModal() { if (Auto.closePrompt) { Auto.closePrompt(); Auto.closePrompt = null; } }
@@ -1162,4 +1227,33 @@ function playBattleEffects(events, before, after, reduce) {
       }, delay);
     }
   }
+}
+
+// チェーン2以降の発動：前のチェーンのカードと新しいカードを大きく斜めに出して、鎖でつなぐ（マスターデュエル風）
+function showChainStack() {
+  const ev = activationQueue.shift();
+  activationQueue.running = true;
+  const prev = Auto.chainLinks[ev.n - 1];
+  const who = e => (e.con === Auto.duel.me ? '' : (Auto.net ? oppName() : 'CPU') + '：');
+  const cardBox = (e, cls) => {
+    const card = DB.byId.get(e.code);
+    return el('div', { class: 'cs-card ' + cls + (e.con === Auto.duel.me ? '' : ' opp') },
+      el('div', { class: 'cs-face' }, cardFace(card || null, { faceDown: !card })),
+      el('div', { class: 'cs-num', text: String(e.n) }),
+      el('div', { class: 'cs-name', text: who(e) + cardName(e.code) }));
+  };
+  // 鎖：楕円の輪を互い違いに並べる
+  const rope = el('div', { class: 'cs-rope' }, Array.from({ length: 11 }, (_, i) => el('span', { class: i % 2 ? 'v' : 'h' })));
+  const pop = el('div', { class: 'chain-stack' },
+    cardBox(prev, 'prev'), rope, cardBox(ev, 'next'),
+    el('div', { class: 'cs-title', text: 'CHAIN' }),
+    ev.desc ? el('div', { class: 'cs-desc', text: ev.desc }) : null);
+  document.body.append(pop);
+  const fast = activationQueue.length > 2;
+  const next = pop.querySelector('.cs-card.next'), ropeEl = pop.querySelector('.cs-rope');
+  next.animate([{ opacity: 0, transform: 'translate(120px, -60px) rotate(18deg) scale(1.3)' }, { opacity: 1, transform: 'translate(0, 0) rotate(8deg) scale(1)' }], { duration: 380, easing: 'cubic-bezier(.2,.9,.3,1.2)', fill: 'both' });
+  ropeEl.animate([{ opacity: 0, transform: 'translate(-50%, -50%) rotate(-32deg) scaleX(.2)' }, { opacity: 1, transform: 'translate(-50%, -50%) rotate(-32deg) scaleX(1)' }], { duration: 300, delay: 250, easing: 'ease-out', fill: 'both' });
+  pop.animate([{ opacity: 0 }, { opacity: 1, offset: 0.12 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }], { duration: fast ? 900 : 1600, easing: 'linear', fill: 'both' })
+    .finished.then(() => { pop.remove(); showNextActivation(); }, () => { pop.remove(); showNextActivation(); });
+  pop.addEventListener('click', () => pop.getAnimations({ subtree: true }).forEach(a => a.finish()));
 }

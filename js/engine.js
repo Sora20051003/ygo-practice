@@ -26,7 +26,7 @@ const MSG = {
   SELECT_OPTION: 14, SELECT_CARD: 15, SELECT_CHAIN: 16, SELECT_PLACE: 18, SELECT_POSITION: 19, SELECT_TRIBUTE: 20,
   SORT_CHAIN: 21, SELECT_COUNTER: 22, SELECT_SUM: 23, SELECT_DISFIELD: 24, SORT_CARD: 25, SELECT_UNSELECT_CARD: 26,
   CONFIRM_DECKTOP: 30, CONFIRM_CARDS: 31, SHUFFLE_DECK: 32, NEW_TURN: 40, NEW_PHASE: 41, MOVE: 50, POS_CHANGE: 53, SET: 54,
-  SUMMONING: 60, SPSUMMONING: 62, FLIPSUMMONING: 64, CHAINING: 70, CHAIN_SOLVED: 73, CHAIN_END: 74, CHAIN_NEGATED: 75,
+  SUMMONING: 60, SPSUMMONING: 62, FLIPSUMMONING: 64, CHAINING: 70, CHAIN_SOLVING: 72, CHAIN_SOLVED: 73, CHAIN_END: 74, CHAIN_NEGATED: 75,
   CHAIN_DISABLED: 76, DRAW: 90, DAMAGE: 91, RECOVER: 92, LPUPDATE: 94, PAY_LPCOST: 100, ATTACK: 110,
   TOSS_COIN: 130, TOSS_DICE: 131, ROCK_PAPER_SCISSORS: 132, ANNOUNCE_RACE: 140, ANNOUNCE_ATTRIB: 141,
   ANNOUNCE_CARD: 142, ANNOUNCE_NUMBER: 143, CARD_HINT: 160, PLAYER_HINT: 165,
@@ -379,8 +379,9 @@ class AutoDuel {
         if (m.controller === this.me) { const dc = Number(BigInt(m.description || 0) >> 20n); this.markUsed(m.code, dc && (dc === m.code || dc === (DB.byId.get(m.code) || {}).alias) ? Number(BigInt(m.description) & 0xfffffn) : '?'); }
         this.addLog(`チェーン${m.chain_size}：${this.who(m.controller)}${cardName(m.code)} の効果を発動（${link.desc || '効果'}）`); break;
       }
+      case MSG.CHAIN_SOLVING: this.solving = m.chain_size; break;   // チェーンの解決中（何番目を解決しているか）
       case MSG.CHAIN_SOLVED: this.chain.pop(); break;
-      case MSG.CHAIN_END: this.chain = []; break;
+      case MSG.CHAIN_END: this.chain = []; this.solving = 0; break;
       case MSG.CHAIN_NEGATED: case MSG.CHAIN_DISABLED: {
         // 無効になったチェーン（演出用に、どのカードかを残す）
         const link = this.chain.find(l => l.n === m.chain_size) || this.chain[this.chain.length - 1];
