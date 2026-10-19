@@ -509,6 +509,7 @@ function playEvents(events, before) {
       .finished.then(() => ghost.remove(), () => ghost.remove());
     n++;
   }
+  playBattleEffects(events, before, after, reduce);
   // 召喚したゾーンを光らせる
   for (const ev of events) {
     if (ev.t !== 'summon') continue;
@@ -524,7 +525,7 @@ function queueActivations(events) {
   const me = Auto.duel.me;
   for (const ev of events) {
     if (ev.t !== 'chain') continue;
-    if (ev.con !== me) toast(`CPU が「${cardName(ev.code)}」を発動しました`);
+    if (ev.con !== me) toast(`${Auto.net ? oppName() : 'CPU'} が「${cardName(ev.code)}」を発動しました`);
     if (Auto.anim && !matchMedia('(prefers-reduced-motion: reduce)').matches) activationQueue.push(ev);
   }
   if (activationQueue.length && !activationQueue.running) showNextActivation();
@@ -1095,4 +1096,64 @@ function linkChoose(link, cards, chosen, i, add) {
   const backs = $$('#modal-root .modal-back');
   if (backs.length) backs[backs.length - 1].style.zIndex = 70;
   return close;
+}
+
+// ---------- 攻撃・無効・ダメージの演出 ----------
+function fxAt(r, cls, text, ms = 1100) {
+  if (!r) return null;
+  const n = el('div', { class: 'fx ' + cls, text });
+  n.style.left = (r.left + r.width / 2) + 'px'; n.style.top = (r.top + r.height / 2) + 'px';
+  document.body.append(n);
+  setTimeout(() => n.remove(), ms);
+  return n;
+}
+// ライフの表示の位置（自分：手札の横、相手：上の帯）
+function lpRect(player) {
+  const mine = player === Auto.duel.me;
+  const node = mine ? $('#my-lp') : $('#opp-bar .lp-box.opp');
+  return node && node.offsetParent ? localRect(node.getBoundingClientRect()) : null;
+}
+function playBattleEffects(events, before, after, reduce) {
+  let delay = 0;
+  for (const ev of events) {
+    if (ev.t === 'attack') {
+      const a = rectAt(before, ev.from) || rectAt(after, ev.from);
+      const b = ev.to ? (rectAt(before, ev.to) || rectAt(after, ev.to)) : lpRect(1 - ev.con);
+      if (!a || !b) continue;
+      setTimeout(() => {
+        if (!reduce) {
+          // 攻撃するモンスターが相手へ飛びかかって戻る
+          const card = null;
+          const f = ev.from, mine = f.con === Auto.duel.me;
+          const node = mine ? document.querySelector(`.bcard[data-uid="${autoKey(f.con, f.loc, f.seq)}"]`)
+            : document.querySelector(`#field [data-ozone="${f.seq >= 5 ? 'emz' : 'm'}"][data-oidx="${f.seq >= 5 ? f.seq - 5 : f.seq}"] .bcard`);
+          const w = Math.min(a.width, 90), h = w * 1.46;
+          const ghost = el('div', { class: 'ap-ghost fx-attacker' }, node ? node.firstElementChild.cloneNode(true) : cardFace(card));
+          ghost.style.width = w + 'px';
+          document.body.append(ghost);
+          const at = (r, k = 1) => `translate(${r.left + r.width / 2 - w / 2}px, ${r.top + r.height / 2 - h / 2}px) scale(${k})`;
+          const mid = { left: a.left + (b.left - a.left) * 0.8, top: a.top + (b.top - a.top) * 0.8, width: a.width, height: a.height };
+          if (node) node.style.visibility = 'hidden';
+          ghost.animate([{ transform: at(a) }, { transform: at(a, 1.15), offset: 0.25 }, { transform: at(mid, 1.15), offset: 0.55 }, { transform: at(a) }],
+            { duration: 700, easing: 'ease-in-out', fill: 'both' }).finished.then(() => { ghost.remove(); if (node) node.style.visibility = ''; }, () => ghost.remove());
+        }
+        setTimeout(() => { fxAt(b, 'fx-hit', '💥', 700); }, reduce ? 0 : 380);
+      }, delay);
+      delay += 750;
+    } else if (ev.t === 'negate') {
+      const r = rectAt(before, ev) || rectAt(after, ev) || rectAt(after, { con: ev.con, loc: LOC.GRAVE, seq: 0 });
+      setTimeout(() => {
+        const n = fxAt(r || { left: innerWidth / 2 - 40, top: innerHeight / 2 - 40, width: 80, height: 80 }, 'fx-negate', '', 1500);
+        if (n) n.append(el('b', { text: '無効' }), el('small', { text: `${cardName(ev.code)}の${ev.what}` }));
+      }, delay);
+      delay += 600;
+    } else if (ev.t === 'damage') {
+      const r = lpRect(ev.player);
+      setTimeout(() => {
+        fxAt(r, 'fx-damage', '−' + ev.amount, 1300);
+        const box = ev.player === Auto.duel.me ? $('#my-lp') : $('#opp-bar .lp-box.opp');
+        if (box && !reduce) box.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(0)' }], { duration: 400 });
+      }, delay);
+    }
+  }
 }

@@ -379,7 +379,17 @@ class AutoDuel {
       }
       case MSG.CHAIN_SOLVED: this.chain.pop(); break;
       case MSG.CHAIN_END: this.chain = []; break;
-      case MSG.CHAIN_NEGATED: case MSG.CHAIN_DISABLED: this.addLog('チェーンの効果が無効になった'); break;
+      case MSG.CHAIN_NEGATED: case MSG.CHAIN_DISABLED: {
+        // 無効になったチェーン（演出用に、どのカードかを残す）
+        const link = this.chain.find(l => l.n === m.chain_size) || this.chain[this.chain.length - 1];
+        if (link) this.events.push({ t: 'negate', code: link.code, con: link.con, loc: link.loc, seq: link.seq, what: m.type === MSG.CHAIN_NEGATED ? '発動を無効' : '効果を無効' });
+        this.addLog(link ? `${this.who(link.con)}${cardName(link.code)} の${m.type === MSG.CHAIN_NEGATED ? '発動' : '効果'}が無効になった` : 'チェーンの効果が無効になった'); break;
+      }
+      case MSG.ATTACK: {
+        const a = m.card, tg = m.target;
+        this.events.push({ t: 'attack', from: { con: a.controller, loc: a.location, seq: a.sequence }, to: tg ? { con: tg.controller, loc: tg.location, seq: tg.sequence } : null, con: a.controller });
+        break;
+      }
       case MSG.MOVE: {
         const code = m.card;
         if (!code || m.from.location === m.to.location && m.from.controller === m.to.controller) break;
@@ -392,7 +402,7 @@ class AutoDuel {
         this.addLog(`${secret ? 'カード' : cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}`);
         break;
       }
-      case MSG.DAMAGE: this.addLog(`${m.player === this.me ? '自分' : '相手'}に ${m.amount} ダメージ`); break;
+      case MSG.DAMAGE: this.addLog(`${m.player === this.me ? '自分' : '相手'}に ${m.amount} ダメージ`); this.events.push({ t: 'damage', player: m.player, amount: m.amount }); break;
       case MSG.RECOVER: this.addLog(`${m.player === this.me ? '自分' : '相手'}が ${m.amount} 回復`); break;
       case MSG.PAY_LPCOST: this.addLog(`${m.player === this.me ? '自分' : '相手'}が ${m.amount} LPを払った`); break;
       case MSG.LPUPDATE: this.lp[m.player] = m.lp; break;

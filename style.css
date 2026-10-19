@@ -1111,3 +1111,17 @@ body.land .opp-zone .stat-badge { top: -6px; bottom: auto; }
 /* 効果を自動処理する対戦：手で動かすための操作は隠す（ライフ・フェイズはエンジンが管理する） */
 body.netauto #dp-my-minus, body.netauto #dp-my-plus, body.netauto #dp-damage, body.netauto #dp-next, body.netauto #dp-end,
 body.netauto #duel-panel .lp-box, body.netauto #ap-undo, body.netauto #ap-rewind { display: none !important; }
+/* 攻撃・無効・ダメージの演出 */
+.fx { position: fixed; z-index: 80; transform: translate(-50%, -50%); pointer-events: none; }
+.fx-hit { font-size: 46px; animation: fx-hit .7s ease-out forwards; }
+@keyframes fx-hit { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.3); } 30% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); } }
+.fx-attacker { z-index: 79; filter: drop-shadow(0 0 10px rgba(255, 90, 60, .9)); }
+.fx-negate { display: flex; flex-direction: column; align-items: center; gap: 2px; animation: fx-negate 1.5s ease-out forwards; }
+.fx-negate b { font-size: 30px; font-weight: 900; color: #fff; background: #d32f2f; border: 3px solid #fff; border-radius: 10px; padding: 2px 14px; transform: rotate(-12deg); box-shadow: 0 4px 18px rgba(0,0,0,.5); letter-spacing: .1em; }
+.fx-negate small { font-size: 12px; font-weight: 700; color: #fff; background: rgba(0,0,0,.7); border-radius: 6px; padding: 1px 8px; white-space: nowrap; }
+.fx-negate::before { content: ''; position: absolute; left: 50%; top: 40%; width: 90px; height: 90px; margin: -45px 0 0 -45px; border: 6px solid #ff5252; border-radius: 50%; box-shadow: 0 0 18px #ff5252; }
+@keyframes fx-negate { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2.2); } 18% { opacity: 1; transform: translate(-50%, -50%) scale(.95); } 26% { transform: translate(-50%, -50%) scale(1.05); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1); } }
+.fx-damage { font-size: 30px; font-weight: 900; color: #ff4d4d; text-shadow: 0 2px 0 #000, 0 0 12px rgba(255,0,0,.7); font-variant-numeric: tabular-nums; animation: fx-damage 1.3s ease-out forwards; }
+@keyframes fx-damage { 0% { opacity: 0; transform: translate(-50%, -20%) scale(.6); } 20% { opacity: 1; transform: translate(-50%, -70%) scale(1.2); } 100% { opacity: 0; transform: translate(-50%, -160%) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .fx { animation-duration: .01s !important; } }
+.fx-negate small { position: relative; z-index: 1; margin-top: 14px; } .fx-negate b { position: relative; z-index: 1; }
