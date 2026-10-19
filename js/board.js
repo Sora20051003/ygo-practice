@@ -895,6 +895,7 @@ document.addEventListener('click', e => { if (!matchMedia('(pointer: fine)').mat
 // ライフの表示（減ったら赤、増えたら緑に光らせる）
 const lastLp = {};
 function lpBox(lp, who) {
+  lp = Math.max(0, lp || 0);   // 0以下は0と表示
   const box = el('div', { class: 'lp-box ' + who }, el('small', { text: who === 'me' ? '自分' : '相手' }), el('b', { text: 'LP ' + lp }));
   const prev = lastLp[who];
   if (prev !== undefined && prev !== lp) box.classList.add(lp < prev ? 'lp-down' : 'lp-up');

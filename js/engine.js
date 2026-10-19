@@ -419,7 +419,7 @@ class AutoDuel {
       case MSG.DAMAGE: this.addLog(`${m.player === this.me ? '自分' : '相手'}に ${m.amount} ダメージ`); this.events.push({ t: 'damage', player: m.player, amount: m.amount }); break;
       case MSG.RECOVER: this.addLog(`${m.player === this.me ? '自分' : '相手'}が ${m.amount} 回復`); break;
       case MSG.PAY_LPCOST: this.addLog(`${m.player === this.me ? '自分' : '相手'}が ${m.amount} LPを払った`); break;
-      case MSG.LPUPDATE: this.lp[m.player] = m.lp; break;
+      case MSG.LPUPDATE: this.lp[m.player] = Math.max(0, m.lp); break;
       case MSG.PLAYER_HINT: {
         // 「このターン、〇〇しか特殊召喚できない」などの制限（縛り）が付いた・外れた
         if (m.player !== this.me) break;
@@ -441,7 +441,8 @@ class AutoDuel {
       default: break;
     }
     if (m.type === MSG.DAMAGE || m.type === MSG.RECOVER || m.type === MSG.PAY_LPCOST) {
-      this.lp[m.player] += m.type === MSG.RECOVER ? m.amount : -m.amount;
+      // ライフは0より下にしない（0以下になったら0）
+      this.lp[m.player] = Math.max(0, this.lp[m.player] + (m.type === MSG.RECOVER ? m.amount : -m.amount));
     }
   }
 
