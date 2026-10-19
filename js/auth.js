@@ -80,7 +80,7 @@ async function initAuth() {
       setTimeout(() => toast('この端末のデッキをアカウントに引き継ぎました'), 1500);
       Online.migrate = true;
     }
-    Online.lastSeen = JSON.stringify((Online.remote && Online.remote.decks) || []);
+    Online.lastSeen = deckCanon((Online.remote && Online.remote.decks) || []);
   } catch (e) {
     console.error(e);
     Online.remote = null;
@@ -99,9 +99,21 @@ function saveDecksOnline(list, currentId) {
   Online.pending = true;
   clearTimeout(Online.saveTimer);
   Online.saveTimer = setTimeout(async () => {
-    const decks = list.map(d => ({ id: d.id, name: d.name, format: d.format || 'ocg', reg: d.reg || 'latest', main: d.main, extra: d.extra, side: d.side }));
-    Online.lastSeen = JSON.stringify(decks);   // 自分が保存した内容は「別の端末の変更」として扱わない
+    let decks = list.map(normDeck);
     try {
+      // 保存する前に、ほかの端末が先に保存していないか確かめる。していたら、両方の変更を合わせてから保存する
+      // （寝ていたスマホの古いデッキで、ほかの端末の変更を消してしまわないように）
+      const { data: row, error: readErr } = await Online.sb.from('user_decks').select('decks').eq('uid', Online.user.uid).maybeSingle();
+      if (readErr) throw readErr;
+      if (row && row.decks && deckCanon(row.decks) !== Online.lastSeen) {
+        const base = JSON.parse(Online.lastSeen || '[]');
+        decks = mergeDecks(base, row.decks.map(normDeck), decks);
+        if (deckCanon(decks) !== deckCanon(list)) {
+          Online.remote = { decks, currentDeck: currentId };
+          if (Online.onRemote) Online.onRemote();
+        }
+      }
+      Online.lastSeen = deckCanon(decks);   // 自分が保存した内容は「別の端末の変更」として扱わない
       const { error } = await Online.sb.from('user_decks').upsert({ uid: Online.user.uid, decks, current_deck: currentId, updated_at: new Date().toISOString() });
       if (error) throw error;
       setSaveState('saved');
@@ -113,16 +125,53 @@ function saveDecksOnline(list, currentId) {
   }, 800);
 }
 
+// デッキを比べるための決まった形（サーバーの jsonb はキーの順番を変えるので、そろえてから比べる）
+const normDeck = d => ({ id: d.id, name: d.name, format: d.format || 'ocg', reg: d.reg || 'latest', main: d.main || [], extra: d.extra || [], side: d.side || [] });
+const deckCanon = list => JSON.stringify((list || []).map(normDeck));
+
+// 3つを合わせる：base＝前に同じだった内容、server＝ほかの端末が保存した内容、local＝この端末の内容
+// ・この端末で変えた・作ったデッキ → この端末のもの
+// ・この端末で変えていないデッキ → サーバーのもの（ほかの端末で変わっていれば、その内容）
+// ・ほかの端末で作ったデッキ → 足す。どちらかで消したデッキ → 消す
+function mergeDecks(base, server, local) {
+  const key = d => JSON.stringify(normDeck(d));
+  const B = new Map(base.map(d => [d.id, key(d)]));
+  const S = new Map(server.map(d => [d.id, d]));
+  const out = [], seen = new Set();
+  for (const d of local) {
+    seen.add(d.id);
+    if (B.get(d.id) !== key(d)) out.push(d);          // この端末で変えた・作った
+    else if (S.has(d.id)) out.push(S.get(d.id));      // 変えていない → サーバーの内容
+    // 変えていないのにサーバーに無い → ほかの端末で消した
+  }
+  for (const d of server) if (!seen.has(d.id) && !B.has(d.id)) out.push(d);   // ほかの端末で作った
+  return out.map(normDeck);
+}
+
 // 別の端末でデッキが変わったら、開いているこの画面にもすぐ反映する
 function startRemoteSync(onChange) {
   if (!Online.user) return;
+  Online.onRemote = onChange;
+  // スマホを開き直したとき（寝ている間は知らせが届かないことがある）にも、最新のデッキを読み直す
+  const refresh = async () => {
+    if (document.hidden || Online.pending || !Online.user) return;
+    const { data: row } = await Online.sb.from('user_decks').select('decks,current_deck').eq('uid', Online.user.uid).maybeSingle();
+    if (!row || !row.decks || Online.pending) return;
+    const json = deckCanon(row.decks);
+    if (json === Online.lastSeen) return;
+    Online.lastSeen = json;
+    Online.remote = { decks: row.decks, currentDeck: Decks.currentId || row.current_deck };
+    onChange();
+  };
+  document.addEventListener('visibilitychange', refresh);
+  window.addEventListener('online', refresh);
   if (Online.migrate && typeof Decks !== 'undefined') { Online.migrate = false; saveDecksOnline(Decks.list, Decks.currentId); }
   Online.sb.channel('decks-' + Online.user.uid)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'user_decks', filter: 'uid=eq.' + Online.user.uid }, payload => {
       if (Online.pending) return;   // この端末で保存中のものは無視
       const row = payload.new;
       if (!row || !row.decks) return;
-      const json = JSON.stringify(row.decks);
+      const json = deckCanon(row.decks);
       if (json === Online.lastSeen) return;
       Online.lastSeen = json;
       Online.remote = { decks: row.decks, currentDeck: row.current_deck };

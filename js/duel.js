@@ -464,7 +464,8 @@ function duelMe() {
   try { uid = localStorage.getItem('ygo.duelUid'); if (!uid) { uid = 'g-' + Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('ygo.duelUid', uid); } } catch { uid = 'g-' + Date.now(); }
   const saved = localStorage.getItem('ygo.duelName');
   const name = saved || (u && (u.displayName || (u.email || '').split('@')[0])) || 'プレイヤー';
-  return { uid: u ? u.uid : uid, name: name.slice(0, 20) };
+  // 同じアカウントで複数の端末を使っても、端末どうしで対戦できるように、端末ごとに別の ID にする
+  return { uid: u ? u.uid.slice(0, 8) + '-' + uid : uid, name: name.slice(0, 20) };
 }
 const oppUid = () => Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guest : Duel.room.host);
 const oppName = () => (Board.S && Board.S.auto && !Auto.net ? 'CPU' : (Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guestName : Duel.room.hostName) || '相手'));
