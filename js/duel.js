@@ -467,10 +467,10 @@ function duelMe() {
   return { uid: u ? u.uid : uid, name: name.slice(0, 20) };
 }
 const oppUid = () => Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guest : Duel.room.host);
-const oppName = () => (Board.S && Board.S.auto ? 'CPU' : (Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guestName : Duel.room.hostName) || '相手'));
+const oppName = () => (Board.S && Board.S.auto && !Auto.net ? 'CPU' : (Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guestName : Duel.room.hostName) || '相手'));
 // 表示する相手の盤面（自動処理モードでは CPU の盤面）
 const curOpp = () => (Board.S && Board.S.auto ? Board.S.opp : Duel.opp);
-const myTurn = () => Duel.room && Duel.room.turnPlayer === Duel.me.uid;
+const myTurn = () => (Auto.net && Auto.duel ? Auto.duel.turnPlayer === Auto.duel.me && !Auto.duel.ended : !!(Duel.room && Duel.room.turnPlayer === Duel.me.uid));
 
 function feed(text, cls = '') {
   Duel.feed.push({ text, cls, at: Date.now() });
@@ -550,7 +550,7 @@ function enterRoom(code) {
   store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
   Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => toast('通信エラー：' + e.message) });
   // 部屋を作った人：持ち時間を部屋に書く（最初は一人回しの制限時間の設定と同じ）
-  if (Duel.t.isHost && Duel.t.room && Duel.t.room.timeLimit === undefined) Duel.t.updateRoom({ timeLimit: typeof timeLimit === 'function' ? timeLimit() : 0, clock: {} });
+  if (Duel.t.isHost && Duel.t.room && Duel.t.room.timeLimit === undefined) Duel.t.updateRoom({ timeLimit: typeof timeLimit === 'function' ? timeLimit() : 0, clock: {}, mode: 'auto' });
   renderDuelLobby();
 }
 
@@ -573,14 +573,15 @@ function onDuelRoom(r) {
   if (r.status === 'waiting' && r.host === me && r.guest && r.ready && r.ready[r.host] && r.ready[r.guest]) {
     const first = Math.random() < 0.5 ? r.host : r.guest;
     Duel.t.sendEvent({ type: 'sys', text: `コイントスの結果、${first === r.host ? r.hostName : r.guestName} の先攻です` });
-    Duel.t.updateRoom({ status: 'playing', turn: 1, turnPlayer: first, phase: 'DP' });
+    const seed = Array.from(crypto.getRandomValues(new Uint32Array(4)), String);   // 効果を自動処理する対戦で、2人のエンジンを同じにするための乱数の種
+    Duel.t.updateRoom({ status: 'playing', turn: 1, turnPlayer: first, first, phase: 'DP', seed });
     return;   // 開始の変更が届いたときに、もう一度ここが呼ばれる（古い情報で処理を続けないように）
   }
-  if (r.status === 'playing' && !Duel.active) { Duel.timeoutSent = false; beginDuelBoard(); }
+  if (r.status === 'playing' && !Duel.active) { Duel.timeoutSent = false; if (r.mode === 'auto') beginNetDuel(); else beginDuelBoard(); }
   if (Duel.active) {
     // ターンが変わったら、自分の盤面のターン数・通常召喚・使用済みを更新
     const key = r.turn + ':' + r.turnPlayer;
-    if (key !== Duel.turnKey && Board.S) {
+    if (key !== Duel.turnKey && Board.S && !Auto.net) {
       // 持ち時間：ターンが始まった時刻（この端末の時計）
       if (r.turnPlayer === me) Duel.myTurnStart = Date.now(); else Duel.oppTurnStart = Date.now();
       Duel.turnKey = key;
@@ -616,6 +617,7 @@ function onDuelOpp(state) {
 }
 
 function onDuelEvent(ev) {
+  if (ev.type === 'eng' || ev.type === 'engsync') { onNetEvent(ev); return; }   // 効果を自動処理する対戦のやり取り（ログには出さない）
   const id = ev.from + ':' + ev.ts + ':' + ev.type;
   if (Duel.seen.has(id)) return;
   Duel.seen.add(id);
@@ -669,10 +671,18 @@ function beginDuelBoard() {
 
 function endDuelBoard() {
   Duel.active = false;
-  document.body.classList.remove('dueling');
+  document.body.classList.remove('dueling', 'netauto');
+  if (Auto.net) {
+    // 効果を自動処理する対戦を終えたら、一人回しの状態に戻す
+    Auto.net = false;
+    if (Duel.solo) { Auto.on = Duel.solo.autoOn; Auto.duel = Duel.solo.autoDuel; }
+    if (typeof hideActionPopup === 'function') hideActionPopup();
+    closePromptModal();
+    if (Duel.code) store.set('ygo.duel.net.' + Duel.code, null);
+  }
   if (Duel.solo) { Board.S = Duel.solo.S; Board.initial = Duel.solo.initial; Board.history = Duel.solo.history || []; }
   Duel.solo = null;
-  renderBoard();
+  if (Auto.on && Auto.duel) autoSync(); else renderBoard();
 }
 
 // 相手に送ってよい情報だけにした盤面
@@ -696,6 +706,7 @@ function publicState(S) {
 
 // 盤面が描き直されるたびに呼ばれる。変わっていれば少し待って相手に送る
 function duelAfterRender() {
+  if (Auto.net) { renderDuelPanel(); return; }   // 効果を自動処理する対戦は、盤面を送らない（2人とも同じエンジンを動かしている）
   renderDuelPanel();
   clearTimeout(Duel.sendTimer);
   Duel.sendTimer = setTimeout(() => {
@@ -863,11 +874,12 @@ function renderDuelLobby() {
     el('ul', { class: 'duel-players' }, r ? [player(r.host, r.hostName), player(r.guest, r.guestName)] : el('li', { text: '接続中…' })),
     r && r.status === 'playing' ? el('button', { class: 'btn primary', text: '▶ 対戦の盤面を開く', onclick: () => { if (!Duel.active) beginDuelBoard(); else switchView('board'); } })
       : el('div', { class: 'stack' },
+        duelModeSetting(r),
         duelTimeSetting(r),
         el('p', { text: `使うデッキ：${deck ? deck.name : '（未選択）'}（メイン${deck ? deck.main.length : 0}・EX${deck ? deck.extra.length : 0}）` }),
         el('button', {
           class: 'btn ' + (amReady ? '' : 'primary'), text: amReady ? '準備OKを取り消す' : '準備OK', disabled: !r || !deck || deck.main.length < 1,
-          onclick: () => Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '' }),
+          onclick: () => Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra } : null }),
         }),
         el('p', { class: 'muted small-note', text: '2人とも「準備OK」になると、コイントスで先攻を決めて対戦が始まります。' })),
     el('button', { class: 'btn small danger', text: '部屋を出る', onclick: leaveRoom })));
@@ -1014,4 +1026,109 @@ function duelTimeSetting(r) {
   range.addEventListener('change', () => Duel.t.updateRoom({ timeLimit: val() }));
   return el('div', { class: 'duel-time' }, el('label', { class: 'muted' }, '1人ずつの持ち時間：', label), range,
     el('p', { class: 'muted small-note', text: '自分のターンの間だけ減ります。なくなったら負けです。右端は無限（時間制限なし）。' }));
+}
+
+// ---------- 効果を自動処理する対戦 ----------
+// 2人とも同じエンジンを、同じ乱数・同じデッキで動かす。自分が選んだこと（返答）は相手に送り、相手の返答は届いた順に流す。
+// こうすると2人の画面のエンジンはいつも同じ状態になる（自分の画面には自分の手札だけを出す）
+Duel.netQueue = [];
+async function beginNetDuel() {
+  const r = Duel.room, me = Duel.me.uid;
+  const firstUid = r.first || r.turnPlayer, secondUid = firstUid === r.host ? r.guest : r.host;
+  const idx = firstUid === me ? 0 : 1;
+  const dl = uid => (r.deckList && r.deckList[uid]) || { main: [], extra: [] };
+  const decks = [firstUid, secondUid].map(u => [dl(u).main || [], dl(u).extra || []]);
+  Duel.solo = { S: Board.S, initial: Board.initial, history: Board.history, autoOn: Auto.on, autoDuel: Auto.duel };
+  Duel.active = true; Duel.endedShown = false; Duel.netQueue = [];
+  document.body.classList.add('dueling', 'netauto');
+  switchView('board');
+  try {
+    await engineLoad(showLoading);
+    await loadCardScripts([...decks[0][0], ...decks[0][1], ...decks[1][0], ...decks[1][1], OPP_FILLER], showLoading);
+  } catch (e) { showLoading(null); showError('自動処理を準備できませんでした', e); return; }
+  showLoading(null);
+  const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks },
+    chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: !!r.firstDraw });
+  d.onSend = (res, i) => Duel.t.sendEvent({ type: 'eng', i, res: JSON.stringify(res, bigReplacer) });
+  Auto.on = true; Auto.net = true; Auto.duel = d; Auto.redoLog = null; Auto.resumed = true;
+  // 読み込み直したときは、保存していた返答を流し直して続きから
+  const saved = store.get('ygo.duel.net.' + Duel.code, null);
+  const items = saved && saved.seed === r.seed.join(',') ? JSON.parse(saved.items, bigReviver) : null;
+  try { d.create(); d.run(items || undefined); } catch (e) { showError('対戦を始められませんでした', e); return; }
+  feed('対戦開始！（効果を自動処理）', 'sys');
+  netFlush();
+  autoAfter(true);
+  // 相手が先に進んでいたら、足りない分を送ってもらう
+  Duel.t.sendEvent({ type: 'engsync', have: d.responses.length });
+}
+
+// 相手の返答を、順番どおりに流す
+function netFlush() {
+  const d = Auto.duel;
+  if (!Auto.net || !d) return;
+  let moved = false;
+  for (;;) {
+    const k = Duel.netQueue.findIndex(q => q.i === d.responses.length);
+    if (k < 0 || !d.remoteAsk) break;
+    const [q] = Duel.netQueue.splice(k, 1);
+    try { d.applyRemote(JSON.parse(q.res, bigReviver)); } catch (e) { showError('相手の操作を処理できませんでした', e); break; }
+    moved = true;
+  }
+  Duel.netQueue = Duel.netQueue.filter(q => q.i >= d.responses.length);   // もう流したもの（重複して届いたもの）は捨てる
+  if (moved) autoAfter();
+}
+
+function onNetEvent(ev) {
+  if (ev.from === Duel.me.uid) return;
+  if (ev.type === 'eng') { Duel.netQueue.push({ i: ev.i, res: ev.res }); if (Auto.net) netFlush(); return; }
+  if (ev.type === 'engsync' && Auto.net && Auto.duel) {
+    // 相手が持っていない分の返答を送り直す（相手は自分が選ぶ番の分だけ使う）
+    const d = Auto.duel;
+    for (let i = ev.have; i < d.responses.length; i++) Duel.t.sendEvent({ type: 'eng', i, res: JSON.stringify(d.responses[i], bigReplacer) });
+  }
+}
+
+function netSave() {
+  const d = Auto.duel;
+  if (!d || !Duel.code || !Duel.room || !Duel.room.seed) return;
+  try { store.set('ygo.duel.net.' + Duel.code, { seed: Duel.room.seed.join(','), items: JSON.stringify(d.history(), bigReplacer) }); } catch { /* 保存できなくても続けられる */ }
+}
+
+// 自動処理のたびに呼ぶ：ターンが変わったら持ち時間を記録する
+function netAfter() {
+  const d = Auto.duel;
+  if (!d || !Duel.room) return;
+  const key = d.turn + ':' + d.turnPlayer;
+  if (key === Duel.netTurnKey) return;
+  const wasMine = Duel.netTurnMine;
+  if (wasMine && Duel.myTurnStart && Duel.room.status === 'playing') {
+    Duel.t.updateRoom({ ['clock.' + Duel.me.uid]: Math.round(myClockUsedAt(Duel.netTurnEndedAt || Date.now())) });
+  }
+  Duel.netTurnKey = key;
+  Duel.netTurnMine = d.turnPlayer === d.me;
+  if (Duel.netTurnMine) Duel.myTurnStart = Date.now(); else Duel.oppTurnStart = Date.now();
+}
+function myClockUsedAt(now) {
+  const r = Duel.room;
+  return ((r.clock && r.clock[Duel.me.uid]) || 0) + (Duel.myTurnStart ? (now - Duel.myTurnStart) / 1000 : 0);
+}
+
+// 勝ち負けが決まったとき（エンジンの判定）：部屋に書いて、2人に終了を出す
+function netGameOver(result, reason) {
+  const r = Duel.room;
+  if (r && r.status === 'playing') Duel.t.updateRoom({ status: 'ended', winner: result === 'win' ? Duel.me.uid : oppUid(), endReason: reason });
+}
+
+// 部屋の画面：対戦のしかた（部屋を作った人だけが変えられる）
+function duelModeSetting(r) {
+  const mode = (r && r.mode) || 'manual';
+  const isHost = r && r.host === Duel.me.uid;
+  const label = { auto: '効果を自動処理（ルールどおりに自動で処理）', manual: '手動（自分でカードを動かす）' };
+  if (!isHost) return el('p', { class: 'muted', text: `対戦のしかた：${label[mode]}（部屋を作った人が決めます）` });
+  return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: '対戦のしかた' }),
+    el('div', { class: 'seg full' }, ['auto', 'manual'].map(m => el('button', {
+      class: mode === m ? 'on' : '', text: m === 'auto' ? '効果を自動処理' : '手動',
+      onclick: () => Duel.t.updateRoom({ mode: m }),
+    }))),
+    el('p', { class: 'muted small-note', text: mode === 'auto' ? '召喚・効果の発動・チェーン・ダメージなどをルールどおり自動で処理します（対象などは自分で選びます）。' : '一人回しの手動モードと同じく、カードを自分で動かします。' }));
 }

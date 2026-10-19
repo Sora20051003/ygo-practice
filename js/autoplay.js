@@ -7,7 +7,7 @@ const Auto = {
   closePrompt: null,
 };
 
-const autoActive = () => Auto.on && !(typeof Duel !== 'undefined' && Duel.active);
+const autoActive = () => Auto.on && (Auto.net || !(typeof Duel !== 'undefined' && Duel.active));   // Auto.net：対戦で効果を自動処理
 const autoKey = (con, loc, seq) => 1 + con * 100000 + loc * 100 + seq;
 const POS_NAME = { 1: '表側攻撃表示', 2: '裏側攻撃表示', 4: '表側守備表示', 8: '裏側守備表示' };
 
@@ -53,7 +53,7 @@ function autoState() {
     m: op.m.slice(0, 5).map(c => pub(c, LOC.MZONE)), emz: [pub(op.m[5], LOC.MZONE), pub(op.m[6], LOC.MZONE)],
     s: op.s.slice(0, 5).map(c => pub(c, LOC.SZONE)), f: [pub(op.s[5], LOC.SZONE)],
   };
-  S.oppText = `CPU：LP ${d.lp[1 - me]}　手札${S.opp.hand}枚`;
+  S.oppText = `${Auto.net ? oppName() : 'CPU'}：LP ${d.lp[1 - me]}　手札${S.opp.hand}枚`;
   return S;
 }
 
@@ -124,6 +124,7 @@ const isPrompt = p => p && p.type !== MSG.SELECT_IDLECMD && p.type !== MSG.SELEC
 function autoRespond(res) {
   const d = Auto.duel;
   if (!d) return;
+  if (Auto.net && !d.pending) return;   // 対戦：聞かれていないときに返答すると、2人のエンジンがずれてしまう
   Auto.redoLog = null;   // 新しい手を選んだら「1手進む」はできなくなる
   // EXデッキなどから特殊召喚するカード（リンク素材の数え方を聞くときに使う）
   if (res.type === RES.SELECT_IDLECMD && res.action === IDLE.SPSUMMON && d.pending && d.pending.special_summons) { const c = d.pending.special_summons[res.index]; Auto.spTarget = c ? c.code : 0; }
@@ -146,6 +147,7 @@ function autoAfter(noAnim) {
   // 勝ち負けが決まったら知らせる（デッキ切れ・ライフ0など）
   if (d.ended && !d.endShown) { d.endShown = true; gameOver(d.ended.startsWith('自分の勝ち') ? 'win' : 'lose', d.endReason || d.ended); }
   if (!d.ended) d.endShown = false;
+  if (Auto.net && typeof netAfter === 'function') netAfter();
 }
 
 function autoSync() {
@@ -166,6 +168,7 @@ function autoPanel() {
   const phase = PHASE_NAME[d.phase] || '';
   let text;
   if (d.ended) text = `対戦終了（${d.ended}）`;
+  else if (!p && d.remoteAsk) text = `${oppName()}が操作しています…`;
   else if (!p) text = '処理中…';
   else if (p.type === MSG.SELECT_IDLECMD) text = `T${d.turn} ${phase}：カードをクリックして操作`;
   else if (p.type === MSG.SELECT_BATTLECMD) text = `T${d.turn} バトルフェイズ：攻撃するモンスターや発動する効果をクリック`;
@@ -265,6 +268,7 @@ const bigReviver = (k, v) => (v && typeof v === 'object' && '__big' in v ? BigIn
 function autoSave() {
   const d = Auto.duel;
   if (!d) return;
+  if (Auto.net) { netSave(); return; }   // 対戦は別に保存する
   const items = d.history();
   try {
     store.set('ygo.autoBoard', JSON.parse(JSON.stringify({

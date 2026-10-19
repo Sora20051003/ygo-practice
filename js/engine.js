@@ -144,13 +144,15 @@ const placeText = (con, loc, seq) => {
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false }) {
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null }) {
+    // net：対戦（2人がそれぞれ同じエンジンを動かす）。{ me: 自分の番号（0＝先攻）, decks: [[先攻のmain, extra], [後攻のmain, extra]] }
+    this.net = net;
     this.firstDraw = firstDraw;   // 先攻1ターン目もドローする（昔のルールなど）
     this.autoTrigger = autoTrigger;   // オンなら、召喚・特殊召喚したカード自身の任意の効果も聞かずに発動する（強制の効果はいつも自動）
     this.main = main; this.extra = extra; this.handIds = handIds || null; this.handSize = handSize;
     this.opp = opp && opp.main && opp.main.length ? opp : null;
     this.chainMode = chainMode;
-    this.me = handSize === 6 ? 1 : 0;   // 後攻なら相手が先に動く
+    this.me = net ? net.me : handSize === 6 ? 1 : 0;   // 後攻なら相手が先に動く
     this.seed = seed || [...crypto.getRandomValues(new Uint32Array(4))].map(BigInt);
     this.responses = [];     // これまでの返答（元に戻すときは最初からやり直して、ここを途中まで流し直す）
     this.userMarks = [];     // 自分が選んだ返答の位置
@@ -158,6 +160,7 @@ class AutoDuel {
   }
 
   create() {
+    if (this.net) return this.netCreate();
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
     this.log = []; this.pending = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
@@ -207,7 +210,7 @@ class AutoDuel {
   // 試しに発動してみて、何か起きるか（効果が使える・サーチなどの処理がある）を調べる。
   // 今の対戦をそのまま複製して試すので、本当の盤面は変わらない。index は今の SELECT_IDLECMD の activates の番号
   probeActivate(index) {
-    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true });
+    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net });
     try {
       t.create();
       t.run(this.history());
@@ -236,6 +239,42 @@ class AutoDuel {
     }
   }
 
+  // 対戦：両方の画面で同じになるよう、先攻（0番）→後攻（1番）の順に、同じ乱数でデッキを混ぜて並べる
+  netCreate() {
+    const L = Engine.lib, O = Engine.ocg;
+    if (this.h) L.destroyDuel(this.h);
+    this.log = []; this.pending = null; this.remoteAsk = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
+    this.justSummoned = new Set(); this.justMoved = new Set(); this.used = new Map();
+    this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
+    const team = { drawCountPerTurn: 1, startingDrawCount: 5, startingLP: 8000 };
+    this.h = L.createDuel({
+      flags: O.OcgDuelMode.MODE_MR5 | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
+      seed: this.seed, team1: team, team2: team,
+      cardReader: code => engineCardData(code),
+      scriptReader: name => Engine.scripts.get(name) || null,
+      errorHandler: (type, text) => { if (type === 0) console.warn('ocgcore', text); },
+    });
+    if (!this.h) throw new Error('対戦を作れませんでした');
+    L.loadScript(this.h, 'constant.lua', Engine.scripts.get('constant.lua'));
+    L.loadScript(this.h, 'utility.lua', Engine.scripts.get('utility.lua'));
+    Engine.me = this.me;
+    const rand = seededRandom(Number(BigInt(this.seed[0]) & 0xffffffffn) || 1);
+    const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    this.net.decks.forEach(([main, extra], p) => {
+      for (const code of shuffle([...main])) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.DECK, sequence: 2, position: POS.FD_ATK });
+      for (const code of extra) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.EXTRA, sequence: 2, position: POS.FD_ATK });
+    });
+    L.startDuel(this.h);
+  }
+  // 対戦：相手の画面から届いた返答を流す（相手が選ぶ番のときだけ）
+  applyRemote(res) {
+    if (!this.remoteAsk) return false;
+    this.lastAsk = this.remoteAsk; this.remoteAsk = null;
+    this.respond(res, true);
+    return true;
+  }
+
   // 相手が最初に引く枚数（初手を指定したら、その分だけ減らす）
   oppDraw() { return Math.max(0, 5 - ((this.opp && this.opp.handIds) || []).length); }
 
@@ -258,12 +297,14 @@ class AutoDuel {
       // 自分が次の行動を選ぶ時点で、召喚したばかりのカードの記録は消す（誘発の機会は終わっている）
       if (ask.player === this.me && (ask.type === MSG.SELECT_IDLECMD || ask.type === MSG.SELECT_BATTLECMD)) { this.justSummoned.clear(); this.justMoved.clear(); }
       this.lastAsk = ask;
-      if (replay && replay.length) { const r = replay.shift(); this.respond(r.res, !r.user, true); continue; }
+      if (replay && replay.length) { const r = replay.shift(); this.replaying = true; try { this.respond(r.res, !r.user, true); } finally { this.replaying = false; } continue; }
       // 試し発動中（probeActivate）：自分の選択は自動で答え、意味のある選択が出たかを数える
       if (this.probing && ask.player === this.me && ask.type !== MSG.SELECT_IDLECMD && ask.type !== MSG.SELECT_BATTLECMD) {
         if (probeMeaningful(ask, this.probing)) this.probeHits++;
         this.respond(probeAnswer(ask, this.me), true, true); continue;
       }
+      // 対戦：相手が選ぶ番は、相手の画面から返答が届くのを待つ
+      if (this.net && ask.player !== this.me) { this.pending = null; this.remoteAsk = ask; return; }
       // 相手の番の入力と、聞くまでもない確認は自動で返す
       const auto = ask.player !== this.me ? (this.opp ? cpuAnswer(ask, this) : autoAnswer(ask)) : skippable(ask, this);
       if (auto) { this.respond(auto, true, true); continue; }
@@ -281,6 +322,8 @@ class AutoDuel {
     if (!auto && (res.type === RES.SELECT_IDLECMD || res.type === RES.SELECT_BATTLECMD)) this.labels[this.responses.length] = describeAction(res, src, this);
     if (!auto) this.userMarks.push(this.responses.length);
     this.responses.push(res);
+    // 対戦：自分が選ぶ番の返答は、相手の画面にも送る（流し直し中は送らない）
+    if (this.net && this.onSend && !this.replaying && src && src.player === this.me) this.onSend(res, this.responses.length - 1);
     this.retry = false;
     if (!auto) this.retries = 0;
     Engine.lib.duelSetResponse(this.h, res);

@@ -1108,3 +1108,6 @@ body.land .opp-zone .stat-badge { top: -6px; bottom: auto; }
 .duel-wait { padding: 10px; border-radius: 10px; background: var(--panel-2); text-align: center; font-weight: 700; }
 @media (max-width: 720px) { .duel-quick, .duel-big { grid-template-columns: 1fr; } }
 .duel-time { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 10px; background: var(--panel-2); }
+/* 効果を自動処理する対戦：手で動かすための操作は隠す（ライフ・フェイズはエンジンが管理する） */
+body.netauto #dp-my-minus, body.netauto #dp-my-plus, body.netauto #dp-damage, body.netauto #dp-next, body.netauto #dp-end,
+body.netauto #duel-panel .lp-box, body.netauto #ap-undo, body.netauto #ap-rewind { display: none !important; }

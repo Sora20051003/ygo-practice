@@ -46,7 +46,7 @@ function commit() {
   if (Board.history.length > 300) Board.history.shift();
 }
 function undo() {
-  if (Board.S && Board.S.auto) { autoUndo(); return; }
+  if (Board.S && Board.S.auto) { if (Auto.net) { toast('対戦中は戻せません'); return; } autoUndo(); return; }
   if (!Board.history.length) { toast('これ以上戻せません'); return; }
   (Board.future = Board.future || []).push(JSON.stringify(Board.S));   // 「1手進む」で戻れるように
   Board.S = JSON.parse(Board.history.pop());
@@ -1112,7 +1112,7 @@ function renderPhaseBar() {
   if (bar.hidden) return;
   bar.innerHTML = '';
   let turn, mine = true, cur, can = {}, endOk, endLabel = 'ターン終了 ▶';
-  if (dueling) {
+  if (dueling && !S.auto) {
     // 対戦：ターンとフェイズは部屋で共有する。自分のターンだけ進められる
     const r = Duel.room;
     turn = r.turn; mine = myTurn(); cur = r.phase || 'DP';
@@ -1184,6 +1184,7 @@ const firstTurnDraw = () => store.get('ygo.firstDraw', false);
 // ---------- 勝ち負け（一人回し） ----------
 // 手動：デッキが0枚のときにドローしようとしたら負け。自動処理：エンジンの判定（デッキ切れ・ライフ0など）
 function gameOver(result, reason) {
+  if (typeof Auto !== 'undefined' && Auto.net) { netGameOver(result, reason); return; }
   Timer.running = false; renderTimer();
   const lose = result !== 'win';
   showModal({
