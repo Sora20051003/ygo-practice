@@ -1197,3 +1197,12 @@ body.land .cs-rope span.v { width: 36px; height: 9px; border-width: 4px; }
 .adm-table tr.revoked td { opacity: .55; }
 .adm-table.adm-dev td { white-space: normal; }
 .adm-table.adm-dev td:last-child { white-space: nowrap; text-align: right; }
+/* 一人回しの左の欄：処理の設定（たためる） */
+.proc-settings { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.proc-settings > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+.proc-settings > summary::-webkit-details-marker { display: none; }
+.proc-settings > summary::after { content: '▾'; margin-left: auto; opacity: .6; }
+.proc-settings:not([open]) > summary::after { content: '▸'; }
+.proc-settings > .ctrl-group { margin-top: 6px; }
+.proc-settings .seg.full { display: flex; }
+.proc-settings .seg.full button { flex: 1 1 0; min-width: 0; padding: 6px 2px; font-size: 13px; }

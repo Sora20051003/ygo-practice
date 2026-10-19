@@ -358,6 +358,9 @@ function setupAutoPlay() {
   const paintSpeed = () => { const v = store.get('ygo.cpuSpeed', 'slow'); $$('#ap-cpuspeed button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); };
   $$('#ap-cpuspeed button').forEach(b => { b.onclick = () => { store.set('ygo.cpuSpeed', b.dataset.v); paintSpeed(); if (Auto.duel) Auto.duel.cpuSlow = cpuDelay() > 0; }; });
   paintSpeed();
+  // 左の欄の「処理の設定」：たたんだかどうかを覚えておく
+  const proc = $('#proc-settings');
+  if (proc) { proc.open = store.get('ygo.procOpen', true); proc.addEventListener('toggle', () => store.set('ygo.procOpen', proc.open)); }
   $('#ap-chain').value = store.get('ygo.chainMode', 'auto');
   const chainNote = { off: 'チェーンの確認をしません（必ず答える場面だけ聞きます）', always: '召喚・発動などのあと、発動できるものがあれば毎回聞きます', auto: '効果が発動したとき、それに対して発動できるものがあるときだけ聞きます' };
   const paintChain = () => { const v = $('#ap-chain').value; $$('#ap-chainseg button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); $('#ap-chainnote').textContent = chainNote[v] || ''; };
