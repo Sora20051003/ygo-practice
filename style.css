@@ -1206,11 +1206,15 @@ body.land .cs-rope span.v { width: 36px; height: 9px; border-width: 4px; }
 .proc-settings > .ctrl-group { margin-top: 6px; }
 .proc-settings .seg.full { display: flex; }
 .proc-settings .seg.full button { flex: 1 1 0; min-width: 0; padding: 6px 2px; font-size: 13px; }
-/* フェイズ（パソコン：盤面の除外ゾーンの横のマスに縦に出す） */
-.zone.phase-cell { border: 1px solid var(--line); background: rgba(10, 14, 20, .55); flex-direction: column; align-items: stretch; justify-content: space-between; gap: 2px; padding: 3px; overflow: hidden; }
-.zone.phase-cell.blank, .zone.phase-cell.empty { border: none; background: none; }
+/* フェイズ（パソコン：盤面の除外ゾーンの右隣に縦に出す） */
+.field.with-phase { padding-left: calc(14px + var(--cw) * 1.14); padding-right: calc(14px + var(--cw) * 1.14); }
+.phase-cell { position: absolute; top: 0; min-height: 100%; left: calc(100% + var(--cw) * 0.14); width: max(var(--cw), 64px); z-index: 3; display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 2px; padding: 3px; border-radius: 6px; border: 1px solid var(--line); background: rgba(10, 14, 20, .85); cursor: default; }
+.phase-cell.empty { border: none; background: none; }
 .phase-cell .ph-turn { text-align: center; font-size: 11px; line-height: 1.2; }
 .phase-cell .ph-chips { flex: none; flex-direction: column; gap: 1px; }
 .phase-cell .ph-chip { flex: none; padding: 0; line-height: 1.3; }
 .phase-cell .ph-chip b { font-size: 11px; }
 .phase-cell .ph-end { padding: 2px; font-size: 11px; line-height: 1.3; }
+/* フェイズの欄のぶん盤面が広くなるので、画面の幅に収まるようにカードを少し小さくする */
+body:not(.land) #view-board .board-center { container-type: inline-size; }
+.field.with-phase { --cw: min(clamp(46px, 6.6vw, 100px), calc((100cqw - 34px) / 10.2)); --ch: calc(var(--cw) * 1.46); }

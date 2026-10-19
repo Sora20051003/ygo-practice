@@ -705,6 +705,7 @@ function renderBoard() {
   const S = Board.S;
   const field = $('#field');
   field.innerHTML = '';
+  field.classList.remove('with-phase');
   $('#view-board').classList.toggle('auto-mode', autoActive());
   $$('#b-mode button').forEach(b => b.classList.toggle('on', (b.dataset.mode === 'auto') === Auto.on));
   renderPauseSummary();
@@ -734,10 +735,10 @@ function renderBoard() {
     renderOppRows(field);
     // 自動処理モード：上の帯に相手（CPU）のライフ
     if (S.auto && S.opp) $('#opp-bar').append(lpBox(Auto.duel ? Auto.duel.lp[1 - Auto.duel.me] : S.opp.lp, 'opp'));
-    field.append(oppPileEl('ban'), blank(), emzSharedEl(0), blank(), emzSharedEl(1), phaseCellEl(), pileEl('ban'));
+    field.append(oppPileEl('ban'), blank(), emzSharedEl(0), blank(), emzSharedEl(1), blank(), banWithPhase());
   } else {
     // 1段目：EXモンスターゾーン・除外
-    field.append(blank(), blank(), slotEl('emz', 0), blank(), slotEl('emz', 1), phaseCellEl(), pileEl('ban'));
+    field.append(blank(), blank(), slotEl('emz', 0), blank(), slotEl('emz', 1), blank(), banWithPhase());
   }
   // 2段目：フィールド・モンスター・墓地
   field.append(slotEl('f', 0));
@@ -1104,11 +1105,17 @@ const PHASE_FULL = { DP: 'ドローフェイズ', SP: 'スタンバイフェイ�
 // エンジンのフェイズ番号 → 略号
 const enginePhase = n => (n === 1 ? 'DP' : n === 2 ? 'SP' : n === 4 ? 'M1' : n >= 8 && n <= 128 ? 'BP' : n === 256 ? 'M2' : n === 512 ? 'EP' : '');
 
-// 除外ゾーンの横のマス（中身は fillPhase で入れる）
-function phaseCellEl() {
-  const cell = el('div', { class: 'zone phase-cell', id: 'phase-cell' });
-  if (phaseInCell()) fillPhase(cell, true); else cell.classList.add('blank');
-  return cell;
+// 除外ゾーンと、その右隣に付けるフェイズの欄（パソコンだけ。中身は fillPhase で入れる）
+function banWithPhase() {
+  const ban = pileEl('ban');
+  $('#field').classList.toggle('with-phase', phaseInCell());
+  if (!phaseInCell()) return ban;
+  const cell = el('div', { class: 'phase-cell', id: 'phase-cell' });
+  // 除外ゾーンを押したときの動き（一覧を開く・ドラッグ）にならないようにする
+  for (const t of ['click', 'pointerdown', 'mousedown', 'dragover', 'drop', 'contextmenu']) cell.addEventListener(t, e => e.stopPropagation());
+  fillPhase(cell, true);
+  ban.append(cell);
+  return ban;
 }
 // フェイズの表示。パソコンでは盤面の除外ゾーンの横のマス（#phase-cell）に縦に出す。スマホは盤面の上の帯（#phase-bar）
 const phaseInCell = () => !document.body.classList.contains('land') && !isMobile();
