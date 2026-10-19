@@ -14,14 +14,30 @@ const Online = {
 // 画像はパソコン内のフォルダ（pics/）にあるので、ファイルとして開いたときだけ使う
 const LOCAL_FILES = location.protocol === 'file:';
 
+// ---------- ID でログイン（メールアドレスは聞かない） ----------
+// Supabase はメールアドレスの形が必要なので、ID から中だけで使うアドレスを作る（このアドレスにメールは送らない）
+const ID_DOMAIN = 'sora20051003.github.io';
+const ID_RE = /^[a-z0-9_-]{3,20}$/;
+function idToEmail(input) {
+  const s = (input || '').trim();
+  if (s.includes('@')) return s;   // メールアドレスで作ったアカウントもそのまま使える
+  const id = s.toLowerCase();
+  if (!ID_RE.test(id)) throw new Error('ID_FORMAT');
+  return id + '@' + ID_DOMAIN;
+}
+// 中で使うアドレス → 画面に出す ID
+const emailToId = e => (e && e.endsWith('@' + ID_DOMAIN) ? e.slice(0, -ID_DOMAIN.length - 1) : (e || ''));
+const isIdAccount = e => !!e && e.endsWith('@' + ID_DOMAIN);
+
 // Supabase のエラー → 日本語
 function authMessage(e) {
   const m = (e && (e.message || e.error_description || String(e))) || '';
-  if (/Invalid login credentials/i.test(m)) return 'メールアドレスかパスワードが違います。';
-  if (/Email not confirmed/i.test(m)) return 'メールアドレスの確認がまだです。届いたメールのリンクを押してから、ログインしてください。';
-  if (/already registered|already been registered|User already exists/i.test(m)) return 'このメールアドレスは登録済みです。「ログイン」してください。';
+  if (m === 'ID_FORMAT') return 'ID は半角の英字・数字・_ - で3〜20文字にしてください。';
+  if (/Invalid login credentials/i.test(m)) return 'ID かパスワードが違います。';
+  if (/Email not confirmed/i.test(m)) return 'アカウントの確認が終わっていません（サーバーの設定で「Confirm email」をオフにする必要があります）。';
+  if (/already registered|already been registered|User already exists/i.test(m)) return 'この ID はもう使われています。別の ID にするか、「ログイン」してください。';
   if (/Password should be at least|weak/i.test(m)) return 'パスワードは6文字以上にしてください。';
-  if (/valid email|invalid email|Unable to validate email/i.test(m)) return 'メールアドレスの形が正しくありません。';
+  if (/valid email|invalid email|Unable to validate email|not authorized/i.test(m)) return 'この ID では登録できませんでした（サーバーの設定を確認してください）：' + m;
   if (/rate limit|too many/i.test(m)) return '試行回数が多すぎます。しばらく待ってからお試しください。';
   if (/Failed to fetch|NetworkError|network/i.test(m)) return 'インターネットに接続できませんでした。';
   if (/provider is not enabled|Unsupported provider/i.test(m)) return 'このログイン方法はまだ使えません（サーバーの設定が必要です）。';
@@ -34,7 +50,7 @@ function toAppUser(u) {
   if (!u) return null;
   const meta = u.user_metadata || {};
   return {
-    uid: u.id, email: u.email || '',
+    uid: u.id, email: u.email || '', loginId: emailToId(u.email || ''),
     displayName: meta.name || meta.full_name || meta.user_name || (u.email || '').split('@')[0] || '',
     createdAt: u.created_at, provider: (u.app_metadata && u.app_metadata.provider) || 'email',
   };
@@ -206,7 +222,7 @@ function renderUserBox() {
   box.innerHTML = '';
   box.append(
     el('span', { id: 'save-state', class: 'save-state saved', text: '✓ 保存済み' }),
-    el('span', { class: 'user-name', title: u.email || '', text: u.displayName || u.email || 'ログイン中' }),
+    el('span', { class: 'user-name', title: u.loginId ? 'ID：' + u.loginId : '', text: u.displayName || u.loginId || 'ログイン中' }),
     ...(typeof openMyDevices === 'function' ? [el('button', { class: 'btn small', text: '📱 端末', title: 'このアカウントでログインしている端末（なくした・壊れた端末をログアウトさせる）', onclick: openMyDevices })] : []),
     el('button', { class: 'btn small', text: 'ログアウト', onclick: async () => {
       Online.loggingOut = true;
@@ -241,25 +257,23 @@ function showLoginScreen(done) {
     if (error) throw error;
   });
   $('#auth-login').onclick = () => busy(async () => {
-    const { data, error } = await sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value });
+    const { data, error } = await sb.auth.signInWithPassword({ email: idToEmail(email.value), password: pass.value });
     if (error) throw error;
     done(data.user);
   });
   $('#auth-signup').onclick = () => busy(async () => {
     if (pass.value.length < 6) throw new Error('Password should be at least 6 characters');
-    const name = nameIn.value.trim() || email.value.trim().split('@')[0];
-    const { data, error } = await sb.auth.signUp({ email: email.value.trim(), password: pass.value, options: { data: { name }, emailRedirectTo: here } });
+    const addr = idToEmail(email.value);
+    const name = nameIn.value.trim() || emailToId(addr).split('@')[0];
+    const { data, error } = await sb.auth.signUp({ email: addr, password: pass.value, options: { data: { name }, emailRedirectTo: here } });
     if (error) throw error;
     if (data.session) { done(data.user); return; }
-    // メールの確認が必要な設定のとき
+    // サーバーの設定で「メールの確認」がオンのまま（ID のアカウントは確認メールを受け取れない）
+    if (isIdAccount(addr)) throw new Error('Email not confirmed');
     say('確認のメールを送りました。メールのリンクを押してから、ここでログインしてください。', 'ok');
   });
-  $('#auth-reset').onclick = () => busy(async () => {
-    if (!email.value.trim()) throw new Error('先にメールアドレスを入力してください。');
-    const { error } = await sb.auth.resetPasswordForEmail(email.value.trim(), { redirectTo: here });
-    if (error) throw error;
-    say('パスワード再設定のメールを送りました。メールのリンクを開くと、新しいパスワードを決められます。', 'ok');
-  });
+  // ID のアカウントはメールを受け取れないので、パスワードを忘れたら管理者に決め直してもらう
+  $('#auth-reset').onclick = () => say('パスワードを忘れたときは、管理者に「仮のパスワード」を決めてもらってください。ログインしたあと、右上の「📱 端末」から自分のパスワードを変えられます。', 'ok');
   pass.onkeydown = e => { if (e.key === 'Enter') $('#auth-login').click(); };
   // 最初は「ログインして使う」「ゲストで使う」を選ぶ画面。ログインを選んだら入力欄を出す
   const showForm = on => { $('#auth-choice').hidden = on; $('#auth-form').hidden = !on; say(''); if (on) setTimeout(() => email.focus(), 50); };

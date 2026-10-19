@@ -113,6 +113,9 @@ async function openMyDevices() {
     box.innerHTML = '';
     if (error) { box.append(el('p', { class: 'warn', text: setupHint(error) })); return; }
     box.append(
+      el('div', { class: 'adm-actions' },
+        el('span', { class: 'muted', text: 'ID：' + (Online.user.loginId || '—') }),
+        el('button', { class: 'btn small', text: '🔑 パスワードを変える', onclick: askNewPassword })),
       el('p', { class: 'muted small-note', text: '壊れた・なくした端末は「ログアウトさせる」を押すと、その端末ではログインが切れます（次にその端末で開いたとき、またはしばらくたってから）。' }),
       deviceTable(data || [], { currentId: myDeviceId(), onRevoke: async d => {
         if (!confirm(`「${d.device || '端末'}」をログアウトさせますか？`)) return;
@@ -155,7 +158,7 @@ async function openAccountAdmin(acc, onChanged) {
   if (!Online.isAdmin) return;
   const sb = Online.sb;
   const box = el('div', { class: 'adm' }, el('p', { class: 'muted', text: '読み込み中…' }));
-  showModal({ title: '👤 ' + (acc.name || acc.email || 'アカウント'), wide: true, body: box, onClose: () => onChanged && onChanged() });
+  showModal({ title: '👤 ' + (acc.name || emailToId(acc.email) || 'アカウント'), wide: true, body: box, onClose: () => onChanged && onChanged() });
   const done = (error, okText) => { toast(error ? 'できませんでした：' + (error.message || error) : okText); load(); };
   const load = async () => {
     const [dv, dk] = await Promise.all([
@@ -167,7 +170,7 @@ async function openAccountAdmin(acc, onChanged) {
     box.append(
       el('div', { class: 'adm-info' },
         el('div', null, el('b', { text: '名前：' }), acc.name || '（なし）'),
-        el('div', null, el('b', { text: 'メール：' }), acc.email || '—', acc.confirmed === false ? '（未確認）' : ''),
+        el('div', null, el('b', { text: isIdAccount(acc.email) ? 'ID：' : 'メール：' }), emailToId(acc.email) || '—'),
         el('div', null, el('b', { text: '登録日：' }), admWhen(acc.created_at)),
         el('div', null, el('b', { text: '最後にログイン：' }), admWhen(acc.last_sign_in_at || acc.last_login)),
         el('div', null, el('b', { text: 'デッキ：' }), `${decks.length}個` + (dk.data ? `（最後の保存 ${admWhen(dk.data.updated_at)}）` : '')),
@@ -185,7 +188,7 @@ async function openAccountAdmin(acc, onChanged) {
           const { error } = await sb.rpc('admin_signout_all', { p_uid: acc.uid });
           done(error, 'すべての端末からログアウトさせました');
         } }),
-        el('button', { class: 'btn', text: '✉ パスワード再設定のメールを送る', disabled: !acc.email, onclick: async () => {
+        el('button', { class: 'btn', text: '✉ パスワード再設定のメールを送る', disabled: !acc.email || isIdAccount(acc.email), title: isIdAccount(acc.email) ? 'ID で作ったアカウントはメールを受け取れません。「仮のパスワードを決める」を使ってください' : '', onclick: async () => {
           if (!confirm(`${acc.email} にパスワード再設定のメールを送りますか？`)) return;
           const { error } = await sb.auth.resetPasswordForEmail(acc.email, { redirectTo: location.origin + location.pathname });
           done(error, 'メールを送りました。本人がメールのリンクを開くと、新しいパスワードを決められます');
@@ -198,7 +201,7 @@ async function openAccountAdmin(acc, onChanged) {
           });
         } }),
         el('button', { class: 'btn', text: '💾 デッキをファイルに保存', disabled: !decks.length, onclick: () => {
-          downloadText(`decks-${(acc.name || acc.email || acc.uid).replace(/[\\/:*?"<>|@]/g, '_')}.json`, JSON.stringify({ app: 'ygo-practice', decks }, null, 2));
+          downloadText(`decks-${(emailToId(acc.email) || acc.name || acc.uid).replace(/[\\/:*?"<>|@]/g, '_')}.json`, JSON.stringify({ app: 'ygo-practice', decks }, null, 2));
         } })),
       el('p', { class: 'muted small-note', text: '「ログアウトさせる」は、その端末が次に開いたとき（開いたままなら1分以内）に切れます。サーバー側のログインも無効にするので、しばらくすると必ず切れます。' }));
   };
@@ -227,7 +230,7 @@ function openAdmin() {
   const isOnline = p => { const d = toDate(p.last_seen); return !!d && Date.now() - d.getTime() < ONLINE_MS; };
   const draw = () => {
     const q = normalizeText(filter.value);
-    const list = profiles.filter(p => !q || normalizeText((p.name || '') + ' ' + (p.email || '')).includes(q))
+    const list = profiles.filter(p => !q || normalizeText((p.name || '') + ' ' + emailToId(p.email)).includes(q))
       .sort((a, b) => (isOnline(b) - isOnline(a)) || ((toDate(b.last_seen) || 0) - (toDate(a.last_seen) || 0)));
     const online = profiles.filter(isOnline).length;
     const today = profiles.filter(p => { const d = toDate(p.last_seen); return d && Date.now() - d.getTime() < 86400000; }).length;
@@ -239,11 +242,11 @@ function openAdmin() {
       el('div', { class: 'adm-num' }, el('b', { text: String(rooms.length) }), '対戦の部屋'));
     userList.innerHTML = '';
     userList.append(el('table', { class: 'adm-table' },
-      el('thead', null, el('tr', null, ['', '名前', 'メール', '最後に使った', '登録日', '端末', 'デッキ', ''].map(h => el('th', { text: h })))),
+      el('thead', null, el('tr', null, ['', '名前', 'ID / メール', '最後に使った', '登録日', '端末', 'デッキ', ''].map(h => el('th', { text: h })))),
       el('tbody', null, list.map(p => el('tr', { class: isOnline(p) ? 'on' : '' },
         el('td', { text: isOnline(p) ? '🟢' : '⚪', title: isOnline(p) ? 'オンライン中' : 'オフライン' }),
         el('td', { text: p.name || '（名前なし）' }),
-        el('td', { text: p.email || '—' }),
+        el('td', { text: emailToId(p.email) || '—' }),
         el('td', { text: when(p.last_seen) }),
         el('td', { text: toDate(p.created_at) ? toDate(p.created_at).toLocaleDateString('ja-JP') : '—' }),
         el('td', { text: p.device || '—' }),
