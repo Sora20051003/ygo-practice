@@ -1070,6 +1070,22 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body.land .zone .stat-badge { font-size: 9px; padding: 0 3px; bottom: -6px; }
 body.land .opp-zone .stat-badge { top: -6px; bottom: auto; }
 @media (max-width: 720px) { .zone .stat-badge { font-size: 9px; padding: 0 3px; } }
+/* 場のモンスターのレベル・ランク（カードの左上。相手のカードは左下） */
+.zone .lv-badge {
+  position: absolute; left: -4px; top: -6px; z-index: 5; pointer-events: none;
+  display: flex; align-items: center; gap: 1px; white-space: nowrap;
+  background: rgba(10, 14, 20, .9); color: #fff; border: 1px solid rgba(255,255,255,.3); border-radius: 6px;
+  padding: 0 4px; font-size: 11px; font-weight: 800; line-height: 1.4; font-variant-numeric: tabular-nums;
+}
+.lv-badge .lv-star { color: #ffcf3a; font-size: .95em; }
+.lv-badge.rank { background: rgba(36, 36, 44, .95); border-color: #c9a64a; }
+.lv-badge.rank .lv-star { color: #f2e2a4; }
+.lv-badge.up { color: #5fe08a; }
+.lv-badge.down { color: #ff7a7a; }
+.opp-zone .lv-badge { top: auto; bottom: -6px; }
+body.land .zone .lv-badge { font-size: 9px; padding: 0 3px; left: -3px; top: -5px; }
+body.land .opp-zone .lv-badge { top: auto; bottom: -5px; }
+@media (max-width: 720px) { .zone .lv-badge { font-size: 9px; padding: 0 3px; } }
 /* 管理ページ */
 .adm h4 { display: flex; align-items: center; gap: 10px; margin: 14px 0 6px; }
 .adm-filter { margin-left: auto; font-size: 13px; padding: 4px 8px; width: 220px; max-width: 50%; }

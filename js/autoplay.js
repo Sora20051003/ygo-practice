@@ -28,6 +28,7 @@ function autoState() {
       ctr: Object.values(c.counters || {}).reduce((a, b) => a + b, 0),
       ref: { con: me, loc, seq },
       atk: c.attack, def: c.defense,   // 今の攻撃力・守備力（効果で変わった値）
+      lv: c.level, rk: c.rank,          // 今のレベル・ランク
     };
   };
   const side = q[me];
@@ -43,7 +44,7 @@ function autoState() {
   const pub = (c, loc) => (c && c.code ? {
     id: c.position & 5 ? c.code : 0, faceUp: !!(c.position & 5), pos: loc === LOC.MZONE && c.position & 12 ? 'def' : 'atk',
     ctr: Object.values(c.counters || {}).reduce((a, b) => a + b, 0), mats: c.overlayCards || [],
-    atk: c.attack, def: c.defense,
+    atk: c.attack, def: c.defense, lv: c.level, rk: c.rank,
   } : null);
   const count = a => a.filter(Boolean).length;
   S.opp = {

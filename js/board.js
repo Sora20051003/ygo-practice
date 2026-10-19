@@ -1215,10 +1215,26 @@ function statBadge(card, inst) {
   const atk = inst.atk != null ? inst.atk : card.atk, def = inst.def != null ? inst.def : card.def;
   const fmt = v => (v == null || v < 0 ? '?' : String(v));
   const cls = (v, base) => (v == null || base == null || v === base ? '' : v > base ? ' up' : ' down');
-  return el('div', { class: 'stat-badge' + (inst.pos === 'def' ? ' is-def' : ''), title: link ? '攻撃力 / リンク' : '攻撃力 / 守備力' },
+  const out = document.createDocumentFragment();
+  const lb = levelBadge(card, inst);
+  if (lb) out.append(lb);
+  out.append(el('div', { class: 'stat-badge' + (inst.pos === 'def' ? ' is-def' : ''), title: link ? '攻撃力 / リンク' : '攻撃力 / 守備力' },
     el('span', { class: 'sb-atk' + cls(atk, card.atk), text: fmt(atk) }),
     el('span', { class: 'sb-sep', text: '/' }),
-    link ? el('span', { class: 'sb-def', text: 'L' + (card.level || '') }) : el('span', { class: 'sb-def' + cls(def, card.def), text: fmt(def) }));
+    link ? el('span', { class: 'sb-def', text: 'L' + (card.level || '') }) : el('span', { class: 'sb-def' + cls(def, card.def), text: fmt(def) })));
+  return out;
+}
+
+// カードの左上に「★4」（レベル）・「☆4」（ランク）を出す。効果で変わったら緑（上がった）・赤（下がった）
+function levelBadge(card, inst) {
+  const kind = levelKind(card);
+  if (kind === 'link') return null;   // リンクは攻撃力の横に「L2」のように出している
+  const base = card.level || 0;
+  const cur = (kind === 'rank' ? inst.rk : inst.lv) || base;
+  if (!cur) return null;
+  const cls = !base || cur === base ? '' : cur > base ? ' up' : ' down';
+  return el('div', { class: 'lv-badge ' + kind + cls, title: (kind === 'rank' ? 'ランク ' : 'レベル ') + cur },
+    el('span', { class: 'lv-star', text: kind === 'rank' ? '☆' : '★' }), el('span', { text: String(cur) }));
 }
 
 // ---------- 主な操作だけのボタン（手動・対戦） ----------
