@@ -734,10 +734,10 @@ function renderBoard() {
     renderOppRows(field);
     // 自動処理モード：上の帯に相手（CPU）のライフ
     if (S.auto && S.opp) $('#opp-bar').append(lpBox(Auto.duel ? Auto.duel.lp[1 - Auto.duel.me] : S.opp.lp, 'opp'));
-    field.append(oppPileEl('ban'), blank(), emzSharedEl(0), blank(), emzSharedEl(1), blank(), pileEl('ban'));
+    field.append(oppPileEl('ban'), blank(), emzSharedEl(0), blank(), emzSharedEl(1), phaseCellEl(), pileEl('ban'));
   } else {
     // 1段目：EXモンスターゾーン・除外
-    field.append(blank(), blank(), slotEl('emz', 0), blank(), slotEl('emz', 1), blank(), pileEl('ban'));
+    field.append(blank(), blank(), slotEl('emz', 0), blank(), slotEl('emz', 1), phaseCellEl(), pileEl('ban'));
   }
   // 2段目：フィールド・モンスター・墓地
   field.append(slotEl('f', 0));
@@ -1104,14 +1104,27 @@ const PHASE_FULL = { DP: 'ドローフェイズ', SP: 'スタンバイフェイ�
 // エンジンのフェイズ番号 → 略号
 const enginePhase = n => (n === 1 ? 'DP' : n === 2 ? 'SP' : n === 4 ? 'M1' : n >= 8 && n <= 128 ? 'BP' : n === 256 ? 'M2' : n === 512 ? 'EP' : '');
 
+// 除外ゾーンの横のマス（中身は fillPhase で入れる）
+function phaseCellEl() {
+  const cell = el('div', { class: 'zone phase-cell', id: 'phase-cell' });
+  if (phaseInCell()) fillPhase(cell, true); else cell.classList.add('blank');
+  return cell;
+}
+// フェイズの表示。パソコンでは盤面の除外ゾーンの横のマス（#phase-cell）に縦に出す。スマホは盤面の上の帯（#phase-bar）
+const phaseInCell = () => !document.body.classList.contains('land') && !isMobile();
 function renderPhaseBar() {
-  const bar = $('#phase-bar');
-  if (!bar) return;
+  const strip = $('#phase-bar');
+  if (!strip) return;
+  if (phaseInCell()) { strip.hidden = true; const cell = $('#phase-cell'); if (cell) fillPhase(cell, true); return; }
+  fillPhase(strip, false);
+}
+function fillPhase(bar, inCell) {
   const S = Board.S;
   const dueling = typeof Duel !== 'undefined' && Duel.active;
-  bar.hidden = !S || (dueling && !(Duel.room && Duel.room.turn));
-  if (bar.hidden) return;
-  bar.innerHTML = '';
+  // 盤面のマスは消すと並びがずれるので、中身だけ空にする
+  const hide = () => { if (inCell) { bar.innerHTML = ''; bar.classList.add('empty'); } else bar.hidden = true; };
+  bar.hidden = false; bar.innerHTML = ''; bar.classList.remove('empty');
+  if (!S || (dueling && !(Duel.room && Duel.room.turn))) { hide(); return; }
   let turn, mine = true, cur, can = {}, endOk, endLabel = 'ターン終了 ▶';
   if (dueling && !S.auto) {
     // 対戦：ターンとフェイズは部屋で共有する。自分のターンだけ進められる
@@ -1124,7 +1137,7 @@ function renderPhaseBar() {
     if (r.status === 'ended') endLabel = '対戦終了';
   } else if (S.auto) {
     const d = Auto.duel, p = d && d.pending;
-    if (!d) { bar.hidden = true; return; }
+    if (!d) { hide(); return; }
     turn = d.turn; mine = d.turnPlayer === d.me; cur = enginePhase(d.phase);
     const idle = p && p.type === MSG.SELECT_IDLECMD, battle = p && p.type === MSG.SELECT_BATTLECMD;
     can = { BP: idle && p.to_bp, M2: battle && p.to_m2, EP: (idle || battle) && p.to_ep };
@@ -1139,7 +1152,7 @@ function renderPhaseBar() {
     endOk = true;
   }
   const curIdx = PHASES.findIndex(x => x[0] === cur);
-  bar.append(el('span', { class: 'ph-turn' + (mine ? '' : ' opp'), text: `T${turn} ${mine ? '自分' : '相手'}のターン` }));
+  bar.append(el('span', { class: 'ph-turn' + (mine ? '' : ' opp'), text: inCell ? `T${turn} ${mine ? '自分' : '相手'}` : `T${turn} ${mine ? '自分' : '相手'}のターン` }));
   const chips = el('div', { class: 'ph-chips' });
   PHASES.forEach(([k, label], i) => {
     chips.append(el('button', {
@@ -1149,7 +1162,7 @@ function renderPhaseBar() {
       onclick: () => goPhase(k),
     }, el('b', { text: label })));
   });
-  bar.append(chips, el('button', { class: 'btn small primary ph-end', text: endLabel, disabled: !endOk || !mine, onclick: endTurn }));
+  bar.append(chips, el('button', { class: 'btn small primary ph-end', text: inCell ? endLabel.replace(' ▶', '') : endLabel, disabled: !endOk || !mine, onclick: endTurn }));
 }
 
 function goPhase(k) {

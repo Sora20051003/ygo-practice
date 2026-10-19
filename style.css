@@ -1206,3 +1206,11 @@ body.land .cs-rope span.v { width: 36px; height: 9px; border-width: 4px; }
 .proc-settings > .ctrl-group { margin-top: 6px; }
 .proc-settings .seg.full { display: flex; }
 .proc-settings .seg.full button { flex: 1 1 0; min-width: 0; padding: 6px 2px; font-size: 13px; }
+/* フェイズ（パソコン：盤面の除外ゾーンの横のマスに縦に出す） */
+.zone.phase-cell { border: 1px solid var(--line); background: rgba(10, 14, 20, .55); flex-direction: column; align-items: stretch; justify-content: space-between; gap: 2px; padding: 3px; overflow: hidden; }
+.zone.phase-cell.blank, .zone.phase-cell.empty { border: none; background: none; }
+.phase-cell .ph-turn { text-align: center; font-size: 11px; line-height: 1.2; }
+.phase-cell .ph-chips { flex: none; flex-direction: column; gap: 1px; }
+.phase-cell .ph-chip { flex: none; padding: 0; line-height: 1.3; }
+.phase-cell .ph-chip b { font-size: 11px; }
+.phase-cell .ph-end { padding: 2px; font-size: 11px; line-height: 1.3; }
