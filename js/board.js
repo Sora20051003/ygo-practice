@@ -1159,6 +1159,16 @@ function fillPhase(bar, inCell) {
     endOk = true;
   }
   const curIdx = PHASES.findIndex(x => x[0] === cur);
+  // 手動・対戦（手動）：フェイズが変わったら画面に大きく出す
+  if (!S.auto && cur) {
+    const key = `${turn}|${cur}|${mine}`;
+    if (Board.phaseKey && Board.phaseKey !== key) {
+      const who = mine ? '自分' : (dueling ? oppName() : '相手');
+      if (String(turn) !== Board.phaseKey.split('|')[0]) phaseBannerOnce(`m-turn${turn}`, who + 'のターン', `ターン${turn}`, !mine);
+      phaseBannerOnce(`m-${key}`, PHASE_FULL[cur], `T${turn} ${who}のターン`, !mine);
+    }
+    Board.phaseKey = key;
+  }
   bar.append(el('span', { class: 'ph-turn' + (mine ? '' : ' opp'), text: inCell ? `T${turn} ${mine ? '自分' : '相手'}` : `T${turn} ${mine ? '自分' : '相手'}のターン` }));
   const chips = el('div', { class: 'ph-chips' });
   PHASES.forEach(([k, label], i) => {
@@ -1316,4 +1326,36 @@ function announceActivation(uid) {
     Duel.t.sendEvent({ type: 'sys', text: `${Duel.me.name}：${c.name} の効果を発動` });
   }
   toast(`${c.name} の効果を発動しました（効果の処理は手で行ってください）`);
+}
+
+// ---------- フェイズが変わったとき、画面の真ん中に大きく出す ----------
+// 続けて変わったとき（ドロー→スタンバイ→メイン1 など）は順番に短めに出す
+const PhaseBanner = { queue: [], running: false, last: '' };
+function showPhaseBanner(main, sub, opp) {
+  PhaseBanner.queue.push({ main, sub, opp });
+  if (!PhaseBanner.running) nextPhaseBanner();
+}
+function nextPhaseBanner() {
+  const b = PhaseBanner.queue.shift();
+  if (!b) { PhaseBanner.running = false; return; }
+  PhaseBanner.running = true;
+  const n = el('div', { class: 'phase-banner' + (b.opp ? ' opp' : '') }, el('b', { text: b.main }), b.sub ? el('small', { text: b.sub }) : null);
+  document.body.append(n);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const C = 'translate(-50%, -50%)';
+  const kf = reduce
+    ? [{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 1, offset: 0.8 }, { opacity: 0 }]
+    : [{ opacity: 0, transform: C + ' translateX(-60px) skewX(-8deg)' }, { opacity: 1, transform: C, offset: 0.18 }, { opacity: 1, transform: C, offset: 0.78 }, { opacity: 0, transform: C + ' translateX(60px)' }];
+  // 演出が終わったら次へ（画面が裏にあるときなど、終わりの知らせが来ないこともあるので時間でも進める）
+  let over = false;
+  const done = () => { if (over) return; over = true; n.remove(); nextPhaseBanner(); };
+  const ms = PhaseBanner.queue.length ? 650 : 1000;
+  n.animate(kf, { duration: ms, easing: 'ease-out', fill: 'both' }).finished.then(done, done);
+  setTimeout(done, ms + 150);
+}
+// 同じフェイズを2回続けて出さない
+function phaseBannerOnce(key, main, sub, opp) {
+  if (PhaseBanner.last === key) return;
+  PhaseBanner.last = key;
+  showPhaseBanner(main, sub, opp);
 }

@@ -144,6 +144,7 @@ function autoAfter(noAnim) {
   autoSync();
   if (anim) playEvents(events, before);
   if (!noAnim) queueActivations(events);
+  if (!noAnim && Auto.anim) phaseBanners(events);
   if (isPrompt(d.pending)) openPrompt();
   // 勝ち負けが決まったら知らせる（デッキ切れ・ライフ0など）
   if (d.ended && !d.endShown) { d.endShown = true; gameOver(d.ended.startsWith('自分の勝ち') ? 'win' : 'lose', d.endReason || d.ended); }
@@ -171,6 +172,19 @@ function scheduleCpu() {
     autoAfter();
   };
   d.cpuTimer = setTimeout(go, cpuDelay());
+}
+
+// ターン・フェイズが変わったら画面に大きく出す（エンジンの知らせから）
+function phaseBanners(events) {
+  const d = Auto.duel;
+  for (const ev of events) {
+    const mine = ev.player === d.me;
+    if (ev.t === 'turn') phaseBannerOnce(`turn${ev.turn}`, mine ? '自分のターン' : (Auto.net ? oppName() : '相手') + 'のターン', `ターン${ev.turn}`, !mine);
+    else if (ev.t === 'phase') {
+      const k = enginePhase(ev.phase);
+      if (k) phaseBannerOnce(`${ev.turn}-${k}`, PHASE_FULL[k], `T${ev.turn} ${mine ? '自分' : '相手'}のターン`, !mine);
+    }
+  }
 }
 
 function autoSync() {
@@ -659,11 +673,19 @@ addEventListener('resize', () => requestAnimationFrame(drawChainLinks));
 // ---------- 選択画面 ----------
 function closePromptModal() { if (Auto.closePrompt) { Auto.closePrompt(); Auto.closePrompt = null; } }
 
+// 「（相手の）メインフェイズ1を終わろうとしています」
+function leavingText(d) {
+  return `${d.turnPlayer === d.me ? '' : '相手の'}${PHASE_NAME[d.leaving] || 'フェイズ'}を終わろうとしています`;
+}
 function promptTitle(p) {
   const hint = Auto.duel && Auto.duel.hint ? descText(Auto.duel.hint) : '';
   switch (p.type) {
     // 積まれているチェーンがあるときだけ「チェーン」。解決し終えたあと（新しいチェーンの1つ目）は「効果の発動」
-    case MSG.SELECT_CHAIN: return Auto.duel && Auto.duel.chain.length ? 'チェーンして発動しますか？' : '効果を発動しますか？';
+    case MSG.SELECT_CHAIN:
+      if (Auto.duel && Auto.duel.chain.length) return 'チェーンして発動しますか？';
+      // フェイズを進めようとしているとき（フェイズが終わる前に発動できる）
+      if (Auto.duel && Auto.duel.leaving) return `${leavingText(Auto.duel)}。効果を発動しますか？`;
+      return '効果を発動しますか？';
     case MSG.SELECT_EFFECTYN: return `「${cardName(p.code)}」の効果を発動しますか？`;
     case MSG.SELECT_YESNO: return descText(p.description) || 'はい／いいえ';
     case MSG.SELECT_OPTION: return '効果を選んでください';
@@ -893,6 +915,7 @@ function openPrompt() {
       const ch = d.chain || [];
       const lead = ch.length
         ? `チェーン${ch.length + 1}として発動できます（チェーン${ch.length}：${ch[ch.length - 1].con === d.me ? '' : '相手の'}${cardName(ch[ch.length - 1].code)}）。発動する効果を選んで「発動する」を押してください`
+        : d.leaving ? `${leavingText(d)}。フェイズが終わる前に発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないとフェイズが進みます）`
         : '発動できる効果があります。発動する効果を選んで「発動する」を押してください';
       promptModal(el('div', { class: 'stack' }, el('p', { class: 'muted', text: lead }), grid,
         el('div', { class: 'row' }, go, p.forced ? null : el('button', { class: 'btn', text: '発動しない', onclick: () => answer({ type: RES.SELECT_CHAIN, index: null }) }))));

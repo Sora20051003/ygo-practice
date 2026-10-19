@@ -1218,3 +1218,15 @@ body.land .cs-rope span.v { width: 36px; height: 9px; border-width: 4px; }
 /* フェイズの欄のぶん盤面が広くなるので、画面の幅に収まるようにカードを少し小さくする */
 body:not(.land) #view-board .board-center { container-type: inline-size; }
 .field.with-phase { --cw: min(clamp(46px, 6.6vw, 100px), calc((100cqw - 34px) / 10.2)); --ch: calc(var(--cw) * 1.46); }
+/* フェイズが変わったときの大きな表示 */
+.phase-banner {
+  position: fixed; left: 50%; top: 44%; z-index: 150; pointer-events: none; transform: translate(-50%, -50%);
+  width: min(92%, 760px); padding: 14px 20px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: linear-gradient(90deg, transparent, rgba(18, 48, 110, .93) 14%, rgba(18, 48, 110, .93) 86%, transparent);
+  border-top: 2px solid rgba(120, 180, 255, .8); border-bottom: 2px solid rgba(120, 180, 255, .8); color: #fff; text-align: center;
+}
+.phase-banner.opp { background: linear-gradient(90deg, transparent, rgba(110, 18, 30, .93) 14%, rgba(110, 18, 30, .93) 86%, transparent); border-color: rgba(255, 130, 130, .8); }
+.phase-banner b { font-size: clamp(26px, 4.4vw, 52px); font-style: italic; letter-spacing: .08em; text-shadow: 0 2px 12px rgba(0, 0, 0, .6); line-height: 1.15; }
+.phase-banner small { font-size: 14px; opacity: .85; }
+body.land .phase-banner b { font-size: 26px; }
+body.land .phase-banner { padding: 8px 14px; }

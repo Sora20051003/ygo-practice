@@ -243,7 +243,7 @@ class AutoDuel {
   netCreate() {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
-    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.leaving = 0; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set(); this.justMoved = new Set(); this.used = new Map();
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
@@ -329,6 +329,8 @@ class AutoDuel {
   markUsed(code, key) { if (!this.used.has(code)) this.used.set(code, new Set()); this.used.get(code).add(key); }
 
   respond(res, auto, inner) {
+    // フェイズを進める返答：次のフェイズになるまで「今のフェイズを終わろうとしている」と覚えておく（チェーンの確認で使う）
+    if ((res.type === RES.SELECT_IDLECMD && (res.action === IDLE.TO_BP || res.action === IDLE.TO_EP)) || (res.type === RES.SELECT_BATTLECMD && (res.action === BATTLE.TO_M2 || res.action === BATTLE.TO_EP))) this.leaving = this.phase;
     // 手札などから自分の方法で特殊召喚するとき（「①の方法による特殊召喚は1ターンに1度」の記録用）
     const src = this.pending || this.lastAsk;
     if (!auto && res.type === RES.SELECT_IDLECMD && res.action === IDLE.SPSUMMON && src && src.special_summons) { const c = src.special_summons[res.index]; this.procCode = c && c.location !== LOC.EXTRA ? c.code : 0; }
@@ -378,8 +380,8 @@ class AutoDuel {
   onInfo(m) {
     switch (m.type) {
       case MSG.HINT: if (m.hint_type === 3 && m.player === this.me) this.hint = m.hint; break;
-      case MSG.NEW_TURN: this.used = new Map(); this.turn++; this.turnPlayer = m.player; this.addLog(`---- ${m.player === this.me ? '自分' : '相手'}のターン ----`); break;
-      case MSG.NEW_PHASE: this.phase = m.phase; if (this.turnPlayer === this.me) this.addLog(PHASE_NAME[m.phase] || 'フェイズ'); break;
+      case MSG.NEW_TURN: this.used = new Map(); this.turn++; this.turnPlayer = m.player; this.addLog(`---- ${m.player === this.me ? '自分' : '相手'}のターン ----`); this.events.push({ t: 'turn', player: m.player, turn: this.turn }); break;
+      case MSG.NEW_PHASE: this.phase = m.phase; if (this.turnPlayer === this.me) this.addLog(PHASE_NAME[m.phase] || 'フェイズ'); this.leaving = 0; this.events.push({ t: 'phase', phase: m.phase, player: this.turnPlayer, turn: this.turn }); break;
       case MSG.DRAW: if (m.player === this.me) this.addLog(`ドロー：${m.drawn.map(d => cardName(d.code & 0x7fffffff)).join('、')}`); break;
       case MSG.SUMMONING: this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を通常召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
       case MSG.SPSUMMONING: if (this.procCode === m.code && !this.chain.length) { this.markUsed(m.code, 'proc'); this.procCode = 0; } this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を特殊召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
