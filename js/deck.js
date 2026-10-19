@@ -250,6 +250,29 @@ function setupSearch() {
     });
   }
   for (const id of ['#f-kind', '#f-sort']) $(id).addEventListener('change', run);
+  // 未発売のカードを出さない（レギュレーションの時点で）
+  const hide = $('#f-hide-unrel');
+  hide.checked = store.get('ygo.hideUnrel', true);
+  hide.addEventListener('change', () => { store.set('ygo.hideUnrel', hide.checked); run(); });
+  // 検索の条件を全部消す
+  $('#f-clear').addEventListener('click', () => {
+    $('#q').value = '';
+    $('#qt').value = '';
+    $('#f-kind').value = '';
+    $('#f-sort').value = 'new';
+    for (const seg of ['#q-mode', '#qt-mode']) $$(seg + ' button').forEach(b => b.classList.toggle('on', b.dataset.mode === 'and'));
+    for (const box of $$('details.multi')) {
+      $$('input[type=checkbox]', box).forEach(i => { i.checked = false; });
+      // AND/OR の切り替えがある欄は OR に戻す
+      box.dataset.mode = 'or';
+      $$('.multi-mode button', box).forEach(b => b.classList.toggle('on', b.dataset.mode === 'or'));
+      const clr = box.querySelector('.multi-clear');
+      if (clr) clr.click();   // 見出しの表示を元に戻す
+      box.open = false;
+    }
+    run();
+    toast('検索の条件を全部消しました');
+  });
 }
 
 const SUB_LABELS = [
@@ -317,10 +340,12 @@ function renderResults() {
   const text = $('#qt').value.trim();
   const fmt = curFormat();
   const ctx = regContext(Decks.current());
-  const res = searchCards({
+  let res = searchCards({
     format: fmt, q: $('#q').value, qMode: segMode('#q-mode'), text, textMode: segMode('#qt-mode'), kind: $('#f-kind').value, sub: getMulti('#f-sub'), subMode: $('#f-sub').dataset.mode,
     attr: getMulti('#f-attr'), race: getMulti('#f-race'), level: getMulti('#f-level'), rank: getMulti('#f-rank'), link: getMulti('#f-link'), marker: getMulti('#f-marker'), markerMode: $('#f-marker').dataset.mode, sort: $('#f-sort').value,
   });
+  // 選んだレギュレーションの時点で未発売のカードは出さない（設定でオフにできる）
+  if (hideUnreleased(ctx)) res = res.filter(c => !isUnreleased(c, ctx));
   $('#result-count').textContent = res.length > MAX_RESULTS
     ? `${res.length}件（上位${MAX_RESULTS}件を表示。条件をしぼってください）`
     : `${res.length}件`;
@@ -328,6 +353,8 @@ function renderResults() {
   for (const c of res.slice(0, MAX_RESULTS)) frag.append(resultRow(c, ctx, text));
   box.append(frag);
 }
+
+const hideUnreleased = ctx => !!ctx.date && ($('#f-hide-unrel') || {}).checked !== false;
 
 // 検索結果の1行
 function resultRow(c, ctx, text) {
@@ -376,7 +403,8 @@ async function showRelated(c) {
 
 function relatedGroups(c, text) {
   const fmt = curFormat();
-  const usable = x => x.id !== c.id && !isToken(x) && cardAllowed(x, fmt);
+  const ctx = regContext(Decks.current()), hide = hideUnreleased(ctx);
+  const usable = x => x.id !== c.id && !isToken(x) && cardAllowed(x, fmt) && !(hide && isUnreleased(x, ctx));
   const seen = new Set([c.id]);
   const groups = [];
   const add = (title, list) => {
