@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261019-214438">
+<link rel="stylesheet" href="style.css?v=20261019-215335">
 </head>
 <body>
 <header class="topbar">
@@ -196,6 +196,16 @@
           <div class="row">
             <button class="btn" id="ap-rewind" title="戻した手を1手やり直す（Ctrl+Y）">1手進む ⏩</button>
           </div>
+          <div class="ap-tools" id="ap-tools">
+            <div class="muted small-note">練習の操作（自分のメインフェイズに使えます）</div>
+            <div class="ap-tool-btns">
+              <button class="btn small" data-tool="0" title="デッキの上から1枚引く">1枚ドロー</button>
+              <button class="btn small" data-tool="1" title="デッキから好きなカードを1枚手札に加える">デッキ→手札</button>
+              <button class="btn small" data-tool="2" title="デッキから好きなカードを1枚墓地へ送る">デッキ→墓地</button>
+              <button class="btn small" data-tool="3" title="手札のカードを1枚デッキに戻してシャッフル">手札→デッキ</button>
+              <button class="btn small" data-tool="4" title="デッキをシャッフル">シャッフル</button>
+            </div>
+          </div>
         </div>
         <details class="auto-only proc-settings" id="proc-settings" open>
           <summary><b>⚙ 処理の設定</b></summary>
@@ -377,20 +387,20 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261019-214438"></script>
-<script src="js/consts.js?v=20261019-214438"></script>
-<script src="js/ui.js?v=20261019-214438"></script>
-<script src="js/data.js?v=20261019-214438"></script>
-<script src="js/cloud-config.js?v=20261019-214438"></script>
-<script src="js/auth.js?v=20261019-214438"></script>
-<script src="js/admin.js?v=20261019-214438"></script>
-<script src="js/deck.js?v=20261019-214438"></script>
-<script src="js/board.js?v=20261019-214438"></script>
-<script src="js/engine.js?v=20261019-214438"></script>
-<script src="js/autoplay.js?v=20261019-214438"></script>
-<script src="js/glow.js?v=20261019-214438"></script>
-<script src="js/duel.js?v=20261019-214438"></script>
-<script src="js/imgdeck.js?v=20261019-214438"></script>
-<script src="js/app.js?v=20261019-214438"></script>
+<script src="js/version.js?v=20261019-215335"></script>
+<script src="js/consts.js?v=20261019-215335"></script>
+<script src="js/ui.js?v=20261019-215335"></script>
+<script src="js/data.js?v=20261019-215335"></script>
+<script src="js/cloud-config.js?v=20261019-215335"></script>
+<script src="js/auth.js?v=20261019-215335"></script>
+<script src="js/admin.js?v=20261019-215335"></script>
+<script src="js/deck.js?v=20261019-215335"></script>
+<script src="js/board.js?v=20261019-215335"></script>
+<script src="js/engine.js?v=20261019-215335"></script>
+<script src="js/autoplay.js?v=20261019-215335"></script>
+<script src="js/glow.js?v=20261019-215335"></script>
+<script src="js/duel.js?v=20261019-215335"></script>
+<script src="js/imgdeck.js?v=20261019-215335"></script>
+<script src="js/app.js?v=20261019-215335"></script>
 </body>
 </html>

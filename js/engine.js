@@ -121,10 +121,56 @@ async function loadCardScripts(codes, onStatus) {
 }
 
 // ---------- 表示用の文字 ----------
-const cardName = code => { const c = DB.byId.get(code); return c ? c.name : `カード${code}`; };
+// ---------- 練習ツール（効果を自動処理するときの「1枚ドロー」などのボタン用） ----------
+// エンジンは返答でしか進まないので、除外ゾーンに見えないカードを1枚置き、その「起動効果」としてドローなどを行う。
+// こうすると「1手戻す」や保存からの再開でも、ほかの操作と同じように流し直せる。画面にはこのカードを出さない
+const TOOL_CODE = 999990001;
+const TOOL_LABELS = ['1枚ドロー', 'デッキから手札に加える', 'デッキから墓地へ送る', '手札をデッキに戻す', 'デッキをシャッフル'];
+const TOOL_LUA = `local s,id=GetID()
+function s.initial_effect(c)
+	s.add(c,0,s.drtg,s.drop)
+	s.add(c,1,s.decktg,s.thop)
+	s.add(c,2,s.decktg,s.tgop)
+	s.add(c,3,s.handtg,s.tdop)
+	s.add(c,4,s.decktg,s.shop)
+end
+function s.add(c,n,tg,op)
+	local e=Effect.CreateEffect(c)
+	e:SetDescription(aux.Stringid(id,n))
+	e:SetType(EFFECT_TYPE_IGNITION)
+	e:SetRange(LOCATION_REMOVED)
+	e:SetProperty(EFFECT_FLAG_CANNOT_DISABLE+EFFECT_FLAG_CANNOT_NEGATE+EFFECT_FLAG_UNCOPYABLE+EFFECT_FLAG_CANNOT_INACTIVATE)
+	e:SetTarget(tg)
+	e:SetOperation(op)
+	c:RegisterEffect(e)
+end
+function s.drtg(e,tp,eg,ep,ev,re,r,rp,chk) if chk==0 then return Duel.IsPlayerCanDraw(tp,1) end end
+function s.decktg(e,tp,eg,ep,ev,re,r,rp,chk) if chk==0 then return Duel.GetFieldGroupCount(tp,LOCATION_DECK,0)>0 end end
+function s.handtg(e,tp,eg,ep,ev,re,r,rp,chk) if chk==0 then return Duel.GetFieldGroupCount(tp,LOCATION_HAND,0)>0 end end
+function s.drop(e,tp) Duel.Draw(tp,1,REASON_RULE) end
+function s.thop(e,tp)
+	Duel.Hint(HINT_SELECTMSG,tp,HINTMSG_ATOHAND)
+	local g=Duel.SelectMatchingCard(tp,nil,tp,LOCATION_DECK,0,1,1,nil)
+	if #g>0 then Duel.SendtoHand(g,nil,REASON_RULE) Duel.ShuffleDeck(tp) end
+end
+function s.tgop(e,tp)
+	Duel.Hint(HINT_SELECTMSG,tp,HINTMSG_TOGRAVE)
+	local g=Duel.SelectMatchingCard(tp,nil,tp,LOCATION_DECK,0,1,1,nil)
+	if #g>0 then Duel.SendtoGrave(g,REASON_RULE) Duel.ShuffleDeck(tp) end
+end
+function s.tdop(e,tp)
+	Duel.Hint(HINT_SELECTMSG,tp,HINTMSG_TODECK)
+	local g=Duel.SelectMatchingCard(tp,nil,tp,LOCATION_HAND,0,1,1,nil)
+	if #g>0 then Duel.SendtoDeck(g,nil,SEQ_DECKSHUFFLE,REASON_RULE) end
+end
+function s.shop(e,tp) Duel.ShuffleDeck(tp) end
+`;
+const isToolCode = code => code === TOOL_CODE;
+const cardName = code => { if (code === TOOL_CODE) return '練習ツール'; const c = DB.byId.get(code); return c ? c.name : `カード${code}`; };
 function descText(desc) {
   const d = BigInt(desc || 0);
   const code = Number(d >> 20n), idx = Number(d & 0xfffffn);
+  if (code === TOOL_CODE) return TOOL_LABELS[idx] || '練習ツール';
   if (code) {
     const c = DB.byId.get(code);
     const s = c && c.jaStrs && c.jaStrs[idx];
@@ -144,7 +190,8 @@ const placeText = (con, loc, seq) => {
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null }) {
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false }) {
+    this.tools = tools && !net;   // 練習ツール（ドローなどのボタン）を使う。前に保存した盤面（ツールなし）と並びが変わらないよう、新しく始めたときだけ
     // net：対戦（2人がそれぞれ同じエンジンを動かす）。{ me: 自分の番号（0＝先攻）, decks: [[先攻のmain, extra], [後攻のmain, extra]] }
     this.net = net;
     this.firstDraw = firstDraw;   // 先攻1ターン目もドローする（昔のルールなど）
@@ -195,6 +242,7 @@ class AutoDuel {
     const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
     for (const id of shuffle(rest)) add(me, id, LOC.DECK);
     for (const id of this.extra) add(me, id, LOC.EXTRA);
+    if (this.tools) { Engine.scripts.set(`c${TOOL_CODE}.lua`, TOOL_LUA); add(me, TOOL_CODE, LOC.REMOVED, POS.FU_ATK); }
     if (this.opp) {
       const rest = [...this.opp.main];
       // 相手の初手を指定したとき（誘発練習）：そのカードを手札に置き、残りを引く
@@ -210,7 +258,7 @@ class AutoDuel {
   // 試しに発動してみて、何か起きるか（効果が使える・サーチなどの処理がある）を調べる。
   // 今の対戦をそのまま複製して試すので、本当の盤面は変わらない。index は今の SELECT_IDLECMD の activates の番号
   probeActivate(index) {
-    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net });
+    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net, tools: this.tools });
     try {
       t.create();
       t.run(this.history());
@@ -388,6 +436,7 @@ class AutoDuel {
       case MSG.FLIPSUMMONING: this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を反転召喚`); break;
       case MSG.CHAINING: {
         const link = { code: m.code, con: m.controller, loc: m.location, seq: m.sequence, desc: descText(m.description), n: m.chain_size };
+        if (m.code === TOOL_CODE) { this.chain.push(link); this.addLog(`練習の操作：${link.desc}`); break; }   // 練習ツール：演出やチェーンの表示には出さない
         this.chain.push(link); this.events.push({ t: 'chain', ...link });
         if (m.controller === this.me) { const dc = Number(BigInt(m.description || 0) >> 20n); this.markUsed(m.code, dc && (dc === m.code || dc === (DB.byId.get(m.code) || {}).alias) ? Number(BigInt(m.description) & 0xfffffn) : '?'); }
         this.addLog(`チェーン${m.chain_size}：${this.who(m.controller)}${cardName(m.code)} の効果を発動（${link.desc || '効果'}）`); break;
@@ -472,6 +521,7 @@ class AutoDuel {
 
 // カードの情報（ocgcore 用）
 function engineCardData(code) {
+  if (code === TOOL_CODE) return { code, alias: 0, setcodes: [], type: 0x2, level: 0, attribute: 0, race: 0n, attack: 0, defense: 0, lscale: 0, rscale: 0, link_marker: 0 };   // 練習ツール（魔法カードとして扱う）
   const e = typeof EDO_CARDS !== 'undefined' && EDO_CARDS.d[code];
   if (e) {
     const [alias, setcodes, type, lv, race, attribute, atk, def] = e;
@@ -515,6 +565,7 @@ function skippable(m, duel) {
   }
   if (m.type === MSG.SELECT_CHAIN && !m.forced) {
     if (!m.selects.length) return { type: RES.SELECT_CHAIN, index: null };
+    if (duel && duel.chain.length && duel.chain[duel.chain.length - 1].code === TOOL_CODE) return { type: RES.SELECT_CHAIN, index: null };   // 練習ツールには聞かない
     const mode = duel ? duel.chainMode : 'always';
     const last = duel && duel.chain[duel.chain.length - 1];
     // 召喚したばかり・動いたばかりの自分のカードの誘発効果（「〜した場合に発動できる」）は、チェーン確認の設定に関係なく聞く
@@ -609,7 +660,8 @@ function cpuAnswer(m, duel) {
       return { type: RES.SELECT_IDLECMD, action: m.to_ep ? IDLE.TO_EP : IDLE.TO_BP, index: null };
     }
     case MSG.SELECT_CHAIN:
-      // 相手（練習する人）のターンに、相手が発動したものへの妨害として使う
+      // 練習ツール（ドローなどのボタン）には何もしない
+      if (!m.forced && duel.chain.length && duel.chain[duel.chain.length - 1].code === TOOL_CODE) return { type: RES.SELECT_CHAIN, index: null };
       if (m.selects.length && (m.forced || (duel.turnPlayer === me && duel.chain.length && duel.chain[duel.chain.length - 1].con === me) || (duel.turnPlayer === me && !duel.chain.length && rnd() < 0.5)))
         return { type: RES.SELECT_CHAIN, index: Math.floor(rnd() * m.selects.length) };
       return { type: RES.SELECT_CHAIN, index: m.forced ? 0 : null };
@@ -794,7 +846,7 @@ function cpuThink(m, duel, kind) {
   const hist = duel.history();
   // 手順 path を打ったあとの複製（CPU が次の手を選ぶ場面、または相手の番まで進めたもの）
   const play = path => {
-    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true });
+    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools });
     t.noThink = true;
     t.create();
     t.stopAtCpu = true;   // 流し直したあと、今の判断の場面（CPU の番）で止める

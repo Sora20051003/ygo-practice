@@ -1242,3 +1242,7 @@ body.land .phase-banner { padding: 8px 14px; }
 /* 相手の手札のうち、公開されているカード */
 .opp-hand-pub { width: 22px; cursor: pointer; outline: 2px solid #ffd23f; border-radius: 3px; }
 .opp-hand-pub .cardface { width: 22px; }
+/* 練習の操作（効果を自動処理のとき） */
+.ap-tools { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; border-top: 1px dashed var(--line); }
+.ap-tool-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.ap-tool-btns .btn { padding-left: 4px; padding-right: 4px; }

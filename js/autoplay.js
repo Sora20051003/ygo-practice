@@ -20,7 +20,7 @@ function autoState() {
     m: Array(5).fill(null), emz: [null, null], s: Array(5).fill(null), f: [null],
   };
   const mk = (c, loc, seq, forceUp) => {
-    if (!c || !c.code) return null;
+    if (!c || !c.code || c.code === TOOL_CODE) return null;   // 練習ツールは盤面に出さない
     return {
       uid: autoKey(me, loc, seq), id: c.code,
       faceUp: forceUp || !!(c.position & 5), pos: (loc === LOC.MZONE && c.position & 12) ? 'def' : 'atk',
@@ -235,7 +235,7 @@ function autoPanel() {
   const st = $('#ap-status');
   if (!st) return;
   $('#ap-bp').hidden = $('#ap-ep').hidden = false;
-  if (!d) { $('#ap-locks').hidden = true; st.textContent = '「シャッフルして開始」で始めます'; $('#ap-lp').textContent = ''; $('#ap-bp').disabled = $('#ap-ep').disabled = $('#ap-undo').disabled = $('#ap-open').disabled = $('#ap-rewind').disabled = true; return; }
+  if (!d) { $('#ap-tools').hidden = true; $('#ap-locks').hidden = true; st.textContent = '「シャッフルして開始」で始めます'; $('#ap-lp').textContent = ''; $('#ap-bp').disabled = $('#ap-ep').disabled = $('#ap-undo').disabled = $('#ap-open').disabled = $('#ap-rewind').disabled = true; return; }
   const phase = PHASE_NAME[d.phase] || '';
   let text;
   if (d.ended) text = `対戦終了（${d.ended}）`;
@@ -252,6 +252,8 @@ function autoPanel() {
   if (p && p.type === MSG.SELECT_BATTLECMD) { bp.textContent = 'メインフェイズ2へ'; bp.disabled = !p.to_m2; ep.disabled = !p.to_ep; }
   else { bp.textContent = 'バトルフェイズへ'; bp.disabled = !(p && p.type === MSG.SELECT_IDLECMD && p.to_bp); ep.disabled = !(p && p.type === MSG.SELECT_IDLECMD && p.to_ep); }
   $('#ap-undo').disabled = !d.userMarks.length;
+  $$('#ap-tools button').forEach(b => { b.disabled = toolIndex(+b.dataset.tool) < 0; });
+  $('#ap-tools').hidden = !d.tools;
   $('#ap-rewind').disabled = !(Auto.redoLog && Auto.redoLog.length > d.responses.length);
   $('#ap-open').disabled = !isPrompt(p);
   renderChainBox();
@@ -259,6 +261,21 @@ function autoPanel() {
   locks.innerHTML = '';
   locks.hidden = !d.locks || !d.locks.length;
   if (!locks.hidden) { locks.append(el('li', { class: 'ap-locks-head', text: '今かかっている制限（縛り）' })); for (const l of d.locks) locks.append(el('li', { text: l.text })); }
+}
+
+// 練習の操作：見えない「練習ツール」のカードの効果として行う（エンジンが処理するので、1手戻す・再開でもそのまま流し直せる）
+function toolIndex(n) {
+  const d = Auto.duel, p = d && d.pending;
+  if (!p || p.type !== MSG.SELECT_IDLECMD) return -1;
+  return p.activates.findIndex(a => a.code === TOOL_CODE && Number(BigInt(a.description || 0) & 0xfffffn) === n);
+}
+function autoTool(n) {
+  const d = Auto.duel;
+  if (!d) { toast('先に「シャッフルして開始」で始めてください'); return; }
+  if (!d.tools) { toast('この盤面は前の版で始めたため使えません。「シャッフルして開始」で始め直すと使えます'); return; }
+  const i = toolIndex(n);
+  if (i < 0) { toast(d.pending && d.pending.type === MSG.SELECT_IDLECMD ? `今は「${TOOL_LABELS[n]}」ができません` : '自分のメインフェイズで、選択中でないときに使えます'); return; }
+  autoRespond({ type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index: i });
 }
 
 function autoPhase(which) {
@@ -317,7 +334,7 @@ async function autoStart(handIds) {
     try { await autoPrepare(opp); } catch (e) { showError('相手のデッキを準備できませんでした', e); return; }
   }
   Auto.redoLog = null;
-  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw() });
+  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw(), tools: true });
   Auto.deckId = deck.id;
   Auto.duel.cpuSlow = cpuDelay() > 0;
   try { Auto.duel.start(); } catch (e) { console.error(e); showError('開始できませんでした', e); Auto.duel = null; renderBoard(); return; }
@@ -345,7 +362,7 @@ function autoSave() {
   const items = d.history();
   try {
     store.set('ygo.autoBoard', JSON.parse(JSON.stringify({
-      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, items, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode, autoTrigger: d.autoTrigger, firstDraw: d.firstDraw,
+      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, items, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode, autoTrigger: d.autoTrigger, firstDraw: d.firstDraw, tools: d.tools,
     }, bigReplacer)));
   } catch { /* 保存できなくても続けられる */ }
 }
@@ -354,7 +371,7 @@ async function autoResume() {
   try { saved = JSON.parse(JSON.stringify(store.get('ygo.autoBoard', null)), bigReviver); } catch { saved = null; }
   if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
   try { await autoPrepare(saved); if (saved.opp) await autoPrepare(saved.opp); } catch { return; }
-  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: !!saved.autoTrigger && store.get('ygo.autoTrigger', false), firstDraw: !!saved.firstDraw });
+  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: !!saved.autoTrigger && store.get('ygo.autoTrigger', false), firstDraw: !!saved.firstDraw, tools: !!saved.tools });
   Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;
   try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
   if (autoActive()) autoAfter(true);
@@ -406,6 +423,8 @@ function setupAutoPlay() {
   const paintSpeed = () => { const v = store.get('ygo.cpuSpeed', 'slow'); $$('#ap-cpuspeed button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); };
   $$('#ap-cpuspeed button').forEach(b => { b.onclick = () => { store.set('ygo.cpuSpeed', b.dataset.v); paintSpeed(); if (Auto.duel) Auto.duel.cpuSlow = cpuDelay() > 0; }; });
   paintSpeed();
+  // 練習の操作（1枚ドローなど）
+  $$('#ap-tools button').forEach(b => { b.onclick = () => autoTool(+b.dataset.tool); });
   // 左の欄の「処理の設定」：たたんだかどうかを覚えておく
   const proc = $('#proc-settings');
   if (proc) { proc.open = store.get('ygo.procOpen', true); proc.addEventListener('toggle', () => store.set('ygo.procOpen', proc.open)); }
@@ -635,7 +654,7 @@ function showNextActivation() {
 function renderChainBox() {
   let box = $('#ap-chainbox');
   const d = Auto.duel;
-  const chain = d && isPrompt(d.pending) ? d.chain : [];
+  const chain = d && isPrompt(d.pending) ? d.chain.filter(c => c.code !== TOOL_CODE) : [];
   requestAnimationFrame(drawChainLinks);   // 盤面を描き終えてから、カードどうしを鎖でつなぐ
   if (!chain.length) { if (box) box.remove(); return; }
   if (!box) { box = el('div', { class: 'ap-chainbox', id: 'ap-chainbox' }); $('.board-center').append(box); }
@@ -678,7 +697,7 @@ function drawChainLinks() {
   if (old) old.remove();
   const d = Auto.duel;
   if (!d || !autoActive() || !d.chain || !d.chain.length || $('#view-board').hidden) return;
-  const pts = d.chain.map(c => ({ c, r: chainNodeRect(c) })).filter(p => p.r).map(p => ({ c: p.c, x: p.r.left + p.r.width / 2, y: p.r.top + p.r.height / 2 }));
+  const pts = d.chain.filter(c => c.code !== TOOL_CODE).map(c => ({ c, r: chainNodeRect(c) })).filter(p => p.r).map(p => ({ c: p.c, x: p.r.left + p.r.width / 2, y: p.r.top + p.r.height / 2 }));
   if (!pts.length) return;
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');
