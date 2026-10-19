@@ -39,8 +39,8 @@ const deckFormat = d => (d && FORMATS[d.format] ? d.format : 'ocg');
 const curFormat = () => deckFormat(Decks.current());
 
 // デッキの中の、ルール違反（使えないカード・枚数オーバー）を調べる
-function deckProblems(deck) {
-  const ctx = regContext(deck);
+// ctx を渡すと、その判定の材料で調べる（対戦の部屋で共有したオリジナルのレギュレーションなど）
+function deckProblems(deck, ctx = regContext(deck)) {
   const counts = new Map();
   for (const sec of ['main', 'extra', 'side']) for (const id of deck[sec]) {
     const c = DB.byId.get(id);
@@ -50,7 +50,7 @@ function deckProblems(deck) {
   for (const { c, n } of counts.values()) {
     const l = limitIn(c, ctx);
     if (!cardAllowed(c, ctx.fmt)) notAllowed.push(c.name);
-    else if (n > l) over.push(`${c.name}（${limitLabel(c, ctx)}${l ? `：${l}枚まで` : ''}）`);
+    else if (n > l) { const lb = limitLabel(c, ctx); over.push(`${c.name}（${lb ? lb + (l ? `：${l}枚まで` : '') : `${l}枚まで`}）`); }
   }
   return { notAllowed, over };
 }

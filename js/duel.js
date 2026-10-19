@@ -551,7 +551,13 @@ function enterRoom(code) {
   store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
   Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => toast('通信エラー：' + e.message) });
   // 部屋を作った人：持ち時間を部屋に書く（最初は一人回しの制限時間の設定と同じ）
-  if (Duel.t.isHost && Duel.t.room && Duel.t.room.timeLimit === undefined) { const dk = Decks.get(Duel.deckId); const dr = dk && dk.reg && !dk.reg.startsWith('custom:') ? dk.reg : 'latest'; Duel.t.updateRoom({ timeLimit: typeof timeLimit === 'function' ? timeLimit() : 0, clock: {}, mode: 'auto', reg: { fmt: dk ? deckFormat(dk) : 'ocg', reg: dr } }); }
+  if (Duel.t.isHost && Duel.t.room && Duel.t.room.timeLimit === undefined) {
+    // 最初のレギュレーションは、部屋を作った人のデッキと同じ（オリジナルなら中身ごと）
+    const dk = Decks.get(Duel.deckId), dr = (dk && dk.reg) || 'latest', cr = dr.startsWith('custom:') ? customReg(dr.slice(7)) : null;
+    const reg = cr ? { fmt: cr.base ? cr.base.fmt : (dk ? deckFormat(dk) : 'ocg'), reg: 'custom', custom: { id: cr.id, name: cr.name, base: cr.base || null, overrides: cr.overrides || {} } }
+      : { fmt: dk ? deckFormat(dk) : 'ocg', reg: dr.startsWith('custom:') ? 'latest' : dr };
+    Duel.t.updateRoom({ timeLimit: typeof timeLimit === 'function' ? timeLimit() : 0, clock: {}, mode: 'auto', reg });
+  }
   renderDuelLobby();
 }
 
@@ -1146,16 +1152,24 @@ function duelModeSetting(r) {
 const roomReg = r => (r && r.reg) || { fmt: 'ocg', reg: 'latest' };
 function regLabel(x) {
   if (!x || x.reg === 'none') return '制限なし（禁止・制限・発売日を気にしない）';
+  if (x.reg === 'custom' && x.custom) return `★ ${x.custom.name}（${customRegNote(x.custom)}）`;
   const f = FORMATS[x.fmt] || FORMATS.ocg;
   if (x.reg === 'latest') { const d = DB.banlists[x.fmt] && DB.banlists[x.fmt].date; return `${f.label}・最新${d ? `（${d.replace(/-/g, '/')}〜）` : ''}`; }
   return `${f.label}・${x.reg.replace(/-/g, '/')}〜 のリスト`;
+}
+// 部屋のレギュレーションの判定の材料。オリジナルは部屋に入っている中身（部屋を作った人のもの）を使う
+function roomRegContext(x, tmp) {
+  if (x.reg !== 'custom' || !x.custom) return regContext(tmp);
+  const cr = x.custom;
+  if (!cr.base) return { fmt: x.fmt, reg: 'custom', custom: cr };
+  return { ...baseContext(cr.base.fmt, cr.base.reg, x.fmt), reg: 'custom', custom: cr };
 }
 // 部屋のレギュレーションで見たときの、そのデッキの問題（使えないカード・枚数オーバー）
 const roomRegLoading = new Set();
 function deckCheckForRoom(deck, r) {
   const x = roomReg(r);
   const tmp = { ...deck, format: x.fmt, reg: x.reg };
-  const ctx = regContext(tmp);
+  const ctx = roomRegContext(x, tmp);
   if (ctx.loading) {
     const key = ctx.src.join(':');
     if (!roomRegLoading.has(key)) {
@@ -1164,7 +1178,7 @@ function deckCheckForRoom(deck, r) {
     }
     return { loading: true };
   }
-  return deckProblems(tmp);
+  return deckProblems(tmp, ctx);
 }
 function duelDeckSetting(r, amReady) {
   const me = Duel.me.uid;
@@ -1182,7 +1196,10 @@ function duelDeckSetting(r, amReady) {
 function duelRegSetting(r) {
   const x = roomReg(r);
   const isHost = r && r.host === Duel.me.uid;
-  if (!isHost) return el('p', { class: 'muted', text: `レギュレーション：${regLabel(x)}（部屋を作った人が決めます）` });
+  if (!isHost) return el('div', null,
+    el('p', { class: 'muted', text: `レギュレーション：${regLabel(x)}（部屋を作った人が決めます）` }),
+    // 相手のオリジナルを、自分のレギュレーションとして保存できる（デッキ作成で使える）
+    x.reg === 'custom' && x.custom ? el('button', { class: 'btn small', text: customReg(x.custom.id) ? '✓ 自分のオリジナルに保存済み（上書きする）' : 'このオリジナルを自分にも保存', onclick: () => { saveCustomReg({ id: x.custom.id, name: x.custom.name, base: x.custom.base || null, overrides: x.custom.overrides || {} }); toast(`「${x.custom.name}」を保存しました（デッキ作成のレギュレーションで選べます）`); renderDuelLobby(); } }) : null);
   const sel = el('select', { class: 'full' });
   for (const fmt of Object.keys(FORMATS)) {
     const f = FORMATS[fmt];
@@ -1193,10 +1210,25 @@ function duelRegSetting(r) {
     for (const d of (DB.regDates[fmt] || []).filter(d => d !== latest && d <= today)) g.append(el('option', { value: `${fmt}|${d}`, text: `${f.label}・${d.replace(/-/g, '/')}〜（過去のリスト）` }));
     sel.append(g);
   }
+  // 自分（部屋を作った人）のオリジナルのレギュレーション：中身ごと部屋に入れて、相手と共有する
+  const mine = customRegs();
+  if (mine.length) {
+    const g = el('optgroup', { label: 'オリジナル（中身を相手と共有します）' });
+    for (const cr of mine) g.append(el('option', { value: 'custom|' + cr.id, text: `★ ${cr.name}` }));
+    sel.append(g);
+  }
   sel.append(el('option', { value: 'ocg|none', text: regLabel({ reg: 'none' }) }));
-  sel.value = x.reg === 'none' ? 'ocg|none' : `${x.fmt}|${x.reg}`;
+  sel.value = x.reg === 'none' ? 'ocg|none' : x.reg === 'custom' ? 'custom|' + (x.custom && x.custom.id) : `${x.fmt}|${x.reg}`;
+  if (x.reg === 'custom' && sel.value === '') sel.append(el('option', { value: 'custom|' + (x.custom && x.custom.id), text: regLabel(x), selected: true }));
   // 変えたら2人とも準備OKをやり直す（違うルールで準備OKのままにならないように）
-  sel.addEventListener('change', () => { const [fmt, reg] = sel.value.split('|'); Duel.t.updateRoom({ reg: { fmt, reg }, ready: {} }); });
+  sel.addEventListener('change', () => {
+    const [a, b] = sel.value.split('|');
+    if (a === 'custom') {
+      const cr = customReg(b);
+      if (!cr) return;
+      Duel.t.updateRoom({ reg: { fmt: cr.base ? cr.base.fmt : 'ocg', reg: 'custom', custom: { id: cr.id, name: cr.name, base: cr.base || null, overrides: cr.overrides || {} } }, ready: {} });
+    } else Duel.t.updateRoom({ reg: { fmt: a, reg: b }, ready: {} });
+  });
   return el('label', { class: 'auth-field' }, 'レギュレーション（2人とも同じルールで対戦します）', sel);
 }
 function duelDeckCheck(deck, r) {
