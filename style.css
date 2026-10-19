@@ -1191,3 +1191,9 @@ body.land .cs-rope span.v { width: 36px; height: 9px; border-width: 4px; }
 .rel-head span { flex: 1; min-width: 0; word-break: break-all; }
 .rel-group { padding: 6px 8px; margin-top: 4px; background: var(--panel-2); color: var(--accent, #6ea8ff); font-size: 13px; font-weight: 700; border-radius: 6px; }
 .rel-empty { padding: 10px 8px; }
+/* アカウントの管理（端末・操作） */
+.adm-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 16px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); word-break: break-all; }
+.adm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.adm-table tr.revoked td { opacity: .55; }
+.adm-table.adm-dev td { white-space: normal; }
+.adm-table.adm-dev td:last-child { white-space: nowrap; text-align: right; }

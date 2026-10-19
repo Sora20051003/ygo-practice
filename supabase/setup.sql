@@ -142,3 +142,78 @@ end $$;
 
 -- 古い部屋は消してよい（7日より前のもの）。必要なら手で実行：
 -- delete from public.rooms where created_at < now() - interval '7 days';
+
+-- ========== ログインしている端末（1台ごと） ==========
+-- 故障・紛失した端末を、管理者（または本人）があとからログアウトさせるための記録
+create table if not exists public.user_devices (
+  uid uuid not null references auth.users on delete cascade,
+  device_id text not null,            -- 端末ごとに作るランダムな番号
+  device text, version text,
+  session_id uuid,                    -- その端末のログイン（auth.sessions の id）
+  first_seen timestamptz not null default now(),
+  last_seen timestamptz,
+  revoked_at timestamptz,             -- 入っていたら、その端末はログアウトさせられた
+  primary key (uid, device_id)
+);
+alter table public.user_devices enable row level security;
+drop policy if exists "devices: read own or admin" on public.user_devices;
+create policy "devices: read own or admin" on public.user_devices for select to authenticated using (uid = auth.uid() or public.is_admin());
+drop policy if exists "devices: insert own" on public.user_devices;
+create policy "devices: insert own" on public.user_devices for insert to authenticated with check (uid = auth.uid() and revoked_at is null);
+drop policy if exists "devices: update own" on public.user_devices;
+create policy "devices: update own" on public.user_devices for update to authenticated using (uid = auth.uid()) with check (uid = auth.uid());
+drop policy if exists "devices: delete own or admin" on public.user_devices;
+create policy "devices: delete own or admin" on public.user_devices for delete to authenticated using (uid = auth.uid() or public.is_admin());
+-- ログアウトさせられた端末が、自分で「ログアウト済み」を消せないようにする
+create or replace function public.keep_revoked() returns trigger language plpgsql as $$
+begin
+  if old.revoked_at is not null and new.revoked_at is null and not public.is_admin() then new.revoked_at := old.revoked_at; end if;
+  return new;
+end $$;
+drop trigger if exists keep_revoked on public.user_devices;
+create trigger keep_revoked before update on public.user_devices for each row execute function public.keep_revoked();
+
+-- 管理者はデッキを読める（バックアップを取ってあげるため）
+drop policy if exists "decks: admin read" on public.user_decks;
+create policy "decks: admin read" on public.user_decks for select to authenticated using (public.is_admin());
+
+-- 1台の端末をログアウトさせる（管理者、または本人）。その端末のログインもサーバー側で無効にする
+create or replace function public.revoke_device(p_uid uuid, p_device_id text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare sid uuid;
+begin
+  if not (public.is_admin() or p_uid = auth.uid()) then raise exception 'NOT_ALLOWED'; end if;
+  update public.user_devices set revoked_at = now() where uid = p_uid and device_id = p_device_id returning session_id into sid;
+  if sid is not null then delete from auth.sessions where id = sid and user_id = p_uid; end if;
+end $$;
+
+-- すべての端末からログアウトさせる（管理者だけ）
+create or replace function public.admin_signout_all(p_uid uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'NOT_ALLOWED'; end if;
+  update public.user_devices set revoked_at = now() where uid = p_uid and revoked_at is null;
+  delete from auth.sessions where user_id = p_uid;
+end $$;
+
+-- 仮のパスワードを決める（管理者だけ。メールも使えなくなった人のため）
+create or replace function public.admin_set_password(p_uid uuid, p_password text) returns void
+  language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if not public.is_admin() then raise exception 'NOT_ALLOWED'; end if;
+  if length(coalesce(p_password, '')) < 6 then raise exception 'SHORT_PASSWORD'; end if;
+  update auth.users set encrypted_password = extensions.crypt(p_password, extensions.gen_salt('bf')), updated_at = now() where id = p_uid;
+end $$;
+
+-- 登録されている全アカウント（管理者だけ。まだ一度も記録のない人も含む）
+create or replace function public.admin_users() returns table (uid uuid, email text, created_at timestamptz, last_sign_in_at timestamptz, confirmed boolean)
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'NOT_ALLOWED'; end if;
+  return query select u.id, u.email::text, u.created_at, u.last_sign_in_at, (u.email_confirmed_at is not null) from auth.users u order by u.created_at;
+end $$;
+
+grant execute on function public.revoke_device(uuid, text) to authenticated;
+grant execute on function public.admin_signout_all(uuid) to authenticated;
+grant execute on function public.admin_set_password(uuid, text) to authenticated;
+grant execute on function public.admin_users() to authenticated;

@@ -51,6 +51,8 @@ async function initAuth() {
   // パスワードを忘れた人がメールのリンクから戻ってきたとき：新しいパスワードを決めてもらう
   sb.auth.onAuthStateChange(event => {
     if (event === 'PASSWORD_RECOVERY') setTimeout(askNewPassword, 300);
+    // 自分で「ログアウト」を押していないのにログインが切れた（ほかの端末や管理者がこの端末をログアウトさせた）
+    if (event === 'SIGNED_OUT' && Online.user && !Online.loggingOut && typeof forcedLogout === 'function') forcedLogout();
   });
   showLoading('ログイン状態を確認中…');
   const { data } = await sb.auth.getSession();
@@ -156,7 +158,9 @@ function renderUserBox() {
   box.append(
     el('span', { id: 'save-state', class: 'save-state saved', text: '✓ 保存済み' }),
     el('span', { class: 'user-name', title: u.email || '', text: u.displayName || u.email || 'ログイン中' }),
+    ...(typeof openMyDevices === 'function' ? [el('button', { class: 'btn small', text: '📱 端末', title: 'このアカウントでログインしている端末（なくした・壊れた端末をログアウトさせる）', onclick: openMyDevices })] : []),
     el('button', { class: 'btn small', text: 'ログアウト', onclick: async () => {
+      Online.loggingOut = true;
       clearTimeout(Online.saveTimer);
       await Online.sb.auth.signOut();
       location.reload();
