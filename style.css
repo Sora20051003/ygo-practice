@@ -1230,3 +1230,4 @@ body:not(.land) #view-board .board-center { container-type: inline-size; }
 .phase-banner small { font-size: 14px; opacity: .85; }
 body.land .phase-banner b { font-size: 26px; }
 body.land .phase-banner { padding: 8px 14px; }
+.ok-note { color: #2fa866; margin: 2px 0; }

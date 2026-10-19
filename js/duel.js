@@ -551,7 +551,7 @@ function enterRoom(code) {
   store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
   Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => toast('通信エラー：' + e.message) });
   // 部屋を作った人：持ち時間を部屋に書く（最初は一人回しの制限時間の設定と同じ）
-  if (Duel.t.isHost && Duel.t.room && Duel.t.room.timeLimit === undefined) Duel.t.updateRoom({ timeLimit: typeof timeLimit === 'function' ? timeLimit() : 0, clock: {}, mode: 'auto' });
+  if (Duel.t.isHost && Duel.t.room && Duel.t.room.timeLimit === undefined) { const dk = Decks.get(Duel.deckId); const dr = dk && dk.reg && !dk.reg.startsWith('custom:') ? dk.reg : 'latest'; Duel.t.updateRoom({ timeLimit: typeof timeLimit === 'function' ? timeLimit() : 0, clock: {}, mode: 'auto', reg: { fmt: dk ? deckFormat(dk) : 'ocg', reg: dr } }); }
   renderDuelLobby();
 }
 
@@ -877,10 +877,17 @@ function renderDuelLobby() {
       : el('div', { class: 'stack' },
         duelModeSetting(r),
         duelTimeSetting(r),
-        el('p', { text: `使うデッキ：${deck ? deck.name : '（未選択）'}（メイン${deck ? deck.main.length : 0}・EX${deck ? deck.extra.length : 0}）` }),
+        duelRegSetting(r),
+        duelDeckSetting(r, amReady),
+        duelDeckCheck(deck, r),
         el('button', {
           class: 'btn ' + (amReady ? '' : 'primary'), text: amReady ? '準備OKを取り消す' : '準備OK', disabled: !r || !deck || deck.main.length < 1,
-          onclick: () => Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra } : null }),
+          onclick: () => {
+            // レギュレーションに合っていないデッキで準備OKにするときは確かめる
+            const p = !amReady && deck ? deckCheckForRoom(deck, r) : null;
+            if (p && !p.loading && (p.notAllowed.length || p.over.length) && !confirm('このデッキは選んだレギュレーションに合っていません。このまま準備OKにしますか？')) return;
+            Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra } : null });
+          },
         }),
         el('p', { class: 'muted small-note', text: '2人とも「準備OK」になると、コイントスで先攻を決めて対戦が始まります。' })),
     el('button', { class: 'btn small danger', text: '部屋を出る', onclick: leaveRoom })));
@@ -1132,4 +1139,74 @@ function duelModeSetting(r) {
       onclick: () => Duel.t.updateRoom({ mode: m }),
     }))),
     el('p', { class: 'muted small-note', text: mode === 'auto' ? '召喚・効果の発動・チェーン・ダメージなどをルールどおり自動で処理します（対象などは自分で選びます）。' : '一人回しの手動モードと同じく、カードを自分で動かします。' }));
+}
+
+// ---------- 対戦の直前に選ぶ：デッキとレギュレーション ----------
+// レギュレーションは部屋を作った人が決め、部屋（room.reg = { fmt, reg }）で2人に共有する
+const roomReg = r => (r && r.reg) || { fmt: 'ocg', reg: 'latest' };
+function regLabel(x) {
+  if (!x || x.reg === 'none') return '制限なし（禁止・制限・発売日を気にしない）';
+  const f = FORMATS[x.fmt] || FORMATS.ocg;
+  if (x.reg === 'latest') { const d = DB.banlists[x.fmt] && DB.banlists[x.fmt].date; return `${f.label}・最新${d ? `（${d.replace(/-/g, '/')}〜）` : ''}`; }
+  return `${f.label}・${x.reg.replace(/-/g, '/')}〜 のリスト`;
+}
+// 部屋のレギュレーションで見たときの、そのデッキの問題（使えないカード・枚数オーバー）
+const roomRegLoading = new Set();
+function deckCheckForRoom(deck, r) {
+  const x = roomReg(r);
+  const tmp = { ...deck, format: x.fmt, reg: x.reg };
+  const ctx = regContext(tmp);
+  if (ctx.loading) {
+    const key = ctx.src.join(':');
+    if (!roomRegLoading.has(key)) {
+      roomRegLoading.add(key);
+      Promise.all([loadRegulation(...ctx.src), loadReleaseDates()]).then(renderDuelLobby, e => toast('リストを読み込めませんでした：' + e.message)).finally(() => roomRegLoading.delete(key));
+    }
+    return { loading: true };
+  }
+  return deckProblems(tmp);
+}
+function duelDeckSetting(r, amReady) {
+  const me = Duel.me.uid;
+  const sel = el('select', { class: 'full' }, Decks.list.map(d => el('option', { value: d.id, text: `${d.name}（${FORMATS[deckFormat(d)].short}・メイン${d.main.length}・EX${d.extra.length}）`, selected: d.id === Duel.deckId })));
+  sel.addEventListener('change', () => {
+    Duel.deckId = sel.value;
+    const cur = store.get('ygo.duel.current', null);
+    if (cur) store.set('ygo.duel.current', { ...cur, deckId: Duel.deckId });
+    // 準備OKのあとでデッキを変えたら、準備OKを取り消す（相手に古いデッキが伝わらないように）
+    if (amReady) Duel.t.updateRoom({ ['ready.' + me]: false });
+    renderDuelLobby();
+  });
+  return el('label', { class: 'auth-field' }, '使うデッキ', sel);
+}
+function duelRegSetting(r) {
+  const x = roomReg(r);
+  const isHost = r && r.host === Duel.me.uid;
+  if (!isHost) return el('p', { class: 'muted', text: `レギュレーション：${regLabel(x)}（部屋を作った人が決めます）` });
+  const sel = el('select', { class: 'full' });
+  for (const fmt of Object.keys(FORMATS)) {
+    const f = FORMATS[fmt];
+    const g = el('optgroup', { label: f.label });
+    g.append(el('option', { value: `${fmt}|latest`, text: regLabel({ fmt, reg: 'latest' }) }));
+    const latest = DB.banlists[fmt] && DB.banlists[fmt].date;
+    const today = new Date().toISOString().slice(0, 10);
+    for (const d of (DB.regDates[fmt] || []).filter(d => d !== latest && d <= today)) g.append(el('option', { value: `${fmt}|${d}`, text: `${f.label}・${d.replace(/-/g, '/')}〜（過去のリスト）` }));
+    sel.append(g);
+  }
+  sel.append(el('option', { value: 'ocg|none', text: regLabel({ reg: 'none' }) }));
+  sel.value = x.reg === 'none' ? 'ocg|none' : `${x.fmt}|${x.reg}`;
+  // 変えたら2人とも準備OKをやり直す（違うルールで準備OKのままにならないように）
+  sel.addEventListener('change', () => { const [fmt, reg] = sel.value.split('|'); Duel.t.updateRoom({ reg: { fmt, reg }, ready: {} }); });
+  return el('label', { class: 'auth-field' }, 'レギュレーション（2人とも同じルールで対戦します）', sel);
+}
+function duelDeckCheck(deck, r) {
+  if (!deck) return null;
+  const p = deckCheckForRoom(deck, r);
+  if (p.loading) return el('p', { class: 'muted small-note', text: 'レギュレーションを確認中…' });
+  const bad = [];
+  if (p.notAllowed.length) bad.push(`使えないカード：${p.notAllowed.join('、')}`);
+  if (p.over.length) bad.push(`枚数オーバー：${p.over.join('、')}`);
+  if (deck.main.length < 40) bad.push(`メインデッキが${deck.main.length}枚です（40枚以上必要）`);
+  return bad.length ? el('div', { class: 'warn small-note' }, bad.map(t => el('div', { text: '⚠ ' + t })))
+    : el('p', { class: 'ok-note small-note', text: '✓ このデッキは選んだレギュレーションで使えます' });
 }
