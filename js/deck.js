@@ -634,7 +634,7 @@ function encodeYdkePart(ids) {
 }
 const toYdke = deck => `ydke://${encodeYdkePart(deck.main)}!${encodeYdkePart(deck.extra)}!${encodeYdkePart(deck.side)}!`;
 
-// ---------- このアプリのデッキコード（YGO1-…） ----------
+// ---------- このアプリのデッキコード（YGO2-…、古い YGO1-…） ----------
 // 中身：版(1) / デッキ名(UTF-8) / メイン・EX・サイドの「カードの種類数, (前のカード番号との差×4＋枚数)…」を
 // 可変長の数値で並べ、URLに使える Base64 にしたもの。サーバー不要で、コードだけでデッキを再現できる。
 const DECK_CODE_PREFIX = 'YGO1-';
@@ -655,9 +655,9 @@ function readVarint(bytes, pos) {
 const b64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unb64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), ch => ch.charCodeAt(0));
 
-// 先頭の1バイトでルールを表す（1 = OCG、2 = マスターデュエル）
+// 古い形式（YGO1-）。読み込みは今も対応。先頭の1バイトでルールを表す（1 = OCG、2 = マスターデュエル）
 const CODE_FORMAT = { ocg: 1, md: 2 };
-function encodeDeckCode(deck) {
+function encodeDeckCode1(deck) {
   const bytes = [CODE_FORMAT[deckFormat(deck)] || 1];
   const name = new TextEncoder().encode(deck.name).slice(0, 60);
   pushVarint(bytes, name.length); bytes.push(...name);
@@ -678,7 +678,93 @@ function encodeDeckCode(deck) {
   return DECK_CODE_PREFIX + b64url(bytes);
 }
 
+// ---------- 短いデッキコード（YGO2-…） ----------
+// YGO1 と同じ中身を、バイト単位ではなくビット単位で詰める：
+//  ・カード番号の差は「指数ゴロム符号」（小さい数ほど短い）。区切りごとに一番短くなる長さの目安(k)を選ぶ
+//  ・枚数は2ビット
+//  ・デッキ名はかな1文字10ビット、英数字8ビット、漢字など18ビット（UTF-8 だと、かな・漢字は24ビット）
+const DECK_CODE2_PREFIX = 'YGO2-';
+class BitWriter {
+  constructor() { this.bytes = []; this.n = 0; }
+  bit(b) { if (!(this.n & 7)) this.bytes.push(0); if (b) this.bytes[this.bytes.length - 1] |= 0x80 >> (this.n & 7); this.n++; }
+  bits(v, len) { for (let i = len - 1; i >= 0; i--) this.bit(Math.floor(v / 2 ** i) % 2); }
+  eg(v, k) { const w = v + 2 ** k; const len = Math.floor(Math.log2(w)) + 1; for (let i = 0; i < len - k - 1; i++) this.bit(0); this.bits(w, len); }
+}
+class BitReader {
+  constructor(bytes) { this.bytes = bytes; this.n = 0; }
+  bit() { if (this.n >= this.bytes.length * 8) throw new Error('コードが途中で切れています'); const b = (this.bytes[this.n >> 3] >> (7 - (this.n & 7))) & 1; this.n++; return b; }
+  bits(len) { let v = 0; for (let i = 0; i < len; i++) v = v * 2 + this.bit(); return v; }
+  eg(k) { let z = 0; while (!this.bit()) { if (++z > 40) throw new Error('コードが正しくありません'); } return (2 ** (z + k) + this.bits(z + k)) - 2 ** k; }
+}
+const egCost = (v, k) => 2 * Math.floor(Math.log2(v + 2 ** k)) - k + 1;
+
+function encodeDeckCode(deck) {
+  const w = new BitWriter();
+  w.bits(CODE_FORMAT[deckFormat(deck)] || 1, 2);
+  // デッキ名（最大40文字）
+  const name = [...(deck.name || '')].join('').slice(0, 40);
+  w.eg(name.length, 3);
+  for (let i = 0; i < name.length; i++) {
+    const ch = name.charCodeAt(i);
+    if (ch < 0x80) { w.bit(0); w.bits(ch, 7); }
+    else if (ch >= 0x3000 && ch <= 0x30ff) { w.bit(1); w.bit(0); w.bits(ch - 0x3000, 8); }
+    else { w.bit(1); w.bit(1); w.bits(ch, 16); }
+  }
+  for (const sec of ['main', 'extra', 'side']) {
+    const counts = new Map();
+    for (const id of deck[sec]) { const c = DB.byId.get(id); if (c && c.cid) counts.set(c.cid, (counts.get(c.cid) || 0) + 1); }
+    const entries = [...counts].sort((a, b) => a[0] - b[0]);
+    w.eg(entries.length, 2);
+    if (!entries.length) continue;
+    let prev = 0;
+    const deltas = entries.map(([cid]) => { const d = cid - prev - 1; prev = cid; return d; });
+    // 一番短くなる k を選ぶ（0〜15）
+    let bestK = 0, best = Infinity;
+    for (let k = 0; k < 16; k++) { const cost = deltas.reduce((s, d) => s + egCost(d, k), 0); if (cost < best) { best = cost; bestK = k; } }
+    w.bits(bestK, 4);
+    entries.forEach(([, n], i) => { w.eg(deltas[i], bestK); w.bits(Math.min(n, 3), 2); });
+  }
+  const reg = deck.reg || 'latest';
+  w.eg(reg === 'latest' || reg.startsWith('custom:') ? 0 : reg === 'none' ? 1 : Math.round((Date.parse(reg) - Date.UTC(2000, 0, 1)) / 86400000) + 2, 0);
+  return DECK_CODE2_PREFIX + b64url(w.bytes);
+}
+
+function decodeDeckCode2(code) {
+  const r = new BitReader(unb64url(code.slice(DECK_CODE2_PREFIX.length).trim()));
+  const head = r.bits(2);
+  const format = Object.keys(CODE_FORMAT).find(k => CODE_FORMAT[k] === head);
+  if (!format) throw new Error('このアプリでは読めない形式のコードです');
+  const len = r.eg(3);
+  if (len > 40) throw new Error('コードが正しくありません');
+  let name = '';
+  for (let i = 0; i < len; i++) {
+    if (!r.bit()) name += String.fromCharCode(r.bits(7));
+    else if (!r.bit()) name += String.fromCharCode(0x3000 + r.bits(8));
+    else name += String.fromCharCode(r.bits(16));
+  }
+  const deck = { name, format, main: [], extra: [], side: [] }, unknown = [];
+  for (const sec of ['main', 'extra', 'side']) {
+    const kinds = r.eg(2);
+    if (!kinds) continue;
+    if (kinds > 200) throw new Error('コードが正しくありません');
+    const k = r.bits(4);
+    let prev = 0;
+    for (let i = 0; i < kinds; i++) {
+      const cid = prev + r.eg(k) + 1;
+      prev = cid;
+      const n = r.bits(2);
+      const c = DB.byCid.get(cid);
+      if (!c) { unknown.push(`カード番号 ${cid}`); continue; }
+      for (let j = 0; j < n; j++) deck[sec].push(c.id);
+    }
+  }
+  const v = r.eg(0);
+  deck.reg = v === 0 ? 'latest' : v === 1 ? 'none' : new Date(Date.UTC(2000, 0, 1) + (v - 2) * 86400000).toISOString().slice(0, 10);
+  return { deck, unknown };
+}
+
 function decodeDeckCode(code) {
+  if (code.startsWith(DECK_CODE2_PREFIX)) return decodeDeckCode2(code);
   const bytes = unb64url(code.replace(DECK_CODE_PREFIX, '').trim());
   const pos = { i: 0 };
   const head = bytes[pos.i++];
@@ -708,7 +794,7 @@ function decodeDeckCode(code) {
 
 // 文章やリンクの中からデッキコードを探す（共有リンクの #deck=… にも対応）
 function findDeckCode(text) {
-  const m = (text || '').match(/YGO1-[A-Za-z0-9_-]+/);
+  const m = (text || '').match(/YGO[12]-[A-Za-z0-9_-]+/);
   return m ? m[0] : null;
 }
 
@@ -1051,7 +1137,7 @@ function openDeckCode() {
 }
 
 function openCodeImport() {
-  const input = el('textarea', { class: 'full code-box', rows: 3, placeholder: 'YGO1- で始まるデッキコード、または共有リンクを貼り付け' });
+  const input = el('textarea', { class: 'full code-box', rows: 3, placeholder: 'YGO2- / YGO1- で始まるデッキコード、または共有リンクを貼り付け' });
   showModal({
     title: 'デッキコードから追加', body: input,
     buttons: [{ label: '追加する', primary: true, onClick: () => addDeckFromCode(input.value) === false ? false : undefined }],
