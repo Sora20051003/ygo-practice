@@ -515,6 +515,51 @@ function seededRandom(seed) {
 }
 
 // 相手（CPU）の返答。妨害（手札誘発・伏せカード）は使えるときに使い、自分のターンは簡単に動く
+// 「デッキで対戦」の相手（CPU）：自分のターンにデッキを回す。
+// 発動できる効果 → 特殊召喚 → 通常召喚 → 罠を伏せる → 攻撃できるならバトル → 終わり の順に試す。
+// 同じ効果を何度も繰り返さないよう、1ターンの回数に上限をつける
+function cpuPlayIdle(m, duel) {
+  const t = duel.cpuTurn && duel.cpuTurn.turn === duel.turn ? duel.cpuTurn : (duel.cpuTurn = { turn: duel.turn, n: 0, count: new Map(), bp: false });
+  const key = (kind, c) => kind + ':' + c.code + ':' + (c.description || '');
+  const tryList = (list, kind, action, max) => {
+    for (let i = 0; i < (list || []).length; i++) {
+      const k = key(kind, list[i]);
+      if ((t.count.get(k) || 0) >= max) continue;
+      t.count.set(k, (t.count.get(k) || 0) + 1); t.n++;
+      return { type: RES.SELECT_IDLECMD, action, index: i };
+    }
+    return null;
+  };
+  if (t.n < 25) {
+    // 手札誘発は自分のターンには使わない（相手の行動への妨害用に残す）
+    const acts = (m.activates || []).map((c, i) => ({ c, i })).filter(({ c }) => !(c.location === LOC.HAND && isHandTrap(c.code)));
+    for (const { c, i } of acts) {
+      const k = key('a', c);
+      if ((t.count.get(k) || 0) >= 2) continue;
+      t.count.set(k, (t.count.get(k) || 0) + 1); t.n++;
+      return { type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index: i };
+    }
+    const sp = tryList(m.special_summons, 's', IDLE.SPSUMMON, 2);
+    if (sp) return sp;
+    if (m.summons.length) {
+      let best = 0;
+      m.summons.forEach((c, i) => { if ((DB.byId.get(c.code) || {}).atk > (DB.byId.get(m.summons[best].code) || {}).atk) best = i; });
+      t.n++;
+      return { type: RES.SELECT_IDLECMD, action: IDLE.SUMMON, index: best };
+    }
+    const traps = (m.spell_sets || []).map((c, i) => ({ c, i })).filter(({ c }) => { const d = DB.byId.get(c.code); return d && (has(d, T.TRAP) || has(d, T.QUICKPLAY)); });
+    if (traps.length) { t.n++; return { type: RES.SELECT_IDLECMD, action: IDLE.SSET, index: traps[0].i }; }
+  }
+  // 攻撃できるモンスターがいればバトルフェイズへ（1ターンに1回）
+  if (m.to_bp && !t.bp && duel.turn > 1) { t.bp = true; return { type: RES.SELECT_IDLECMD, action: IDLE.TO_BP, index: null }; }
+  return { type: RES.SELECT_IDLECMD, action: m.to_ep ? IDLE.TO_EP : IDLE.TO_BP, index: null };
+}
+// 「デッキで対戦」の相手：バトルフェイズでは、攻撃できるモンスターで順に攻撃する
+function cpuPlayBattle(m) {
+  if (m.attacks && m.attacks.length) return { type: RES.SELECT_BATTLECMD, action: BATTLE.ATTACK, index: 0 };
+  return { type: RES.SELECT_BATTLECMD, action: m.to_m2 ? BATTLE.TO_M2 : BATTLE.TO_EP, index: null };
+}
+
 function cpuAnswer(m, duel) {
   const me = duel.me;            // 練習する人（CPU から見た相手）
   const rnd = duel.rng;
@@ -527,6 +572,7 @@ function cpuAnswer(m, duel) {
   };
   switch (m.type) {
     case MSG.SELECT_IDLECMD: {
+      if (duel.opp && duel.opp.plays) return cpuPlayIdle(m, duel);
       // 罠などを伏せる → 一番攻撃力の高いモンスターを召喚 → 終わり
       const traps = m.spell_sets.filter(c => { const d = DB.byId.get(c.code); return d && has(d, T.TRAP); });
       if (traps.length) return { type: RES.SELECT_IDLECMD, action: IDLE.SSET, index: m.spell_sets.indexOf(traps[0]) };
@@ -542,6 +588,7 @@ function cpuAnswer(m, duel) {
       if (m.selects.length && (m.forced || (duel.turnPlayer === me && duel.chain.length && duel.chain[duel.chain.length - 1].con === me) || (duel.turnPlayer === me && !duel.chain.length && rnd() < 0.5)))
         return { type: RES.SELECT_CHAIN, index: Math.floor(rnd() * m.selects.length) };
       return { type: RES.SELECT_CHAIN, index: m.forced ? 0 : null };
+    case MSG.SELECT_BATTLECMD: if (duel.opp && duel.opp.plays) return cpuPlayBattle(m); return autoAnswer(m);
     case MSG.SELECT_EFFECTYN: return { type: RES.SELECT_EFFECTYN, yes: true };
     case MSG.SELECT_YESNO: return { type: RES.SELECT_YESNO, yes: true };
     case MSG.SELECT_CARD: return { type: RES.SELECT_CARD, indicies: prefer(m.selects).slice(0, m.min).sort((a, b) => a - b) };

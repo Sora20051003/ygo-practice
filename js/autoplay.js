@@ -327,7 +327,7 @@ function setupAutoPlay() {
   if (store.get('ygo.oppMode', null) === null && store.get('ygo.autoOpp', '') === 'none') store.set('ygo.oppMode', 'none');   // 前の「相手：何もしない」の設定を引き継ぐ
   refreshOppSelect();
   $('#ap-opp').onchange = e => { store.set('ygo.autoOpp', e.target.value); toast('次に開始したときから、このデッキになります'); };
-  $$('#ap-oppmode button').forEach(b => { b.onclick = () => { store.set('ygo.oppMode', b.dataset.v); renderOppSettings(); toast(b.dataset.v === 'trap' ? '誘発練習：次に開始したときから、相手が手札誘発を使ってきます' : '次に開始したときから、相手は何もしません'); }; });
+  $$('#ap-oppmode button').forEach(b => { b.onclick = () => { store.set('ygo.oppMode', b.dataset.v); renderOppSettings(); toast(b.dataset.v === 'trap' ? '誘発練習：次に開始したときから、相手が手札誘発を使ってきます' : b.dataset.v === 'cpu' ? 'デッキで対戦：次に開始したときから、相手が選んだデッキを回してきます' : '次に開始したときから、相手は何もしません'); }; });
   $('#ap-trappick').onclick = openOppHandPicker;
   $('#ap-chain').value = store.get('ygo.chainMode', 'auto');
   const chainNote = { off: 'チェーンの確認をしません（必ず答える場面だけ聞きます）', always: '召喚・発動などのあと、発動できるものがあれば毎回聞きます', auto: '効果が発動したとき、それに対して発動できるものがあるときだけ聞きます' };
@@ -381,7 +381,7 @@ function refreshOppSelect() {
 function renderOppSettings() {
   const mode = oppMode();
   $$('#ap-oppmode button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
-  $('#ap-trapbox').hidden = mode !== 'trap';
+  $('#ap-trapbox').hidden = mode === 'none';
   const box = $('#ap-traphand');
   box.innerHTML = '';
   const ids = oppHandIds();
@@ -391,7 +391,7 @@ function renderOppSettings() {
 }
 
 function oppDeck() {
-  if (oppMode() !== 'trap') return null;
+  if (oppMode() === 'none') return null;
   const v = $('#ap-opp').value;
   let deck = null;
   if (v.startsWith('deck:')) {
@@ -411,6 +411,7 @@ function oppDeck() {
     for (let k = have; k < need; k++) { const f = deck.main.indexOf(OPP_FILLER); if (f >= 0) deck.main[f] = id; else deck.main.push(id); }
   }
   deck.handIds = handIds;
+  deck.plays = oppMode() === 'cpu';   // 「デッキで対戦」：相手もデッキを回す
   return deck;
 }
 
