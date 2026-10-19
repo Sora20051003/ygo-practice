@@ -539,7 +539,7 @@ function showNextActivation() {
   const mine = ev.con === Auto.duel.me;
   const pop = el('div', { class: 'ap-activate' + (mine ? '' : ' opp') },
     el('div', { class: 'ap-act-card' }, cardFace(card || null, { faceDown: !card })),
-    el('div', { class: 'ap-act-text' }, el('b', { text: `チェーン${ev.n}` }), el('span', { text: (mine ? '' : 'CPU：') + cardName(ev.code) }), ev.desc ? el('small', { text: ev.desc }) : null));
+    el('div', { class: 'ap-act-text' }, el('b', { text: `チェーン${ev.n}` }), el('span', { text: (mine ? '' : (Auto.net ? oppName() : 'CPU') + '：') + cardName(ev.code) }), ev.desc ? el('small', { text: ev.desc }) : null));
   document.body.append(pop);
   pop.animate([{ opacity: 0, transform: 'translate(-50%, -50%) scale(.85)' }, { opacity: 1, transform: 'translate(-50%, -50%) scale(1)', offset: 0.2 }, { opacity: 1, transform: 'translate(-50%, -50%) scale(1)', offset: 0.8 }, { opacity: 0, transform: 'translate(-50%, -50%) scale(1.05)' }],
     { duration: activationQueue.length > 2 ? 700 : 1100, easing: 'ease-out', fill: 'both' })
@@ -565,7 +565,8 @@ function closePromptModal() { if (Auto.closePrompt) { Auto.closePrompt(); Auto.c
 function promptTitle(p) {
   const hint = Auto.duel && Auto.duel.hint ? descText(Auto.duel.hint) : '';
   switch (p.type) {
-    case MSG.SELECT_CHAIN: return 'チェーンして発動しますか？';
+    // 積まれているチェーンがあるときだけ「チェーン」。解決し終えたあと（新しいチェーンの1つ目）は「効果の発動」
+    case MSG.SELECT_CHAIN: return Auto.duel && Auto.duel.chain.length ? 'チェーンして発動しますか？' : '効果を発動しますか？';
     case MSG.SELECT_EFFECTYN: return `「${cardName(p.code)}」の効果を発動しますか？`;
     case MSG.SELECT_YESNO: return descText(p.description) || 'はい／いいえ';
     case MSG.SELECT_OPTION: return '効果を選んでください';
@@ -792,7 +793,11 @@ function openPrompt() {
         n.onclick = () => { pick = pick === i ? -1 : i; [...grid.children].forEach((x, k) => x.classList.toggle('on', k === pick)); go.disabled = pick < 0; };
         grid.append(n);
       });
-      promptModal(el('div', { class: 'stack' }, el('p', { class: 'muted', text: '発動する効果を選んで「発動する」を押してください' }), grid,
+      const ch = d.chain || [];
+      const lead = ch.length
+        ? `チェーン${ch.length + 1}として発動できます（チェーン${ch.length}：${ch[ch.length - 1].con === d.me ? '' : '相手の'}${cardName(ch[ch.length - 1].code)}）。発動する効果を選んで「発動する」を押してください`
+        : '発動できる効果があります。発動する効果を選んで「発動する」を押してください';
+      promptModal(el('div', { class: 'stack' }, el('p', { class: 'muted', text: lead }), grid,
         el('div', { class: 'row' }, go, p.forced ? null : el('button', { class: 'btn', text: '発動しない', onclick: () => answer({ type: RES.SELECT_CHAIN, index: null }) }))));
       break;
     }
