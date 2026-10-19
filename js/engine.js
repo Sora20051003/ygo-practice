@@ -622,13 +622,21 @@ function autoAnswer(m) {
     case MSG.SELECT_TRIBUTE: return { type: RES.SELECT_TRIBUTE, indicies: [...Array(m.min).keys()] };
     case MSG.SELECT_UNSELECT_CARD: return { type: RES.SELECT_UNSELECT_CARD, index: m.can_finish || !m.select_cards.length ? null : 0 };
     case MSG.SELECT_POSITION: return { type: RES.SELECT_POSITION, position: [1, 2, 4, 8].find(p => m.positions & p) };
-    case MSG.SELECT_PLACE: case MSG.SELECT_DISFIELD: return { type: m.type === MSG.SELECT_PLACE ? RES.SELECT_PLACE : RES.SELECT_DISFIELD, places: freePlaces(m.field_mask, m.player).slice(0, m.count) };
+    case MSG.SELECT_PLACE: return { type: RES.SELECT_PLACE, places: placeOrder(freePlaces(m.field_mask, m.player), m.player).slice(0, m.count) };
+    case MSG.SELECT_DISFIELD: return { type: RES.SELECT_DISFIELD, places: freePlaces(m.field_mask, m.player).slice(0, m.count) };
     case MSG.SELECT_SUM: return { type: RES.SELECT_SUM, indicies: [...Array(Math.max(m.min, 1)).keys()] };
     case MSG.SORT_CARD: case MSG.SORT_CHAIN: return { type: RES.SORT_CARD, order: null };
     case MSG.SELECT_COUNTER: return { type: RES.SELECT_COUNTER, counters: m.cards.map((c, i) => (i === 0 ? m.count : 0)) };
     case MSG.ANNOUNCE_NUMBER: return { type: RES.ANNOUNCE_NUMBER, value: 0 };
     default: return skippable(m);
   }
+}
+
+// 自動で置く場所を決めるときの順番：真ん中から外へ（「中央のゾーンに召喚した場合」の効果を使えるように）
+const PLACE_PREF = [2, 1, 3, 0, 4, 5, 6, 7];
+function placeOrder(places, player) {
+  const rank = p => (p.player === player ? 0 : 100) + (p.location === LOC.MZONE ? 0 : 10) + PLACE_PREF.indexOf(p.sequence);
+  return places.slice().sort((a, b) => rank(a) - rank(b));
 }
 
 // field_mask（1＝選べない）から選べる場所の一覧。自分から見た向き（下位16ビットが自分）
@@ -669,7 +677,8 @@ function probeAnswer(m, me) {
     case MSG.SELECT_YESNO: return { type: RES.SELECT_YESNO, yes: true };
     case MSG.SELECT_EFFECTYN: return { type: RES.SELECT_EFFECTYN, yes: true };
     case MSG.SELECT_CHAIN: return { type: RES.SELECT_CHAIN, index: m.forced ? 0 : null };
-    case MSG.SELECT_PLACE: case MSG.SELECT_DISFIELD: return { type: m.type === MSG.SELECT_PLACE ? RES.SELECT_PLACE : RES.SELECT_DISFIELD, places: freePlaces(m.field_mask, me).slice(0, m.count) };
+    case MSG.SELECT_PLACE: return { type: RES.SELECT_PLACE, places: placeOrder(freePlaces(m.field_mask, me), me).slice(0, m.count) };
+    case MSG.SELECT_DISFIELD: return { type: RES.SELECT_DISFIELD, places: freePlaces(m.field_mask, me).slice(0, m.count) };
     default: return autoAnswer(m);
   }
 }
