@@ -204,7 +204,9 @@ function deckCardBar(c) {
         el('button', { class: 'btn small', text: '＋ サイドに追加', onclick: () => { addToDeck(c, 'side'); draw(); } })),
       el('div', { class: 'd-addbtns' },
         el('button', { class: 'btn small', text: `− ${label}から1枚減らす`, disabled: !nMain, onclick: () => removeOne(main) }),
-        el('button', { class: 'btn small', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })));
+        el('button', { class: 'btn small', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })),
+      el('div', { class: 'd-addbtns' },
+        el('button', { class: 'btn small', text: '🔍 関連カードを検索', onclick: () => showRelated(c) })));
   };
   draw();
   return bar;
@@ -222,7 +224,8 @@ let searchTimer = null;
 const MAX_RESULTS = 300;
 
 function setupSearch() {
-  const run = () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderResults, 120); };
+  // 検索の条件を変えたら、関連カードの表示をやめて普通の検索結果に戻す
+  const run = () => { Related.card = null; clearTimeout(searchTimer); searchTimer = setTimeout(renderResults, 120); };
   // カードデータに実際にある数字だけを選択肢にする
   const values = { level: new Set(), rank: new Set(), link: new Set() };
   for (const c of DB.cards) if (isMonster(c) && !isToken(c)) values[levelKind(c)].add(c.level);
@@ -310,6 +313,7 @@ function renderResults() {
   const box = $('#results');
   box.innerHTML = '';
   if (!DB.cards.length) return;
+  if (Related.card) { renderRelated(box); return; }
   const text = $('#qt').value.trim();
   const fmt = curFormat();
   const ctx = regContext(Decks.current());
@@ -321,22 +325,100 @@ function renderResults() {
     ? `${res.length}件（上位${MAX_RESULTS}件を表示。条件をしぼってください）`
     : `${res.length}件`;
   const frag = document.createDocumentFragment();
-  for (const c of res.slice(0, MAX_RESULTS)) {
-    const info = isMonster(c)
-      ? `${levelText(c)} ${ATTR[c.attr] || ''} ${RACE[c.race] || ''}　${statText(c)}${has(c, T.LINK) ? "　" + linkArrowsText(c) : ""}`
-      : typeLine(c);
-    const row = el('div', { class: 'result-row', onclick: () => showDeckCard(c) },
-      rowMark(c),
-      el('div', { class: 'r-main' },
-        el('div', { class: 'r-name' }, limitBadge(c, ctx), c.name + (c.noJp ? '（TCG）' : '')),
-        el('div', { class: 'r-info', text: info }),
-        text ? snippetEl(c.jaText, text) : null),
-      el('button', { class: 'btn small', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),
-      el('button', { class: 'btn small primary', title: 'デッキに追加', text: '＋', onclick: e => { e.stopPropagation(); addToDeck(c); } }),
-    );
-    row.addEventListener('contextmenu', e => { e.preventDefault(); addToDeck(c); });
-    frag.append(row);
+  for (const c of res.slice(0, MAX_RESULTS)) frag.append(resultRow(c, ctx, text));
+  box.append(frag);
+}
+
+// 検索結果の1行
+function resultRow(c, ctx, text) {
+  const info = isMonster(c)
+    ? `${levelText(c)} ${ATTR[c.attr] || ''} ${RACE[c.race] || ''}　${statText(c)}${has(c, T.LINK) ? "　" + linkArrowsText(c) : ""}`
+    : typeLine(c);
+  const row = el('div', { class: 'result-row', onclick: () => showDeckCard(c) },
+    rowMark(c),
+    el('div', { class: 'r-main' },
+      el('div', { class: 'r-name' }, limitBadge(c, ctx), c.name + (c.noJp ? '（TCG）' : '')),
+      el('div', { class: 'r-info', text: info }),
+      text ? snippetEl(c.jaText, text) : null),
+    el('button', { class: 'btn small', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),
+    el('button', { class: 'btn small primary', title: 'デッキに追加', text: '＋', onclick: e => { e.stopPropagation(); addToDeck(c); } }),
+  );
+  row.addEventListener('contextmenu', e => { e.preventDefault(); addToDeck(c); });
+  return row;
+}
+
+// ---------- 関連カード ----------
+// 選んだカードについて、次のカードを検索結果の欄にまとめて出す
+//  ・効果に「」で書かれているカード
+//  ・効果に「」で書かれているテーマ（「耀聖」など）のカード
+//  ・同じテーマのカード
+//  ・効果にこのカードの名前が書かれているカード
+const Related = { card: null, text: '' };
+
+async function showRelated(c) {
+  Related.card = c;
+  Related.text = c.jaText || '';
+  // スマホ：詳細の画面を閉じて「カードを探す」に切り替える
+  if (isMobile()) {
+    [...openModals].forEach(close => close());
+    const tab = $('#deck-mtabs button[data-pane="search"]');
+    if (tab) tab.click();
   }
+  renderResults();
+  $('#results').scrollTop = 0;
+  // 効果文がまだ無いときは取ってきて、出し直す
+  if (!Related.text) {
+    const t = await fetchCardTexts(c).catch(() => null);
+    const text = t ? [t.jaP, t.ja].filter(Boolean).join('\n') : '';
+    if (Related.card === c && text) { Related.text = text; renderResults(); }
+  }
+}
+
+function relatedGroups(c, text) {
+  const fmt = curFormat();
+  const usable = x => x.id !== c.id && !isToken(x) && cardAllowed(x, fmt);
+  const seen = new Set([c.id]);
+  const groups = [];
+  const add = (title, list) => {
+    const cards = list.filter(x => usable(x) && !seen.has(x.id));
+    cards.forEach(x => seen.add(x.id));
+    if (cards.length) groups.push({ title, cards });
+  };
+  const byName = new Map(DB.cards.map(x => [x.name, x]));
+  const quoted = [...new Set([...(text || '').matchAll(/「([^「」]+)」/g)].map(m => m[1].trim()).filter(s => s && s !== c.name))];
+  // 効果に書かれているカード
+  add('効果に書かれているカード', quoted.map(s => byName.get(s)).filter(Boolean));
+  // 効果に書かれているテーマ（カード名ではない「」）→ 名前にその言葉が入っているカード
+  const themeWords = quoted.filter(s => !byName.has(s)).map(s => normalizeText(s)).filter(s => s.length >= 2);
+  if (themeWords.length) add('効果に書かれているテーマのカード', DB.cards.filter(x => themeWords.some(w => (x.nkey || normalizeText(x.name)).includes(w))));
+  // 同じテーマ（カテゴリ）のカード
+  const mine = cardThemes(c);
+  if (mine.length) add('同じテーマのカード', DB.cards.filter(x => cardThemes(x).some(t => mine.includes(t))));
+  // 効果にこのカードの名前が書かれているカード
+  const quote = `「${c.name}」`;
+  add('このカードの名前が効果に書かれているカード', DB.cards.filter(x => x.jaText && x.jaText.includes(quote)));
+  // 各グループの中は種類順（モンスター→魔法→罠、EXは後ろ）、同じ種類は新しい順
+  const kindRank = x => (isExtraType(x) ? 3 : isMonster(x) ? 0 : has(x, T.SPELL) ? 1 : 2);
+  for (const g of groups) g.cards.sort((a, b) => kindRank(a) - kindRank(b) || b.cid - a.cid);
+  return groups;
+}
+
+function renderRelated(box) {
+  const c = Related.card;
+  const ctx = regContext(Decks.current());
+  const groups = relatedGroups(c, Related.text);
+  const total = groups.reduce((n, g) => n + g.cards.length, 0);
+  $('#result-count').textContent = `「${c.name}」の関連カード ${total}件`;
+  const frag = document.createDocumentFragment();
+  frag.append(el('div', { class: 'rel-head' },
+    el('span', { text: `🔍「${c.name}」の関連カード` }),
+    el('button', { class: 'btn small', text: '✕ 普通の検索に戻る', onclick: () => { Related.card = null; renderResults(); } })));
+  if (!total) frag.append(el('p', { class: 'muted rel-empty', text: '関連カードが見つかりませんでした。' }));
+  for (const g of groups) {
+    frag.append(el('div', { class: 'rel-group', text: `${g.title}（${g.cards.length}）` }));
+    for (const x of g.cards.slice(0, MAX_RESULTS)) frag.append(resultRow(x, ctx, ''));
+  }
+  if (!DB.cards.some(x => x.jaText)) frag.append(el('p', { class: 'muted rel-empty', text: 'テキスト検索用データの読み込みが終わると、「このカードの名前が効果に書かれているカード」も出ます。' }));
   box.append(frag);
 }
 

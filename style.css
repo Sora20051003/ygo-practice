@@ -1186,3 +1186,8 @@ body.land .cs-title { font-size: 46px; }
 .cs-rope span.v { width: 46px; height: 11px; border-width: 5px; margin: 0 -10px; }
 body.land .cs-rope span.h { width: 36px; height: 20px; border-width: 5px; }
 body.land .cs-rope span.v { width: 36px; height: 9px; border-width: 4px; }
+/* 関連カード（検索結果の欄） */
+.rel-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 6px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 700; }
+.rel-head span { flex: 1; min-width: 0; word-break: break-all; }
+.rel-group { padding: 6px 8px; margin-top: 4px; background: var(--panel-2); color: var(--accent, #6ea8ff); font-size: 13px; font-weight: 700; border-radius: 6px; }
+.rel-empty { padding: 10px 8px; }
