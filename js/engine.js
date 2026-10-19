@@ -431,7 +431,13 @@ class AutoDuel {
         else if (m.player_hint === 7) { const i = this.locks.findIndex(l => l.desc === String(m.description)); if (i >= 0) this.locks.splice(i, 1); }
         break;
       }
-      case MSG.CONFIRM_CARDS: if (m.cards.length) this.addLog(`確認：${m.cards.map(c => cardName(c.code)).join('、')}`); break;
+      // カードを見せる・確認する（相手の手札を確認する、手札のカードを見せる、デッキの上を確認する など）。m.player が見る人
+      case MSG.CONFIRM_CARDS: case MSG.CONFIRM_DECKTOP:
+        if (m.cards.length) {
+          this.addLog(`${m.player === this.me ? '' : '相手が'}確認：${m.cards.map(c => cardName(c.code)).join('、')}`);
+          this.events.push({ t: 'confirm', player: m.player, top: m.type === MSG.CONFIRM_DECKTOP, cards: m.cards.map(c => ({ code: c.code, con: c.controller, loc: c.location, seq: c.sequence })) });
+        }
+        break;
       case MSG.TOSS_COIN: this.addLog(`コイン：${m.results.map(r => (r ? '表' : '裏')).join('・')}`); break;
       case MSG.TOSS_DICE: this.addLog(`サイコロ：${m.results.join('・')}`); break;
       case MSG.WIN: {

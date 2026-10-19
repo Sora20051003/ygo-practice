@@ -816,7 +816,14 @@ function renderOppRows(field) {
   bar.hidden = false;
   bar.innerHTML = '';
   const backs = el('div', { class: 'opp-hand' });
-  for (let i = 0; i < Math.min(o.hand, 12); i++) backs.append(el('div', { class: 'cardface back mini' }));
+  // 公開されている手札（効果で見せたカードなど）は表向きに出す。押すと詳しい内容
+  for (let i = 0; i < Math.min(o.hand, 12); i++) {
+    const code = o.handPub && o.handPub[i], card = code && DB.byId.get(code);
+    if (!card) { backs.append(el('div', { class: 'cardface back mini' })); continue; }
+    const n = el('div', { class: 'opp-hand-pub', title: card.name + '（公開中）' }, cardFace(card, { small: true }));
+    n.addEventListener('click', () => { Board.detailCard = card; showCardDetail(card, '#board-detail'); });
+    backs.append(n);
+  }
   bar.append(el('div', { class: 'opp-name' }, el('b', { text: oppName() }), el('span', { class: 'muted', text: `　手札${o.hand}枚` })), backs);
 }
 

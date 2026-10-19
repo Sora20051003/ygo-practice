@@ -48,7 +48,9 @@ function autoState() {
   } : null);
   const count = a => a.filter(Boolean).length;
   S.opp = {
-    lp: d.lp[1 - me], hand: count(op.hand), deck: count(op.deck), extra: count(op.extra),
+    lp: d.lp[1 - me], hand: count(op.hand),
+    handPub: op.hand.filter(Boolean).map(c => (c.isPublic ? c.code : 0)),   // 公開されている手札（見せたカードなど）
+    deck: count(op.deck), extra: count(op.extra),
     extraUp: op.extra.filter(c => c && c.position & 5).map(c => c.code),
     gy: op.gy.filter(Boolean).map(c => c.code), ban: op.ban.filter(Boolean).map(c => (c.position & 5 ? c.code : 0)),
     m: op.m.slice(0, 5).map(c => pub(c, LOC.MZONE)), emz: [pub(op.m[5], LOC.MZONE), pub(op.m[6], LOC.MZONE)],
@@ -145,6 +147,7 @@ function autoAfter(noAnim) {
   if (anim) playEvents(events, before);
   if (!noAnim) queueActivations(events);
   if (!noAnim && Auto.anim) phaseBanners(events);
+  if (!noAnim) showConfirms(events);
   if (isPrompt(d.pending)) openPrompt();
   // 勝ち負けが決まったら知らせる（デッキ切れ・ライフ0など）
   if (d.ended && !d.endShown) { d.endShown = true; gameOver(d.ended.startsWith('自分の勝ち') ? 'win' : 'lose', d.endReason || d.ended); }
@@ -172,6 +175,37 @@ function scheduleCpu() {
     autoAfter();
   };
   d.cpuTimer = setTimeout(go, cpuDelay());
+}
+
+// ---------- カードを見せる・確認する ----------
+// 自分が見る番（相手の手札を確認する、デッキの上を確認する など）：カードを並べた窓を出す
+// 自分のカードを相手に見せたとき：「相手に見せました」と知らせる
+const LOC_JA = { 1: 'デッキ', 2: '手札', 4: 'モンスターゾーン', 8: '魔法・罠ゾーン', 16: '墓地', 32: '除外', 64: 'EXデッキ' };
+function showConfirms(events) {
+  const d = Auto.duel;
+  for (const ev of events) {
+    if (ev.t !== 'confirm' || !ev.cards.length) continue;
+    const names = ev.cards.map(c => cardName(c.code)).join('、');
+    const mineCards = ev.cards.every(c => c.con === d.me);
+    if (ev.player !== d.me) {
+      if (mineCards) toast(`${Auto.net ? oppName() : '相手'}に見せました：${names}`);
+      continue;
+    }
+    // 自分が見る
+    const c0 = ev.cards[0], whose = c0.con === d.me ? '自分の' : '相手の';
+    const where = ev.top ? 'デッキの上' : (LOC_JA[c0.loc] || 'カード');
+    if (mineCards && !ev.top && c0.loc !== LOC.DECK) { toast(`確認：${names}`); continue; }   // 自分の手札などは、もう見えているので知らせるだけ
+    // すぐあとの選択画面に同じカードが並ぶとき（確認した手札から選ぶ効果など）は、窓を重ねずに知らせるだけ
+    const p = d.pending, opts = p && isPrompt(p) ? [...(p.selects || []), ...(p.cards || []), ...(p.select_cards || []), ...(p.unselect_cards || [])].map(c => c.code) : [];
+    if (opts.length && ev.cards.every(c => opts.includes(c.code))) { toast(`${whose}${where}を確認：${names}`); continue; }
+    const grid = el('div', { class: 'confirm-grid' }, ev.cards.map(c => {
+      const card = DB.byId.get(c.code);
+      const n = el('div', { class: 'confirm-card' }, cardFace(card || null, { faceDown: !card }), el('small', { text: cardName(c.code) }));
+      if (card) n.addEventListener('click', () => { Board.detailCard = card; if (!isMobile()) renderDetail($('#board-detail'), card); });
+      return n;
+    }));
+    showModal({ title: `👁 ${whose}${where}を確認（${ev.cards.length}枚）`, wide: ev.cards.length > 4, body: el('div', { class: 'stack' }, el('p', { class: 'muted small-note', text: '効果で確認したカードです。カードを押すと右に詳しい内容が出ます。' }), grid), buttons: [{ label: '確認した', primary: true, onClick: () => {} }] });
+  }
 }
 
 // ターン・フェイズが変わったら画面に大きく出す（エンジンの知らせから）
