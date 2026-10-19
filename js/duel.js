@@ -591,6 +591,8 @@ function onDuelRoom(r) {
       }
       persist(); renderBoard();
     }
+    // フェイズが変わったら盤面を描き直す（光らせる・カードのボタンをフェイズに合わせるため）
+    if (r.phase !== Duel.lastPhase && Board.S) { Duel.lastPhase = r.phase; renderBoard(); }
     if (r.status === 'ended' && !Duel.endedShown) {
       Duel.endedShown = true;
       const why = r.endReason === 'timeout' ? (r.winner === me ? '相手の持ち時間がなくなりました。' : 'あなたの持ち時間がなくなりました。') : '';

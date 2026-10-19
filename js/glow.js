@@ -52,9 +52,18 @@ function glowInfo(c) {
 // 盤面全体を見て、uid → 'y'（発動）/'b'（召喚）を返す
 function computeGlow(S) {
   const res = new Map();
+  if (S && !S.auto) snapActions(S);   // 光らせない設定でも、カードを押したときのボタンのために判定しておく
   if (!Glow.on || !S) return res;
   if (S.auto) return autoGlow();   // 自動処理モード：エンジンが「できる」と言ったものだけ光らせる
   if (typeof Duel !== 'undefined' && Duel.active && !myTurn()) return res;
+  // 手動・対戦も、今の盤面をエンジンで判定した結果で光らせる（判定中・判定できないときは光らせない）
+  const snap = snapActions(S);
+  if (snap) for (const [uid, r] of snap) { if (r.activate) res.set(uid, 'y'); else if (r.summon || r.spsummon) res.set(uid, 'b'); }
+  return res;
+}
+// （以前の、効果文から推測して光らせる方法。今は使っていない）
+function computeGlowGuess(S) {
+  const res = new Map();
   const used = new Set(S.used);
   const fieldMons = [...S.m, ...S.emz].filter(Boolean);
   const upMons = fieldMons.filter(i => i.faceUp && !i.tokenCard).map(i => ({ inst: i, c: cardOf(i) }))
@@ -145,4 +154,142 @@ function computeGlow(S) {
     if (ok) set(inst, 'b');
   }
   return res;
+}
+
+// ---------- 手動・対戦：今の盤面をエンジンで判定する ----------
+// 手動の盤面（と対戦相手の見えている盤面）をそのまま、裏で動かすエンジンに並べて、
+// 「今、発動・召喚できるカード」を聞く。光らせるのも、カードを押したときのボタンも、これに合わせる（効果文からの推測はしない）。
+// ・自分のメインフェイズとして判定する（相手のターン・メイン以外のフェイズでは何も光らせない）
+// ・「1ターンに1度」は、手動で「使用済み」にしたカード名だけ除く
+const Snap = { key: null, result: null, busy: false, failed: false, loadedFor: '' };
+
+function snapKey(S) {
+  const opp = typeof Duel !== 'undefined' && Duel.active ? Duel.opp : null;
+  return JSON.stringify([S.hand, S.m, S.emz, S.s, S.f, S.gy, S.ban, S.extra, S.ns, S.used, opp && [opp.m, opp.emz, opp.s, opp.f, opp.gy, opp.ban]]);
+}
+// 盤面のカード → [{ code, loc, seq, pos, overlay? }]
+function snapCards(S) {
+  const out = [];
+  const pos = i => (i.faceUp ? (i.pos === 'def' ? POS.FU_DEF : POS.FU_ATK) : (i.pos === 'def' ? POS.FD_DEF : POS.FD_ATK));
+  const id = i => (i.tokenCard ? 0 : i.id);
+  S.hand.forEach((i, k) => out.push({ code: id(i), loc: LOC.HAND, seq: k, pos: POS.FU_ATK, ref: ['hand', k] }));
+  S.m.forEach((i, k) => { if (i) out.push({ code: id(i), loc: LOC.MZONE, seq: k, pos: pos(i), ref: ['m', k], mats: i.mats }); });
+  S.emz.forEach((i, k) => { if (i) out.push({ code: id(i), loc: LOC.MZONE, seq: 5 + k, pos: pos(i), ref: ['emz', k], mats: i.mats }); });
+  S.s.forEach((i, k) => { if (i) out.push({ code: id(i), loc: LOC.SZONE, seq: k, pos: i.faceUp ? POS.FU_ATK : POS.FD_ATK, ref: ['s', k] }); });
+  if (S.f[0]) out.push({ code: id(S.f[0]), loc: LOC.SZONE, seq: 5, pos: S.f[0].faceUp ? POS.FU_ATK : POS.FD_ATK, ref: ['f', 0] });
+  S.gy.forEach((i, k) => out.push({ code: id(i), loc: LOC.GRAVE, seq: k, pos: POS.FU_ATK, ref: ['gy', k] }));
+  S.ban.forEach((i, k) => out.push({ code: id(i), loc: LOC.REMOVED, seq: k, pos: i.faceUp ? POS.FU_ATK : POS.FD_ATK, ref: ['ban', k] }));
+  S.extra.forEach((i, k) => out.push({ code: id(i), loc: LOC.EXTRA, seq: k, pos: i.faceUp ? POS.FU_ATK : POS.FD_ATK, ref: ['extra', k] }));
+  S.deck.forEach((i, k) => out.push({ code: id(i), loc: LOC.DECK, seq: k, pos: POS.FD_ATK, ref: ['deck', k] }));
+  return out.filter(x => x.code);
+}
+
+// 裏でエンジンを動かして判定する（必要なカードの処理を読み込んでから）
+async function snapCompute(S) {
+  const key = snapKey(S);
+  if (Snap.busy || Snap.key === key) return;
+  Snap.busy = true;
+  try {
+    const mine = snapCards(S);
+    const op = typeof Duel !== 'undefined' && Duel.active ? Duel.opp : null;
+    const oppCards = [];
+    if (op) {
+      const pub = (p, loc, seq) => { if (p && p.id && p.faceUp) oppCards.push({ code: p.id, loc, seq, pos: loc === LOC.MZONE && p.pos === 'def' ? POS.FU_DEF : POS.FU_ATK }); else if (p) oppCards.push({ code: OPP_FILLER, loc, seq, pos: loc === LOC.MZONE ? POS.FD_DEF : POS.FD_ATK }); };
+      (op.m || []).forEach((p, k) => pub(p, LOC.MZONE, k));
+      (op.emz || []).forEach((p, k) => pub(p, LOC.MZONE, 5 + k));
+      (op.s || []).forEach((p, k) => pub(p, LOC.SZONE, k));
+      (op.f || []).forEach(p => pub(p, LOC.SZONE, 5));
+      (op.gy || []).forEach((code, k) => { if (code) oppCards.push({ code, loc: LOC.GRAVE, seq: k, pos: POS.FU_ATK }); });
+    }
+    const codes = [...mine.map(c => c.code), ...mine.flatMap(c => (c.mats || []).map(m => m.id)), ...oppCards.map(c => c.code), OPP_FILLER];
+    const need = [...new Set(codes)].join(',');
+    if (Snap.loadedFor !== need) {
+      await engineLoad();
+      await loadCardScripts(codes);
+      Snap.loadedFor = need;
+    }
+    Snap.result = snapRun(mine, oppCards, S);
+    Snap.key = key;
+    Snap.failed = false;
+  } catch (e) {
+    console.warn('盤面の判定ができませんでした', e);
+    Snap.failed = true; Snap.key = key; Snap.result = null;
+  } finally { Snap.busy = false; }
+  if (typeof renderBoard === 'function') renderBoard();
+}
+
+function snapRun(mine, oppCards, S) {
+  const d = new AutoDuel({ main: [], extra: [], handSize: 5, seed: [1n, 2n, 3n, 4n], opp: null, chainMode: 'off' });
+  const savedMe = Engine.me;
+  d.create = function () {
+    const L = Engine.lib, O = Engine.ocg;
+    this.log = []; this.pending = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
+    this.justSummoned = new Set(); this.justMoved = new Set(); this.used = new Map();
+    this.rng = seededRandom(7);
+    const team = { drawCountPerTurn: 1, startingDrawCount: 0, startingLP: 8000 };
+    this.h = L.createDuel({ flags: O.OcgDuelMode.MODE_MR5, seed: this.seed, team1: team, team2: team,
+      cardReader: code => engineCardData(code), scriptReader: name => Engine.scripts.get(name) || null, errorHandler: () => {} });
+    L.loadScript(this.h, 'constant.lua', Engine.scripts.get('constant.lua'));
+    L.loadScript(this.h, 'utility.lua', Engine.scripts.get('utility.lua'));
+    Engine.me = 0;
+    const add = (con, c) => L.duelNewCard(this.h, { team: con, duelist: 0, code: c.code, controller: con, location: c.loc, sequence: c.seq, position: c.pos });
+    for (const c of mine) {
+      add(0, c);
+      for (const m of c.mats || []) if (m.id) L.duelNewCard(this.h, { team: 0, duelist: 0, code: m.id, controller: 0, location: LOC.OVERLAY, sequence: c.seq, position: POS.FU_ATK });
+    }
+    for (const c of oppCards) add(1, c);
+    // デッキが空だと負けてしまうので、足りない分は何もしないカードで埋める
+    if (!mine.some(c => c.loc === LOC.DECK)) for (let i = 0; i < 5; i++) add(0, { code: OPP_FILLER, loc: LOC.DECK, seq: 0, pos: POS.FD_ATK });
+    for (let i = 0; i < 20; i++) add(1, { code: OPP_FILLER, loc: LOC.DECK, seq: 0, pos: POS.FD_ATK });
+    L.startDuel(this.h);
+  };
+  try {
+    d.start();
+    const p = d.pending;
+    if (!p || p.type !== MSG.SELECT_IDLECMD) return null;
+    // エンジンの位置 → 盤面のカード
+    // 手札・墓地などは、エンジンの中の並び順がこちらと違うことがあるので、カードの番号で探す（同じ番号のカードは中身が同じなのでどれでもよい）
+    const refOf = c => {
+      const z = { [LOC.HAND]: 'hand', [LOC.GRAVE]: 'gy', [LOC.REMOVED]: 'ban', [LOC.EXTRA]: 'extra', [LOC.DECK]: 'deck' }[c.location];
+      if (z) {
+        const at = S[z][c.sequence];
+        if (at && at.id === c.code) return at;
+        return S[z].find(i => i.id === c.code) || null;
+      }
+      if (c.location === LOC.MZONE) return c.sequence < 5 ? S.m[c.sequence] : S.emz[c.sequence - 5];
+      if (c.location === LOC.SZONE) return c.sequence < 5 ? S.s[c.sequence] : S.f[0];
+      return null;
+    };
+    const res = new Map();   // uid → { summon, spsummon, activate }
+    const mark = (list, kind) => (list || []).forEach(c => {
+      if (c.controller !== 0) return;
+      const inst = refOf(c);
+      if (!inst) return;
+      const r = res.get(inst.uid) || {};
+      r[kind] = true;
+      res.set(inst.uid, r);
+    });
+    if (!S.ns) { mark(p.summons, 'summon'); mark(p.monster_sets, 'summon'); }
+    mark(p.special_summons, 'spsummon');
+    mark(p.activates, 'activate');
+    // 手動で「使用済み」にしたカード名は、発動できないものとして扱う
+    const used = new Set(S.used || []);
+    for (const [uid, r] of res) { const l = locate(uid); if (l && used.has(cardOf(l.inst).name)) r.activate = false; }
+    return res;
+  } finally {
+    if (d.h) Engine.lib.destroyDuel(d.h);
+    Engine.me = savedMe;
+  }
+}
+
+// 今の盤面の判定結果（まだなら裏で計算を始めて null）。自分のメインフェイズ以外は判定しない
+function snapActions(S) {
+  if (!S || S.auto) return null;
+  const dueling = typeof Duel !== 'undefined' && Duel.active;
+  const phase = dueling ? (Duel.room && Duel.room.phase) : (S.phase || 'M1');
+  if (dueling && !myTurn()) return new Map();
+  if (phase !== 'M1' && phase !== 'M2') return new Map();
+  if (Snap.key !== snapKey(S)) { setTimeout(() => snapCompute(Board.S), 0); return Snap.result && !Snap.failed ? null : null; }
+  return Snap.failed ? null : Snap.result;
 }

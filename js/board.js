@@ -325,8 +325,8 @@ function openCardMenu(uid, x, y) {
   }
   Board.selected = uid;
   const loc = locate(uid);
-  // 対戦：手札・場のカードは、一人回しの自動処理と同じく、カードの上に主な操作のボタンを出す（ほかの操作は「その他の操作…」）
-  if (typeof Duel !== 'undefined' && Duel.active && loc && (loc.zone === 'hand' || FIELD_ZONES.includes(loc.zone))) {
+  // 手動・対戦：手札・場のカードは、自動処理と同じく、カードの上に「召喚・効果の発動」のボタンを出す（ほかの操作は「その他の操作…」）
+  if (Board.S && !Board.S.auto && loc && (loc.zone === 'hand' || FIELD_ZONES.includes(loc.zone))) {
     if (!isMobile()) showBoardDetail(loc);
     if (quickActionPopup(uid, x, y)) return;
   }
@@ -1220,38 +1220,62 @@ function statBadge(card, inst) {
     link ? el('span', { class: 'sb-def', text: 'L' + (card.level || '') }) : el('span', { class: 'sb-def' + cls(def, card.def), text: fmt(def) }));
 }
 
-// ---------- 主な操作だけのボタン（対戦で使う） ----------
-// 手動のメニューから「召喚・セット・発動・表示形式の変更・相手に見せる」を選んでカードの上に出す。残りは「その他の操作…」
-const QUICK_LABELS = [
-  [/^通常召喚$/, '召喚', 'b'], [/^裏守備でセット$/, 'セット', 'b'], [/^特殊召喚（攻撃表示）$/, '特殊召喚', 'b'], [/^特殊召喚（守備表示）$/, '特殊召喚（守備）', 'b'],
-  [/^発動する/, '発動する', 'y'], [/^表にする（発動）$/, '発動する', 'y'], [/^セットする$/, 'セットする', 'b'],
-  [/^守備表示にする$/, '守備表示にする', ''], [/^攻撃表示にする$/, '攻撃表示にする', ''], [/^表側攻撃表示にする/, '表にする（反転召喚）', 'b'],
-  [/^ペンデュラムスケールに置く$/, 'Pスケールに置く', 'y'], [/^👁 相手に見せる/, '👁 相手に見せる', ''],
-];
+// ---------- 主な操作だけのボタン（手動・対戦） ----------
+// カードを押したとき、カードの上に「召喚・特殊召喚・効果の発動」だけを出す（ほかは「その他の操作…」）。
+// 出すかどうかは、今の盤面をエンジンで判定した結果（glow.js の snapActions）に合わせる
 function quickActionPopup(uid, x, y) {
   if (typeof hideActionPopup === 'function') hideActionPopup();
   const node = document.querySelector(`.bcard[data-uid="${uid}"]`);
   const loc = locate(uid);
   if (!node || !loc) return false;
+  const inst = loc.inst, c = cardOf(inst), z = loc.zone;
   const items = cardMenuItems(uid);
+  const snap = typeof snapActions === 'function' ? snapActions(Board.S) : null;
+  const r = snap ? (snap.get(uid) || {}) : null;
   const acts = [];
-  for (const it of items) {
-    if (!it.label) continue;
-    const q = QUICK_LABELS.find(([re]) => re.test(it.label));
-    if (q) acts.push({ label: q[1], kind: q[2], onClick: it.onClick });
+  const add = (label, kind, fn) => acts.push({ label, kind, onClick: fn });
+  const mZones = isExtraType(c) ? ['m', 'emz'] : ['m'];
+  // 判定できたときはその結果だけ。判定中・判定できないときは出さない（「操作…」から全部の操作ができる）
+  const canSummon = r ? r.summon : false;
+  const canSp = r ? r.spsummon : false;
+  const canAct = r ? r.activate : false;
+  if (canSummon) add('召喚', 'b', () => requestPlace(uid, { zones: ['m'], faceUp: true, pos: 'atk', ns: true, verb: '（通常召喚）' }));
+  if (canSp) add('特殊召喚', 'b', () => requestPlace(uid, { zones: mZones, faceUp: true, pos: 'atk', verb: '（特殊召喚）' }));
+  if (canAct) {
+    if (!isMonster(c) && z === 'hand') {
+      if (has(c, T.FIELD)) add('発動する', 'y', () => requestPlace(uid, { zones: ['f'], faceUp: true, verb: '（発動）' }));
+      else add('発動する', 'y', () => requestPlace(uid, { zones: ['s'], faceUp: true, verb: '（発動）' }));
+    } else if (!isMonster(c) && !inst.faceUp) {
+      add('発動する', 'y', () => changeInst(uid, (S, i) => { i.faceUp = true; }, `${c.name}: 発動`));
+    } else {
+      add('効果を発動', 'y', () => announceActivation(uid));
+    }
   }
-  // 「相手に見せる」は最後に
-  acts.sort((a, b) => (a.label.startsWith('👁') ? 1 : 0) - (b.label.startsWith('👁') ? 1 : 0));
   const box = el('div', { class: 'ap-actions', id: 'ap-actions' },
     acts.map(a => el('button', { class: 'ap-act' + (a.kind ? ' k-' + a.kind : ''), text: a.label, onclick: e => { e.stopPropagation(); hideActionPopup(); a.onClick(); } })),
-    el('button', { class: 'ap-act k-info', text: 'その他の操作…', onclick: e => { e.stopPropagation(); hideActionPopup(); showMenu(x, y, items); } }),
+    el('button', { class: 'ap-act k-info', text: acts.length ? 'その他の操作…' : '操作…', onclick: e => { e.stopPropagation(); hideActionPopup(); showMenu(x, y, items); } }),
     isMobile() ? el('button', { class: 'ap-act k-info', text: '🔍 詳細', onclick: e => { e.stopPropagation(); hideActionPopup(); showBoardDetail(locate(uid) || loc); } }) : null);
   document.body.append(box);
-  const r = localRect(node.getBoundingClientRect()), b = { width: box.offsetWidth, height: box.offsetHeight };
-  let left = r.left + r.width / 2 - b.width / 2, top = r.top - b.height - 6;
-  if (top < 4) top = r.bottom + 6;
+  const rr = localRect(node.getBoundingClientRect()), b = { width: box.offsetWidth, height: box.offsetHeight };
+  let left = rr.left + rr.width / 2 - b.width / 2, top = rr.top - b.height - 6;
+  if (top < 4) top = rr.bottom + 6;
   left = Math.max(4, Math.min(left, viewW() - b.width - 4));
   box.style.left = left + 'px'; box.style.top = top + 'px';
   setTimeout(() => document.addEventListener('pointerdown', onOutsideAction, true), 0);
   return true;
+}
+
+// モンスターなどの効果の発動を記録する（手動なので、効果の中身は自分で処理する）。対戦なら相手にも知らせて、手札のカードは公開する
+function announceActivation(uid) {
+  const l = locate(uid);
+  if (!l) return;
+  const c = cardOf(l.inst);
+  commit();
+  log(`${c.name} の効果を発動`);
+  finishChange();
+  if (typeof Duel !== 'undefined' && Duel.active) {
+    if (l.zone === 'hand') duelReveal(c, '手札');
+    Duel.t.sendEvent({ type: 'sys', text: `${Duel.me.name}：${c.name} の効果を発動` });
+  }
+  toast(`${c.name} の効果を発動しました（効果の処理は手で行ってください）`);
 }
