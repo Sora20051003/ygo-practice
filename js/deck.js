@@ -11,7 +11,7 @@ const Decks = {
     if (Online.user) {
       // ログイン中：ネットに保存したデッキを使う
       const r = Online.remote || {};
-      this.list = (r.decks || []).map(d => ({ id: d.id, name: d.name, format: d.format || 'ocg', reg: d.reg || 'latest', main: d.main || [], extra: d.extra || [], side: d.side || [] }));
+      this.list = (r.decks || []).map(d => ({ id: d.id, name: d.name, format: d.format || 'ocg', reg: d.reg || 'latest', cutoff: d.cutoff, main: d.main || [], extra: d.extra || [], side: d.side || [] }));
       this.currentId = r.currentDeck;
     } else {
       this.list = store.get('ygo.decks', []);
@@ -68,10 +68,11 @@ const regLoading = new Set();
 function ensureRegLoaded(deck) {
   const ctx = regContext(deck);
   if (!ctx.loading) return;
-  const key = ctx.src.join(':');
+  // 発売日の区切りだけのとき（最新のリスト）は、発売日の表だけ読む
+  const key = ctx.src ? ctx.src.join(':') : 'release';
   if (regLoading.has(key)) return;
   regLoading.add(key);
-  Promise.all([loadRegulation(...ctx.src), loadReleaseDates()])
+  Promise.all([ctx.src ? loadRegulation(...ctx.src) : null, loadReleaseDates()])
     .then(() => { renderDeck(); renderResults(); })
     .catch(e => toast('過去のリストを読み込めませんでした：' + e.message))
     .finally(() => regLoading.delete(key));
@@ -539,8 +540,14 @@ function renderDeck() {
   $('#deck-banlist').textContent = ctx.custom ? customRegNote(ctx.custom)
     : ctx.none ? '禁止・制限なし'
     : ctx.loading ? '読み込み中…'
+    : ctx.cutoff ? `${ctx.reg === 'latest' ? '最新のリスト' : ctx.reg.replace(/-/g, '/') + '〜 のリスト'}：${ctx.endDate.replace(/-/g, '/')} までに発売されたカードが使えます（発売日の区切り）`
     : ctx.date ? `${ctx.reg.replace(/-/g, '/')}〜${ctx.endDate.replace(/-/g, '/')} のリスト：${ctx.endDate.replace(/-/g, '/')}（このリストの最後の日）までに発売されたカードが使えます`
     : (ctx.vector ? '' : '（リスト未取得）');
+  // 発売日の区切り
+  $('#deck-cutoff').value = deck.cutoff || '';
+  $('#deck-cutoff-clear').disabled = !deck.cutoff;
+  if (ctx.custom && ctx.cutoff) $('#deck-banlist').textContent += `（${ctx.endDate.replace(/-/g, '/')} までに発売されたカード）`;
+  if (ctx.none && ctx.cutoff) $('#deck-banlist').textContent = `禁止・制限なし（${ctx.cutoff.replace(/-/g, '/')} までに発売されたカード）`;
 
   for (const sec of ['main', 'extra', 'side']) {
     const grid = $('#deck-' + sec);
@@ -1232,6 +1239,7 @@ function restoreBackup() {
       for (const d of decks) {
         const nd = Decks.blank(String(d.name || '読み込んだデッキ'), FORMATS[d.format] ? d.format : 'ocg');
         if (typeof d.reg === 'string') nd.reg = d.reg;
+        if (typeof d.cutoff === 'string') nd.cutoff = d.cutoff;
         nd.main = (d.main || []).filter(id => DB.byId.has(id));
         nd.extra = (d.extra || []).filter(id => DB.byId.has(id));
         nd.side = (d.side || []).filter(id => DB.byId.has(id));
@@ -1281,6 +1289,10 @@ function setupDeckView() {
   $('#deck-export').onclick = openExport;
   $('#deck-backup').onclick = backupAll;
   // 禁止・制限リストの切り替え（最新・過去・制限なし）
+  // 発売日の区切り（この日までに発売されたカードだけ使う）
+  const setCutoff = v => { const deck = Decks.current(); if (v) deck.cutoff = v; else delete deck.cutoff; Decks.save(); renderDeck(); renderResults(); };
+  $('#deck-cutoff').addEventListener('change', e => setCutoff(e.target.value));
+  $('#deck-cutoff-clear').addEventListener('click', () => setCutoff(''));
   $('#deck-reg').addEventListener('change', e => {
     // オリジナルを作る・編集する
     if (e.target.value === '__new' || e.target.value === '__edit') {

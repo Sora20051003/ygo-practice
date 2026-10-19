@@ -1247,3 +1247,4 @@ body.land .phase-banner { padding: 8px 14px; }
 .ap-tool-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .ap-tool-btns .btn { padding-left: 4px; padding-right: 4px; }
 .search-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12px; margin: 4px 0; }
+.cutoff-input { padding: 4px 6px; font-size: 13px; max-width: 160px; }

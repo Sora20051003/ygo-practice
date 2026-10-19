@@ -142,7 +142,7 @@ function saveDecksOnline(list, currentId) {
 }
 
 // デッキを比べるための決まった形（サーバーの jsonb はキーの順番を変えるので、そろえてから比べる）
-const normDeck = d => ({ id: d.id, name: d.name, format: d.format || 'ocg', reg: d.reg || 'latest', main: d.main || [], extra: d.extra || [], side: d.side || [] });
+const normDeck = d => ({ id: d.id, name: d.name, format: d.format || 'ocg', reg: d.reg || 'latest', cutoff: d.cutoff || null, main: d.main || [], extra: d.extra || [], side: d.side || [] });
 const deckCanon = list => JSON.stringify((list || []).map(normDeck));
 
 // 3つを合わせる：base＝前に同じだった内容、server＝ほかの端末が保存した内容、local＝この端末の内容

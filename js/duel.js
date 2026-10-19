@@ -556,6 +556,7 @@ function enterRoom(code) {
     const dk = Decks.get(Duel.deckId), dr = (dk && dk.reg) || 'latest', cr = dr.startsWith('custom:') ? customReg(dr.slice(7)) : null;
     const reg = cr ? { fmt: cr.base ? cr.base.fmt : (dk ? deckFormat(dk) : 'ocg'), reg: 'custom', custom: { id: cr.id, name: cr.name, base: cr.base || null, overrides: cr.overrides || {} } }
       : { fmt: dk ? deckFormat(dk) : 'ocg', reg: dr.startsWith('custom:') ? 'latest' : dr };
+    if (dk && dk.cutoff) reg.cutoff = dk.cutoff;   // 発売日の区切りも、部屋を作った人のデッキと同じに
     Duel.t.updateRoom({ timeLimit: typeof timeLimit === 'function' ? timeLimit() : 0, clock: {}, mode: 'auto', reg });
   }
   renderDuelLobby();
@@ -1183,20 +1184,22 @@ function regLabel(x) {
 function roomRegContext(x, tmp) {
   if (x.reg !== 'custom' || !x.custom) return regContext(tmp);
   const cr = x.custom;
-  if (!cr.base) return { fmt: x.fmt, reg: 'custom', custom: cr };
-  return { ...baseContext(cr.base.fmt, cr.base.reg, x.fmt), reg: 'custom', custom: cr };
+  const ctx = !cr.base ? { fmt: x.fmt, reg: 'custom', custom: cr } : { ...baseContext(cr.base.fmt, cr.base.reg, x.fmt), reg: 'custom', custom: cr };
+  if (!x.cutoff) return ctx;
+  const end = ctx.endDate && ctx.endDate < x.cutoff ? ctx.endDate : x.cutoff;   // 発売日の区切り
+  return { ...ctx, cutoff: x.cutoff, endDate: end, date: +end.replace(/-/g, ''), loading: ctx.loading || (typeof RELEASE_DATES === 'undefined' && !DB.releaseFailed) };
 }
 // 部屋のレギュレーションで見たときの、そのデッキの問題（使えないカード・枚数オーバー）
 const roomRegLoading = new Set();
 function deckCheckForRoom(deck, r) {
   const x = roomReg(r);
-  const tmp = { ...deck, format: x.fmt, reg: x.reg };
+  const tmp = { ...deck, format: x.fmt, reg: x.reg, cutoff: x.cutoff || undefined };
   const ctx = roomRegContext(x, tmp);
   if (ctx.loading) {
-    const key = ctx.src.join(':');
+    const key = ctx.src ? ctx.src.join(':') : 'release';
     if (!roomRegLoading.has(key)) {
       roomRegLoading.add(key);
-      Promise.all([loadRegulation(...ctx.src), loadReleaseDates()]).then(renderDuelLobby, e => toast('リストを読み込めませんでした：' + e.message)).finally(() => roomRegLoading.delete(key));
+      Promise.all([ctx.src ? loadRegulation(...ctx.src) : null, loadReleaseDates()]).then(renderDuelLobby, e => toast('リストを読み込めませんでした：' + e.message)).finally(() => roomRegLoading.delete(key));
     }
     return { loading: true };
   }
@@ -1219,7 +1222,7 @@ function duelRegSetting(r) {
   const x = roomReg(r);
   const isHost = r && r.host === Duel.me.uid;
   if (!isHost) return el('div', null,
-    el('p', { class: 'muted', text: `レギュレーション：${regLabel(x)}（部屋を作った人が決めます）` }),
+    el('p', { class: 'muted', text: `レギュレーション：${regLabel(x)}${x.cutoff ? `・${x.cutoff.replace(/-/g, '/')} までに発売されたカード` : ''}（部屋を作った人が決めます）` }),
     // 相手のオリジナルを、自分のレギュレーションとして保存できる（デッキ作成で使える）
     x.reg === 'custom' && x.custom ? el('button', { class: 'btn small', text: customReg(x.custom.id) ? '✓ 自分のオリジナルに保存済み（上書きする）' : 'このオリジナルを自分にも保存', onclick: () => { saveCustomReg({ id: x.custom.id, name: x.custom.name, base: x.custom.base || null, overrides: x.custom.overrides || {} }); toast(`「${x.custom.name}」を保存しました（デッキ作成のレギュレーションで選べます）`); renderDuelLobby(); } }) : null);
   const sel = el('select', { class: 'full' });
@@ -1248,10 +1251,18 @@ function duelRegSetting(r) {
     if (a === 'custom') {
       const cr = customReg(b);
       if (!cr) return;
-      Duel.t.updateRoom({ reg: { fmt: cr.base ? cr.base.fmt : 'ocg', reg: 'custom', custom: { id: cr.id, name: cr.name, base: cr.base || null, overrides: cr.overrides || {} } }, ready: {} });
-    } else Duel.t.updateRoom({ reg: { fmt: a, reg: b }, ready: {} });
+      Duel.t.updateRoom({ reg: { fmt: cr.base ? cr.base.fmt : 'ocg', reg: 'custom', custom: { id: cr.id, name: cr.name, base: cr.base || null, overrides: cr.overrides || {} }, cutoff: x.cutoff || null }, ready: {} });
+    } else Duel.t.updateRoom({ reg: { fmt: a, reg: b, cutoff: x.cutoff || null }, ready: {} });
   });
-  return el('label', { class: 'auth-field' }, 'レギュレーション（2人とも同じルールで対戦します）', sel);
+  // 発売日の区切り（この日までに発売されたカードだけ使う）
+  const cut = el('input', { type: 'date', class: 'cutoff-input', value: x.cutoff || '' });
+  const setCut = v => Duel.t.updateRoom({ reg: { ...x, cutoff: v || null }, ready: {} });
+  cut.addEventListener('change', () => setCut(cut.value));
+  return el('div', { class: 'stack' },
+    el('label', { class: 'auth-field' }, 'レギュレーション（2人とも同じルールで対戦します）', sel),
+    el('div', { class: 'row wrap' }, el('span', { class: 'muted', text: '発売日の区切り' }), cut,
+      el('button', { class: 'btn small', text: '✕', title: '区切りをなくす', disabled: !x.cutoff, onclick: () => setCut('') }),
+      el('span', { class: 'muted small-note', text: 'この日までに発売されたカードだけ（空欄＝区切りなし）' })));
 }
 function duelDeckCheck(deck, r) {
   if (!deck) return null;

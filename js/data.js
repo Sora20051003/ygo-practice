@@ -322,7 +322,16 @@ function releaseDate(c, fmt) {
 // デッキに合わせた判定の材料
 // reg：'latest'（最新）／'none'（制限なし）／'YYYY-MM-DD'（過去のリスト）／'custom:ID'（オリジナル）
 // src：読み込みが必要なリスト [ルール, 日付]（過去のリストのとき）
+// 発売日の区切り（deck.cutoff = 'YYYY-MM-DD'）：その日までに発売されたカードだけ使える。
+// 禁止・制限リストとは別に決められる（同じレギュレーションの中で、まだ発売されていない頃の環境を遊ぶため）
 function regContext(deck) {
+  const ctx = regContextBase(deck);
+  const cut = deck && /^\d{4}-\d{2}-\d{2}$/.test(deck.cutoff || '') ? deck.cutoff : null;
+  if (!cut) return ctx;
+  const end = ctx.endDate && ctx.endDate < cut ? ctx.endDate : cut;   // リストの最後の日のほうが早ければ、そちら
+  return { ...ctx, cutoff: cut, endDate: end, date: +end.replace(/-/g, ''), loading: ctx.loading || (typeof RELEASE_DATES === 'undefined' && !DB.releaseFailed) };
+}
+function regContextBase(deck) {
   const fmt = deckFormat(deck);
   const reg = deck.reg || 'latest';
   if (reg.startsWith('custom:')) {
@@ -368,8 +377,8 @@ const isUnreleased = (c, ctx) => !!ctx.date && typeof RELEASE_DATES !== 'undefin
 function limitIn(c, ctx) {
   // オリジナルで決めた枚数がいちばん優先
   if (ctx.custom && ctx.custom.overrides && ctx.custom.overrides[c.cid] !== undefined) return ctx.custom.overrides[c.cid];
+  if (isUnreleased(c, ctx)) return 0;   // 未発売（過去のリスト・発売日の区切り）。「制限なし」でも区切りの日付は効く
   if (ctx.none) return 3;
-  if (isUnreleased(c, ctx)) return 0;
   const v = ctx.vector && ctx.vector.regulation ? ctx.vector.regulation[c.cid] : undefined;
   return v === undefined ? 3 : v;
 }
