@@ -1216,12 +1216,18 @@ function lpRect(player) {
   const node = mine ? $('#my-lp') : $('#opp-bar .lp-box.opp');
   return node && node.offsetParent ? localRect(node.getBoundingClientRect()) : null;
 }
+// 直接攻撃でねらう場所：相手の真ん中の魔法・罠ゾーンのあたり（見つからなければライフの表示）
+function directRect(player) {
+  const mine = player === Auto.duel.me;
+  const node = mine ? $('#field .zone[data-zone="s"][data-idx="2"]') : $('#field [data-ozone="s"][data-oidx="2"]');
+  return node && node.offsetParent ? localRect(node.getBoundingClientRect()) : lpRect(player);
+}
 function playBattleEffects(events, before, after, reduce) {
   let delay = 0;
   for (const ev of events) {
     if (ev.t === 'attack') {
       const a = rectAt(before, ev.from) || rectAt(after, ev.from);
-      const b = ev.to ? (rectAt(before, ev.to) || rectAt(after, ev.to)) : lpRect(1 - ev.con);
+      const b = ev.to ? (rectAt(before, ev.to) || rectAt(after, ev.to)) : directRect(1 - ev.con);
       if (!a || !b) continue;
       setTimeout(() => {
         if (!reduce) {
