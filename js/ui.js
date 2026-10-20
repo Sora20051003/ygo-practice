@@ -323,7 +323,7 @@ function jpCard(c, big = false) {
   // ペンデュラム：イラストの下にP効果の欄と左右のスケール
   const pbox = pend ? el('div', { class: 'jp-pbox' },
     el('div', { class: 'jp-pscale l' }, el('span', { text: '◆' }), el('b', { text: c.ls })),
-    fitLater(el('div', { class: 'jp-pdesc', text: p }), Math.min(2.8, descSize(p.length * 1.6))),
+    fitLater(el('div', { class: 'jp-pdesc', text: p }), Math.min(3.1, descSize(p.length * 1.1))),
     el('div', { class: 'jp-pscale r' }, el('span', { text: '◆' }), el('b', { text: c.rs }))) : null;
 
   return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}`, title: c.name },
@@ -354,6 +354,15 @@ async function fetchEnglishText(id) {
   return p;
 }
 
+// P効果とモンスター効果をつなぐ。カードの絵で分けて表示できるよう、ほかのデータと同じ【Pスケール】【モンスター効果】の見出しを付ける
+function joinPendText(c, p, main) {
+  if (!p) return main;
+  const head = has(c, T.EFFECT) ? 'モンスター効果' : 'フレーバーテキスト';
+  return `【Pスケール：青${c.ls}／赤${c.rs}】
+${p}
+【${head}】
+${main}`;
+}
 // 日本語・英語の効果文（ygoresources.com から取得。一度取ったらブラウザに保存）
 const cardTextCache = new Map();
 function fetchCardTexts(c) {
@@ -363,7 +372,7 @@ function fetchCardTexts(c) {
     try {
       const saved = await idbGet(key);
       if (saved && saved.ja) {
-        if (!c.jaText) setCardText(c, saved.jaP ? `${saved.jaP}\n${saved.ja}` : saved.ja);
+        if (!c.jaText) setCardText(c, joinPendText(c, saved.jaP, saved.ja));
         return saved;
       }
     } catch { /* 保存データが読めなくても取得に進む */ }
@@ -382,7 +391,7 @@ function fetchCardTexts(c) {
     }
     if (!en) en = (await fetchEnglishText(c.id)) || '';
     // テキスト検索用データに無い新しいカードは、ここで取れた文を検索にも使う
-    if (ja && !c.jaText) setCardText(c, jaP ? `${jaP}\n${ja}` : ja);
+    if (ja && !c.jaText) setCardText(c, joinPendText(c, jaP, ja));
     // 通信できない場合はテキスト検索用データの文を使う
     if (!ja && c.jaText) return { ja: c.jaText, jaP: '', en };
     const result = { ja, jaP, en };
