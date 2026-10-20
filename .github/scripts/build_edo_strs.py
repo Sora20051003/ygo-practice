@@ -29,6 +29,32 @@ PHRASES = {
     'change level': 'レベルを変更する', 'change attribute': '属性を変更する', 'gain control': 'コントロールを得る', 'add counter': 'カウンターを置く',
 }
 
+# よくある形の英語の説明（数やだれのが入るもの）を日本語に直す。まるごと一致したときだけ
+WHO = {'your': '自分の', "your opponent's": '相手の', "their": '相手の', 'either': 'どちらかの', 'each': 'お互いの'}
+PATTERNS = [
+    (r"send the top (\d+) cards? of (your|your opponent's|their|either|each) deck to the (?:gy|graveyard)", lambda m: f"{WHO[m[2]]}デッキの上から{m[1]}枚を墓地へ送る"),
+    (r"send the top (\d+) cards? of (your|your opponent's|their|either|each) deck", lambda m: f"{WHO[m[2]]}デッキの上から{m[1]}枚を墓地へ送る"),
+    (r"send the top card of (your|your opponent's|their|either|each) deck to the (?:gy|graveyard)", lambda m: f"{WHO[m[1]]}デッキの上から1枚を墓地へ送る"),
+    (r"draw (\d+) cards?", lambda m: f"{m[1]}枚ドローする"),
+    (r"special summon (?:it|this card|that monster)", lambda m: '特殊召喚する'),
+    (r"special summon (?:it|this card) to your field", lambda m: '自分フィールドに特殊召喚する'),
+    (r"special summon (?:it|this card) to your opponent's field", lambda m: '相手フィールドに特殊召喚する'),
+    (r"banish (?:it|this card)", lambda m: '除外する'),
+    (r"destroy (?:it|this card)", lambda m: '破壊する'),
+    (r"inflict (\d+) damage(?: to your opponent)?", lambda m: f"相手に{m[1]}ダメージを与える"),
+    (r"gain (\d+) lp", lambda m: f"{m[1]}LP回復する"),
+    (r"take (\d+) damage", lambda m: f"{m[1]}ダメージを受ける"),
+]
+def translate(s):
+    t = s.lower().strip().rstrip('.?')
+    if t in PHRASES:
+        return PHRASES[t]
+    for pat, f in PATTERNS:
+        m = re.fullmatch(pat, t)
+        if m:
+            return f(m) + ('？' if s.strip().endswith('?') else '')
+    return None
+
 def get(url):
     with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=180) as r:
         return r.read()
@@ -135,8 +161,8 @@ def main():
                 stat['ja'] += 1
                 if not got[i][1]:
                     stat['similar'] = stat.get('similar', 0) + 1
-            elif s.lower().rstrip('.') in PHRASES:
-                label = PHRASES[s.lower().rstrip('.')]; stat['phrase'] += 1
+            elif translate(s):
+                label = translate(s); stat['phrase'] += 1
             else:
                 label = s; stat['en'] += 1
             row.append(label)
