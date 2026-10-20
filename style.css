@@ -1357,3 +1357,4 @@ body.replaying #view-board { padding-bottom: 150px; }
 .ap-peek-back { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 950; padding: 12px 22px; font-size: 16px; border-radius: 999px; box-shadow: 0 6px 20px rgba(0, 0, 0, .5); }
 @media (min-width: 721px) { .ap-peek-back { bottom: 24px; } }
 .ap-sheet[hidden] { display: none !important; }
+.errata-label { color: #b06bd6; }

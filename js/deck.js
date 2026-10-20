@@ -202,7 +202,9 @@ function errataChoice(deck, c, redraw) {
     deck.errata[c.id] = v;
     Decks.save();
     renderDeck();
-    redraw();
+    // カードの絵と効果文もエラッタ前・後の文章に描き直す（スマホは窓を開き直す）
+    if (isMobile()) closeAllModals();
+    showDeckCard(c);
     toast(`このデッキの「${c.name}」は${v === 'pre' ? 'エラッタ前' : 'エラッタ後（今）'}の効果で処理します`);
   };
   return el('div', { class: 'd-errata' },

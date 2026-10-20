@@ -308,7 +308,9 @@ function jpCard(c, big = false) {
     for (const [bit, ch] of Object.entries(JP_ARROWS)) art.append(el('span', { class: `jp-arrow b${bit}` + ((c.def & bit) ? ' on' : ''), text: ch }));
   }
 
-  const text = c.jaText || '';
+  // エラッタ前の効果で処理する設定のカードは、エラッタ前の文章を描く
+  const preText = errataTextFor(c);
+  const text = (preText && (preText.ja || preText.en)) || c.jaText || '';
   const { p, main } = pend ? splitPendulum(text) : { p: '', main: text };
   const flavor = mon && has(c, T.NORMAL) && !has(c, T.EFFECT);
   const atk = c.atk < 0 ? '?' : c.atk;
@@ -438,6 +440,23 @@ function formatInfo(c) {
   }));
 }
 
+// ---------- エラッタ前の文章 ----------
+// そのカードを今「エラッタ前の効果」で処理する設定か。一人回し・対戦の盤面ではその対戦の設定、ほかは今のデッキの設定（無ければ全体の設定）
+function isPreSelected(id) {
+  if (typeof hasErrata !== 'function' || !hasErrata(id)) return false;
+  const boardShown = typeof Board !== 'undefined' && Board.S && Board.S.auto && typeof Auto !== 'undefined' && Auto.duel && !document.getElementById('view-board').hidden;
+  if (boardShown) return usePre(errataSpec(Auto.duel.errata), id);
+  const d = typeof Decks !== 'undefined' && Decks.current();
+  const v = d && d.errata && d.errata[id];
+  if (v) return v === 'pre';
+  return typeof errataMode === 'function' && errataMode() === 'pre';
+}
+// エラッタ前の文章 { ja } または { en }（エラッタ前で処理する設定でなければ null）
+function errataTextFor(c) {
+  if (!c || typeof ERRATA_TEXTS === 'undefined' || !ERRATA_TEXTS[c.id] || !isPreSelected(c.id)) return null;
+  return ERRATA_TEXTS[c.id];
+}
+
 // カード詳細パネル
 function renderDetail(box, c, extra) {
   box.innerHTML = '';
@@ -492,6 +511,16 @@ function renderDetail(box, c, extra) {
       jaBox.append(el('div', { class: 'card-text muted', text: c.noJp
         ? '日本では未発売のカードのため、日本語の効果文はありません。下の英語の効果を見てください。'
         : '日本語の効果文を取得できませんでした（インターネット接続を確認してください）。' }));
+    }
+    // エラッタ前の効果で処理する設定のカードは、エラッタ前の文章を出す（今の文章は下に畳んでおく）
+    const pre = errataTextFor(c);
+    if (pre) {
+      const cur = el('div', { class: 'ja-text' }, ...jaBox.childNodes);
+      jaBox.innerHTML = '';
+      jaBox.append(el('div', { class: 'text-label errata-label', text: 'エラッタ前の効果（エラッタ前で処理する設定です）' }),
+        el('div', { class: 'card-text', text: pre.ja || pre.en }),
+        pre.en ? el('div', { class: 'muted small-note', text: 'エラッタ前の日本語の文章が見つからなかったため、英語の文章です。' }) : null,
+        el('details', null, el('summary', { text: '今の効果（エラッタ後）' }), cur));
     }
     enBox.textContent = (t && t.en) || '英語テキストが見つかりませんでした（日本先行のカードなど）。';
   });
