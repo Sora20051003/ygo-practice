@@ -165,6 +165,7 @@ function autoRespond(res) {
 
 function autoAfter(noAnim) {
   const d = Auto.duel;
+  if (!d.pending || d.pending.type !== MSG.SELECT_OPTION) Auto.spPick = null;   // 召喚の方法の答えは、すぐ次の選択肢にだけ使う
   if (d.retry) { toast('その選び方はできません。選び直してください'); d.retry = false; }
   autoSave();
   findUseless(d);
@@ -1028,10 +1029,24 @@ function openPrompt() {
         code ? `「${cardName(code)}」の効果の処理の途中です（効果の中の「〜できる」部分を行うかどうか）` : null);
       break;
     }
-    case MSG.SELECT_OPTION:
-      promptModal(el('div', { class: 'stack' }, uniqTexts(p.options.map((o, i) => descText(o) || `選択肢${i + 1}`)).map((t, i) =>
+    case MSG.SELECT_OPTION: {
+      // 召喚の方法をボタンのあとの窓で選んだ直後に、エンジンが同じことを聞いてくる：選んだ方法でそのまま答える（2回聞かない）
+      const pick = Auto.spPick;
+      Auto.spPick = null;
+      const texts = p.options.map(o => descText(o));
+      if (pick && p.options.length === pick.n) {
+        let idx = texts.findIndex(t => t && t === pick.label);
+        if (idx < 0) idx = /^通常の/.test(pick.label) ? texts.findIndex(t => !t) : -1;
+        if (idx < 0) idx = pick.i;
+        answer({ type: RES.SELECT_OPTION, index: idx });
+        break;
+      }
+      // 説明の無い選択肢（「選択肢1」になっていたもの）：ほかの選択肢が召喚の方法なら「通常の方法」と出す
+      const isSummonChoice = texts.some(t => t && /召喚/.test(t));
+      promptModal(el('div', { class: 'stack' }, uniqTexts(texts.map((t, i) => t || (isSummonChoice ? '通常の方法で召喚' : `選択肢${i + 1}`))).map((t, i) =>
         el('button', { class: 'btn full', text: t, onclick: () => answer({ type: RES.SELECT_OPTION, index: i }) }))));
       break;
+    }
     case MSG.SELECT_POSITION:
       promptModal(el('div', { class: 'stack' }, [1, 2, 4, 8].filter(x => p.positions & x).map(x =>
         el('button', { class: 'btn full', text: POS_NAME[x], onclick: () => answer({ type: RES.SELECT_POSITION, position: x }) }))));
@@ -1158,7 +1173,7 @@ function runAction(a) {
   if (!a.choose) { autoRespond(a.res); return; }
 
   promptModal(el('div', { class: 'stack' }, el('p', { class: 'ap-question', text: a.question || '表示形式を選んでください' })), [
-    ...uniqTexts(a.choose.map(c => c.label)).map((label, i) => ({ label, primary: i === 0, onClick: () => { closePromptModal(); autoRespond(a.choose[i].res); return false; } })),
+    ...uniqTexts(a.choose.map(c => c.label)).map((label, i) => ({ label, primary: i === 0, onClick: () => { closePromptModal(); Auto.spPick = a.question ? { label: a.choose[i].label, i, n: a.choose.length } : null; autoRespond(a.choose[i].res); return false; } })),
     { label: 'やめる', onClick: () => {} },
   ], a.title2 || (a.name ? `「${a.name}」を召喚する` : '召喚する'));
 }
