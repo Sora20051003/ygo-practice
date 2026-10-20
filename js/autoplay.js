@@ -94,9 +94,26 @@ function autoActions(inst) {
     add(p.chains, actLabel, BATTLE.CHAIN, 'y');
     add(p.attacks, c => (c.can_direct ? '攻撃する（直接攻撃できます）' : '攻撃する'), BATTLE.ATTACK, 'b');
   }
+  // 同じ名前の特殊召喚（例：エクシーズ召喚の方法が2つあるカード）は1つのボタンにまとめ、押したあとに方法を選ぶ
+  const merged = [], groups = new Map();
+  for (const it of out) {
+    if (it.res && it.res.type === RES.SELECT_IDLECMD && it.res.action === IDLE.SPSUMMON) {
+      const g = groups.get(it.label);
+      if (g) { g.push(it); continue; }
+      const ng = [it]; groups.set(it.label, ng); merged.push(ng);
+    } else merged.push([it]);
+  }
+  const items = merged.map(g => {
+    if (g.length === 1) return g[0];
+    const name = cardOf(inst).name;
+    return {
+      label: g[0].label, kind: g[0].kind, name, question: 'どの方法で召喚しますか？', title2: `「${name}」を${g[0].label}する`,
+      choose: g.map((x, i) => { const sp = p.special_summons[x.res.index]; return { label: (sp && descText(sp.description)) || `通常の${g[0].label}`, res: x.res }; }),   // 説明の無い方法は、ふつうの召喚の方法
+    };
+  });
   // 召喚しかできないモンスターは、「攻撃表示で召喚」「セット」をそのままボタンにする
-  if (out.length === 1 && out[0].choose) return out[0].choose.map(c => ({ label: c.label === '表側攻撃表示で召喚' ? '攻撃表示で召喚' : c.label, kind: 'b', res: c.res }));
-  return uniqLabels(out);
+  if (items.length === 1 && items[0].choose && items[0].label === '召喚する') return items[0].choose.map(c => ({ label: c.label === '表側攻撃表示で召喚' ? '攻撃表示で召喚' : c.label, kind: 'b', res: c.res }));
+  return uniqLabels(items);
 }
 
 // 光らせる（黄＝発動、青＝召喚）。エンジンが「できる」と言ったものだけ
@@ -1132,10 +1149,10 @@ function autoRowButtons(inst, onDone) {
 function runAction(a) {
   if (!a.choose) { autoRespond(a.res); return; }
 
-  promptModal(el('div', { class: 'stack' }, el('p', { class: 'ap-question', text: '表示形式を選んでください' })), [
-    ...a.choose.map((c, i) => ({ label: c.label, primary: i === 0, onClick: () => { closePromptModal(); autoRespond(c.res); return false; } })),
+  promptModal(el('div', { class: 'stack' }, el('p', { class: 'ap-question', text: a.question || '表示形式を選んでください' })), [
+    ...uniqTexts(a.choose.map(c => c.label)).map((label, i) => ({ label, primary: i === 0, onClick: () => { closePromptModal(); autoRespond(a.choose[i].res); return false; } })),
     { label: 'やめる', onClick: () => {} },
-  ], a.name ? `「${a.name}」を召喚する` : '召喚する');
+  ], a.title2 || (a.name ? `「${a.name}」を召喚する` : '召喚する'));
 }
 
 // 発動しても何も起きない永続魔法・永続罠を調べる（試し発動して確かめる）
