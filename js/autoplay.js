@@ -95,7 +95,7 @@ function autoActions(inst) {
   }
   // 召喚しかできないモンスターは、「攻撃表示で召喚」「セット」をそのままボタンにする
   if (out.length === 1 && out[0].choose) return out[0].choose.map(c => ({ label: c.label === '表側攻撃表示で召喚' ? '攻撃表示で召喚' : c.label, kind: 'b', res: c.res }));
-  return out;
+  return uniqLabels(out);
 }
 
 // 光らせる（黄＝発動、青＝召喚）。エンジンが「できる」と言ったものだけ
@@ -993,8 +993,8 @@ function openPrompt() {
       break;
     }
     case MSG.SELECT_OPTION:
-      promptModal(el('div', { class: 'stack' }, p.options.map((o, i) =>
-        el('button', { class: 'btn full', text: descText(o) || `選択肢${i + 1}`, onclick: () => answer({ type: RES.SELECT_OPTION, index: i }) }))));
+      promptModal(el('div', { class: 'stack' }, uniqTexts(p.options.map((o, i) => descText(o) || `選択肢${i + 1}`)).map((t, i) =>
+        el('button', { class: 'btn full', text: t, onclick: () => answer({ type: RES.SELECT_OPTION, index: i }) }))));
       break;
     case MSG.SELECT_POSITION:
       promptModal(el('div', { class: 'stack' }, [1, 2, 4, 8].filter(x => p.positions & x).map(x =>
@@ -1373,4 +1373,16 @@ function showChainStack() {
   pop.animate([{ opacity: 0 }, { opacity: 1, offset: 0.12 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }], { duration: fast ? 900 : 1600, easing: 'linear', fill: 'both' })
     .finished.then(() => { pop.remove(); showNextActivation(); }, () => { pop.remove(); showNextActivation(); });
   pop.addEventListener('click', () => pop.getAnimations({ subtree: true }).forEach(a => a.finish()));
+}
+
+// 同じ文の選択肢が2つ以上あると見分けられないので、番号を付ける（効果の説明が同じになってしまうカードのため）
+function uniqTexts(list) {
+  const n = new Map();
+  for (const t of list) n.set(t, (n.get(t) || 0) + 1);
+  const k = new Map();
+  return list.map(t => { if (n.get(t) < 2) return t; const i = (k.get(t) || 0) + 1; k.set(t, i); return `${t}（${i}つ目）`; });
+}
+function uniqLabels(items) {
+  const t = uniqTexts(items.map(x => x.label));
+  return items.map((x, i) => ({ ...x, label: t[i] }));
 }
