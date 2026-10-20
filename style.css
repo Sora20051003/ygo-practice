@@ -428,9 +428,10 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
   border: 0.7cqw solid; border-color: rgba(255, 255, 255, 0.5) rgba(0, 0, 0, 0.55) rgba(0, 0, 0, 0.55) rgba(255, 255, 255, 0.5);
   box-shadow: 0 0 0 0.3cqw rgba(0, 0, 0, 0.5);
 }
-/* ペンデュラム（本物と同じ比率。カードの高さは 145.8cqw）：イラストは 24.5〜118cqw、P効果の欄は 96〜118cqw でイラストに重なる、モンスター効果の欄は 118.5cqw から */
-.cardface.jp.pend .jp-art { top: 24.5cqw; left: 6.6cqw; width: 86.8cqw; height: 93.5cqw; }
-.cardface.jp.pend .jp-art img { object-position: center 30%; }
+/* ペンデュラム（本物と同じ比率。カードの高さは 145.8cqw）：イラストは 24.5〜96cqw、P効果とスケールの欄は 96〜118cqw（イラストは重ねない）、モンスター効果の欄は 118.5cqw から
+   ペンデュラムのイラスト画像は欄の裏の部分まで入った縦長なので、幅に合わせて上の部分（欄より上に見える部分）だけを出す */
+.cardface.jp.pend .jp-art { top: 24.5cqw; left: 6.6cqw; width: 86.8cqw; height: 71.5cqw; }
+.cardface.jp.pend .jp-art img { object-position: center top; }
 .cardface.jp.pend .jp-box { top: 118.5cqw; padding-top: 0.4cqw; padding-bottom: 0.4cqw; }
 .jp-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .jp-arrow { position: absolute; font-size: 6.5cqw; line-height: 1; color: rgba(20, 20, 30, 0.75); }
@@ -442,16 +443,16 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
 
 /* ペンデュラム効果の欄と左右のスケール */
 .jp-pbox {
-  position: absolute; top: 96cqw; left: 7.3cqw; right: 7.3cqw; height: 22cqw;
+  position: absolute; top: 97.6cqw; left: 6.6cqw; right: 6.6cqw; height: 20.4cqw;
   display: grid; grid-template-columns: 8cqw 1fr 8cqw;
-  background: rgba(225, 240, 235, 0.35); border-top: 0.4cqw solid rgba(0, 0, 0, 0.45);
+  background: rgba(225, 240, 235, 0.85); border: 0.4cqw solid rgba(0, 0, 0, 0.45);
 }
 .jp-pscale { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
 .jp-pscale span { font-size: 4cqw; }
 .jp-pscale b { font-size: 5.6cqw; font-weight: 900; color: #111; }
 .jp-pscale.l span { color: #1d5fb8; } .jp-pscale.r span { color: #c0392b; }
 .jp-pdesc {
-  background: rgba(246, 239, 220, 0.82); color: #111; padding: 0.6cqw 1.2cqw; overflow: hidden;
+  background: #f6efdc; color: #111; padding: 0.6cqw 1.2cqw; overflow: hidden;
   line-height: 1.2; white-space: pre-line; word-break: break-all;
 }
 
