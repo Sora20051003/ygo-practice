@@ -89,7 +89,7 @@ function engineLoad(onStatus) {
     }
     // 効果の説明（選択肢の文）。EDOPro の番号順にそろえたもの
     if (typeof EDO_STRS === 'undefined') {
-      try { await loadScript('data/edo-strs.js?d=' + new Date().toISOString().slice(0, 10)); } catch (e) { console.warn('効果の説明のデータを読めませんでした', e); }
+      try { await loadScript('data/edo-strs.js?h=' + new Date().toISOString().slice(0, 13)); } catch (e) { console.warn('効果の説明のデータを読めませんでした', e); }
     }
     onStatus && onStatus('自動処理の準備中…（共通スクリプトを読み込んでいます）');
     const texts = await Promise.all(CORE_SCRIPTS.map(n => fetchScript(n, n)));
