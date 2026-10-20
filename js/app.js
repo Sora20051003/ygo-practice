@@ -87,7 +87,21 @@ async function prepareTextSearch(task) {
   }
 }
 
+// アプリのファイルが全部読み込めたか（新しい版を出した直後などに、通信の具合で一部だけ読めないことがある）
+function checkScriptsLoaded() {
+  const missing = [
+    ['board.js', typeof renderBoard], ['engine.js', typeof engineLoad], ['autoplay.js', typeof autoStart], ['glow.js', typeof computeGlow],
+    ['duel.js', typeof setupDuel], ['friends.js', typeof startFriends], ['replay.js', typeof startReplay], ['deck.js', typeof openSamples],
+  ].filter(x => x[1] !== 'function').map(x => x[0]);
+  if (!missing.length) return;
+  console.warn('読み込めなかったファイル', missing);
+  document.body.append(el('div', { class: 'update-banner' },
+    el('span', { text: `アプリの一部（${missing.join('・')}）を読み込めませんでした。再読み込みしてください。` }),
+    el('button', { class: 'btn small primary', text: '再読み込み', onclick: () => freshReload(Date.now()) })));
+}
+
 async function init() {
+  checkScriptsLoaded();
   for (const t of $$('.tab')) t.addEventListener('click', () => switchView(t.dataset.view));
   // ネット版ならログインが終わるまで待つ
   try { await initAuth(); } catch (e) {

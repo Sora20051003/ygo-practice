@@ -728,7 +728,7 @@ function renderBoard() {
     $('#b-used').innerHTML = '';
     return;
   }
-  Board.glow = computeGlow(S);
+  Board.glow = typeof computeGlow === 'function' ? computeGlow(S) : null;   // glow.js が読み込めていなくても盤面は出す
   const blank = () => el('div', { class: 'zone blank' });
   const dueling = typeof Duel !== 'undefined' && Duel.active;
   const withOpp = dueling || !!(S.auto && S.opp);   // 自動処理モードでは CPU の盤面も出す
