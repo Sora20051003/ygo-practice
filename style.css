@@ -1248,3 +1248,9 @@ body.land .phase-banner { padding: 8px 14px; }
 .ap-tool-btns .btn { padding-left: 4px; padding-right: 4px; }
 .search-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12px; margin: 4px 0; }
 .cutoff-input { padding: 4px 6px; font-size: 13px; max-width: 160px; }
+/* サンプルデッキ */
+.sample-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.sample-item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.sample-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.sample-head b { font-size: 15px; }
+.sample-cards { font-size: 12px; line-height: 1.6; display: flex; flex-direction: column; gap: 4px; }

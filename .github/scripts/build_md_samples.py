@@ -2,7 +2,7 @@
 # 禁止・制限リストの期間（レギュレーション）ごとに、Master Duel Meta の大会上位・高ランクのデッキから
 # よく勝っているデッキタイプを選び、その代表のデッキを1つずつ入れる。
 # アプリからは Master Duel Meta に直接つなげない（ブラウザからの読み込みが許可されていない）ので、ここで作っておく。
-import json, time, urllib.request, urllib.parse, datetime, sys
+import os, json, time, urllib.request, urllib.parse, datetime, sys
 
 UA = {'User-Agent': 'ygo-practice-sample-builder (github.com/Sora20051003/ygo-practice)'}
 MDM = 'https://www.masterduelmeta.com/api/v1/top-decks'
@@ -41,9 +41,12 @@ def main():
     dates = [d for d in dates if d <= today]
     # 英語のカード名 → カードのパスワード（YGOPRODeck）
     cards = get('https://db.ygoprodeck.com/api/v7/cardinfo.php')['data']
-    by_name = {}
+    by_name, by_key = {}, {}
+    norm = lambda s: ''.join(ch for ch in s.lower() if ch.isalnum())
     for c in cards:
-        by_name.setdefault(c['name'], c['id'])
+        # 同じ名前が何件かある（別番号のイラスト違いなど）ときは、いちばん小さい番号（元のカード）にする
+        by_name[c['name']] = min(by_name.get(c['name'], c['id']), c['id'])
+        by_key[norm(c['name'])] = min(by_key.get(norm(c['name']), c['id']), c['id'])
     # 前に作ったものがあれば、終わった期間はそのまま使う（毎日すべて取り直さない。新しい2つの期間だけ取り直す）
     old = {}
     try:
@@ -54,7 +57,7 @@ def main():
         pass
     periods = {}
     for i, start in enumerate(dates):
-        if start in old and i < len(dates) - 2:
+        if start in old and i < len(dates) - 2 and not os.environ.get('FULL'):   # FULL=1 で全部作り直す
             periods[start] = old[start]
             continue
         end =dates[i + 1] if i + 1 < len(dates) else '2999-01-01'
@@ -88,7 +91,7 @@ def main():
                 res = []
                 for e in lst or []:
                     name = (e.get('card') or {}).get('name') or ''
-                    res.append([by_name.get(name, name), e.get('amount') or 1])
+                    res.append([by_name.get(name) or by_key.get(norm(name)) or name, e.get('amount') or 1])
                 return res
             tt = d.get('tournamentType') or {}
             src = (tt.get('name') + ' ' + (d.get('tournamentPlacement') or '')).strip() if tt else ((d.get('rankedType') or {}).get('name') or '')

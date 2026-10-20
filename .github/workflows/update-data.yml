@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: "0 3 * * *"   # 毎日 12:00（日本時間）
   workflow_dispatch:       # 手動でも実行できる
+    inputs:
+      full:
+        description: "サンプルデッキを全部作り直す（1 を入れる）"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -21,6 +26,8 @@ jobs:
       - name: 自動処理用の EDOPro カードデータを作り直す
         run: python3 .github/scripts/build_edo_cards.py
       - name: マスターデュエルのサンプルデッキを作り直す（失敗しても、ほかの更新は続ける）
+        env:
+          FULL: ${{ inputs.full }}
         run: python3 .github/scripts/build_md_samples.py || echo "サンプルデッキの更新に失敗"
       - name: 変わっていれば記録して公開
         env:

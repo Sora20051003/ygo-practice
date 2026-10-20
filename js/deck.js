@@ -1342,6 +1342,7 @@ function setupDeckView() {
   });
   $('#deck-code').onclick = openDeckCode;
   $('#deck-code-import').onclick = openCodeImport;
+  $('#deck-samples').onclick = openSamples;
   $('#deck-image-import').onclick = () => {
     const input = el('input', { type: 'file', accept: 'image/*,.pdf,application/pdf' });
     input.addEventListener('change', async () => {
@@ -1460,4 +1461,127 @@ function customRegNote(cr) {
   const n = Object.keys(cr.overrides || {}).length;
   const base = cr.base ? `${FORMATS[cr.base.fmt].label}・${cr.base.reg === 'latest' ? '最新' : cr.base.reg.replace(/-/g, '/')}を元に` : '完全オリジナル';
   return `オリジナル（${base}、${n}枚を変更）`;
+}
+
+// ---------- サンプルデッキ ----------
+// マスターデュエル：data/md-samples.js（Master Duel Meta の大会上位・高ランクのデッキ。毎日自動で更新）
+// OCG：data/ocg-samples.js（手作りの代表的なデッキ。大会のリストそのものではない）
+// どちらも { periods: { 'リストの開始日': [{ t: デッキタイプ, s: 出どころ, d: 日付, m: [[カード, 枚数]], x: [...] }] } }
+const SAMPLE_FILES = { md: 'data/md-samples.js', ocg: 'data/ocg-samples.js' };
+let ocgSamples = null;
+const sampleData = fmt => (fmt === 'md' ? (typeof MD_SAMPLES !== 'undefined' ? MD_SAMPLES : null) : ocgSamples);
+async function loadSamples(fmt) {
+  if (sampleData(fmt)) return sampleData(fmt);
+  const v = '?v=' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');
+  // OCG もマスターデュエルのリストを元にするので、両方読む
+  for (const k of fmt === 'md' ? ['md'] : ['md', 'ocg']) {
+    try { await loadScript(SAMPLE_FILES[k] + v); } catch { /* 無ければ空 */ }
+  }
+  if (fmt === 'ocg') ocgSamples = buildOcgSamples();
+  return sampleData(fmt);
+}
+// OCG：選んだデッキタイプごとに、マスターデュエルのいちばん新しい大会上位のリストを使う
+function buildOcgSamples() {
+  if (typeof OCG_SAMPLE_PICKS === 'undefined' || typeof MD_SAMPLES === 'undefined') return null;
+  const mdPeriods = Object.keys(MD_SAMPLES.periods).sort().reverse();
+  const periods = {};
+  for (const [p, pick] of Object.entries(OCG_SAMPLE_PICKS)) {
+    periods[p] = [];
+    for (const [ja, type] of pick.types) {
+      let found = null;
+      for (const mp of mdPeriods) { found = (MD_SAMPLES.periods[mp] || []).find(s => s.t === type); if (found) break; }
+      if (found) periods[p].push({ ...found, t: ja, s: `マスターデュエルの大会上位のリストを元に（${found.s}）`, ocgFix: true });
+    }
+  }
+  return { periods, notes: Object.fromEntries(Object.entries(OCG_SAMPLE_PICKS).map(([p, x]) => [p, x.note])) };
+}
+// カード（パスワード、または名前）→ アプリのカード
+function sampleCard(v) {
+  if (typeof v === 'number') return DB.byId.get(v) || null;
+  const n = normalizeText(v);
+  const k = enKey(v);   // 記号の違い（「Maliss <P> March Hare」と「Maliss P March Hare」など）を気にしない
+  return DB.cards.find(c => c.name === v || (c.en && c.en.toLowerCase() === String(v).toLowerCase())) || DB.cards.find(c => c.nkey === n)
+    || (k ? DB.cards.find(c => c.en && enKey(c.en) === k) : null) || null;
+}
+// サンプルのリスト → デッキ。fmt・reg のルールに合わせて、使えないカードは外し、枚数オーバーは減らす
+function sampleToDeck(s, fmt, reg) {
+  const res = { main: [], extra: [], unknown: [], fixed: [] };
+  const ctx = fmt ? regContext({ format: fmt, reg: reg || 'latest' }) : null;
+  const used = new Map();
+  for (const [sec, list] of [['main', s.m], ['extra', s.x]]) {
+    for (const [v, n] of list || []) {
+      const c = sampleCard(v);
+      if (!c) { res.unknown.push(String(v)); continue; }
+      let cnt = n;
+      if (ctx) {
+        const lim = cardAllowed(c, fmt) ? limitIn(c, ctx) : 0;
+        const room = Math.max(0, lim - (used.get(c.name) || 0));
+        if (cnt > room) { res.fixed.push(`${c.name}（${n}枚→${room}枚）`); cnt = room; }
+        used.set(c.name, (used.get(c.name) || 0) + cnt);
+      }
+      for (let i = 0; i < cnt; i++) res[isExtraType(c) ? 'extra' : sec].push(c.id);
+    }
+  }
+  return res;
+}
+async function openSamples() {
+  const cur = Decks.current();
+  let fmt = cur ? deckFormat(cur) : 'ocg';
+  const body = el('div', { class: 'stack samples' });
+  const close = showModal({ title: '🏆 サンプルデッキ', wide: true, body });
+  const draw = async () => {
+    body.innerHTML = '';
+    body.append(el('p', { class: 'muted', text: '読み込み中…' }));
+    const data = await loadSamples(fmt);
+    body.innerHTML = '';
+    const tabs = el('div', { class: 'seg' }, Object.entries(FORMATS).map(([k, f]) => el('button', { class: k === fmt ? 'on' : '', text: f.label, onclick: () => { fmt = k; draw(); } })));
+    body.append(tabs);
+    const periods = data ? Object.keys(data.periods).filter(p => (data.periods[p] || []).length).sort().reverse() : [];
+    if (!periods.length) { body.append(el('p', { class: 'muted', text: 'このルールのサンプルデッキはまだありません。' })); return; }
+    // 今のデッキのレギュレーションに当たる期間を最初に選ぶ
+    const want = cur && deckFormat(cur) === fmt && /^\d{4}-/.test(cur.reg || '') ? cur.reg : null;
+    const pick = (want && periods.find(p => p <= want)) || periods[0];
+    const latest = DB.banlists[fmt] && DB.banlists[fmt].date;
+    const sel = el('select', null, periods.map(p => el('option', { value: p, text: `${p.replace(/-/g, '/')}〜 のリスト${p === latest ? '（最新）' : ''}（${data.periods[p].length}個）`, selected: p === pick })));
+    const list = el('div', { class: 'sample-list' });
+    const note = fmt === 'md'
+      ? el('p', { class: 'muted small-note' }, 'その期間の大会上位・高ランクのデッキから、よく勝っているデッキタイプを順に並べています（出どころ：', el('a', { href: 'https://www.masterduelmeta.com/', target: '_blank', rel: 'noopener', text: 'Master Duel Meta' }), '）。')
+      : el('p', { class: 'muted small-note', text: 'OCGの大会のリストは自動で取れる公開データが無いため、その期間にOCGの大会で入賞しているデッキタイプを選び、中身はマスターデュエルの大会上位のリストを元に、OCGの禁止・制限に合わせて枚数を直したものです（OCGの大会のリストそのものではありません）。' });
+    const fill = () => {
+      list.innerHTML = '';
+      const p = sel.value;
+      if (data.notes && data.notes[p]) list.append(el('p', { class: 'muted small-note', text: '選んだデッキタイプ：' + data.notes[p] }));
+      for (const s of data.periods[p]) {
+        const d = sampleToDeck(s, fmt, p === latest ? 'latest' : p);
+        const body2 = el('div', { class: 'sample-cards', hidden: true });
+        const cardsOf = ids => { const m = new Map(); for (const id of ids) m.set(id, (m.get(id) || 0) + 1); return [...m].map(([id, n]) => `${DB.byId.get(id).name}×${n}`).join('、'); };
+        body2.append(el('div', null, el('b', { text: `メイン${d.main.length}枚：` }), cardsOf(d.main)),
+          el('div', null, el('b', { text: `EX${d.extra.length}枚：` }), cardsOf(d.extra) || 'なし'),
+          d.fixed.length ? el('div', { class: 'warn', text: FORMATS[fmt].label + 'のルールに合わせて減らしたカード：' + d.fixed.join('、') }) : null,
+          d.fixed.length && d.main.length < 40 ? el('div', { class: 'warn', text: `減らした分、メインデッキが${d.main.length}枚になっています。追加したあと、40枚になるようにカードを足してください。` }) : null,
+          d.unknown.length ? el('div', { class: 'warn', text: 'アプリに無いカード（入りません）：' + d.unknown.join('、') }) : null);
+        list.append(el('div', { class: 'sample-item' },
+          el('div', { class: 'sample-head' },
+            el('b', { text: s.t }),
+            el('span', { class: 'muted small-note', text: [s.s, s.d && s.d.replace(/-/g, '/')].filter(Boolean).join('・') }),
+            el('span', { class: 'muted small-note', text: `メイン${d.main.length}・EX${d.extra.length}` + (d.fixed.length ? `・${d.fixed.length}種類をルールに合わせて調整` : '') })),
+          el('div', { class: 'row' },
+            el('button', { class: 'btn small', text: '中身を見る', onclick: () => { body2.hidden = !body2.hidden; } }),
+            el('button', { class: 'btn small primary', text: '＋ デッキに追加', onclick: () => {
+              const nd = Decks.blank(`${s.t}（${FORMATS[fmt].short}・${p.replace(/-/g, '/')}〜）`, fmt);
+              nd.reg = p === latest ? 'latest' : p;
+              nd.main = d.main; nd.extra = d.extra;
+              Decks.list.push(nd); Decks.currentId = nd.id; Decks.save();
+              renderDeck(); renderResults();
+              close();
+              toast(`「${nd.name}」を追加しました`);
+            } })),
+          body2));
+      }
+    };
+    sel.addEventListener('change', fill);
+    body.append(el('label', { class: 'auth-field' }, 'レギュレーション（禁止・制限リストの期間）', sel), note, list);
+    fill();
+  };
+  draw();
 }
