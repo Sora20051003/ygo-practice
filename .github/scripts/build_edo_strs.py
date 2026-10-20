@@ -10,6 +10,9 @@ EDO = 'https://raw.githubusercontent.com/ProjectIgnis/BabelCDB/master/cards.cdb'
 MC_EN = 'https://raw.githubusercontent.com/mycard/ygopro-database/master/locales/en-US/cards.cdb'
 MC_JA = 'https://raw.githubusercontent.com/mycard/ygopro-database/master/locales/ja-JP/cards.cdb'
 OUT = 'data/edo-strs.js'
+# 英語の説明 → 日本語の訳（日本語の説明と対応づけられないもの用。手で作った辞書。新しいカードの分はあとで足す）
+TR_FILE = 'data/strs-ja.json'
+TR = {}
 
 # よくある短い言い回し（まるごと一致したときだけ置きかえる）
 PHRASES = {
@@ -116,6 +119,12 @@ def sim(a, b):
     return len(A & B) / min(len(A), len(B)) + 0.1 * len(A & B) / len(A | B)
 
 def main():
+    global TR
+    try:
+        with open(TR_FILE, encoding='utf-8') as fp:
+            TR = json.load(fp)
+    except Exception:
+        TR = {}
     edo, en, ja = strs(get(EDO)), strs(get(MC_EN)), strs(get(MC_JA))
     print('EDOPro', len(edo), 'mycard en', len(en), 'ja', len(ja), file=sys.stderr)
     table, stat = {}, {'ja': 0, 'phrase': 0, 'en': 0}
@@ -161,6 +170,8 @@ def main():
                 stat['ja'] += 1
                 if not got[i][1]:
                     stat['similar'] = stat.get('similar', 0) + 1
+            elif s in TR:
+                label = TR[s]; stat['dict'] = stat.get('dict', 0) + 1   # 訳した辞書（data/strs-ja.json）
             elif translate(s):
                 label = translate(s); stat['phrase'] += 1
             else:
