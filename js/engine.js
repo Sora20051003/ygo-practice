@@ -178,6 +178,15 @@ const MASTER_RULES = {
   mr1: { label: 'マスタールール（2008〜2011）', short: 'MR1', note: '2008年3月〜2011年2月。EXモンスターゾーン・ペンデュラムゾーンはありません。先攻1ターン目もドローするなど、当時の処理になります。', emz: false, pzone: false },
 };
 
+// EXモンスターゾーンの無いルール（マスタールール1〜3）にはリンクモンスターが無かったので、EXデッキに入れない（出せないようにする）
+const isLinkCode = code => { const c = DB.byId.get(code); return !!(c && has(c, T.LINK)); };
+const ruleExtra = (extra, rule) => (MASTER_RULES[rule] && !MASTER_RULES[rule].emz ? extra.filter(code => !isLinkCode(code)) : extra);
+// 外したことを知らせる
+function noteLinkRemoved(extra, rule) {
+  const n = extra.length - ruleExtra(extra, rule).length;
+  if (n && typeof toast === 'function') toast(`${MASTER_RULES[rule].label}にはリンクモンスターが無いので、EXデッキのリンクモンスター${n}枚は使えません（EXデッキから外して始めました）`);
+}
+
 const TOOL_CODE = 999990001;
 const TOOL_LABELS = ['1枚ドロー', 'デッキから手札に加える', 'デッキから墓地へ送る', '手札をデッキに戻す', 'デッキをシャッフル'];
 const TOOL_LUA = `local s,id=GetID()
@@ -294,14 +303,14 @@ class AutoDuel {
     const rand = seededRandom(Number(BigInt(this.seed[0]) & 0xffffffffn) || 1);
     const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
     for (const id of shuffle(rest)) add(me, id, LOC.DECK);
-    for (const id of this.extra) add(me, id, LOC.EXTRA);
+    for (const id of ruleExtra(this.extra, this.rule)) add(me, id, LOC.EXTRA);
     if (this.tools) { Engine.scripts.set(`c${TOOL_CODE}.lua`, TOOL_LUA); add(me, TOOL_CODE, LOC.REMOVED, POS.FU_ATK); }
     if (this.opp) {
       const rest = [...this.opp.main];
       // 相手の初手を指定したとき（誘発練習）：そのカードを手札に置き、残りを引く
       for (const id of this.opp.handIds || []) { const i = rest.indexOf(id); if (i >= 0) rest.splice(i, 1); add(1 - me, id, LOC.HAND); }
       for (const id of shuffle(rest)) add(1 - me, id, LOC.DECK);
-      for (const id of this.opp.extra || []) add(1 - me, id, LOC.EXTRA);
+      for (const id of ruleExtra(this.opp.extra || [], this.rule)) add(1 - me, id, LOC.EXTRA);
     } else {
       for (let i = 0; i < 40; i++) add(1 - me, OPP_FILLER, LOC.DECK);
     }
@@ -364,7 +373,7 @@ class AutoDuel {
     const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
     this.net.decks.forEach(([main, extra], p) => {
       for (const code of shuffle([...main])) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.DECK, sequence: 2, position: POS.FD_ATK });
-      for (const code of extra) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.EXTRA, sequence: 2, position: POS.FD_ATK });
+      for (const code of ruleExtra(extra, this.rule)) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.EXTRA, sequence: 2, position: POS.FD_ATK });
     });
     L.startDuel(this.h);
   }

@@ -339,6 +339,7 @@ async function autoStart(handIds) {
   Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), errata: errataMode() });
   Auto.deckId = deck.id;
   Auto.duel.cpuSlow = cpuDelay() > 0;
+  noteLinkRemoved(Auto.duel.extra, Auto.duel.rule);
   try { Auto.duel.start(); } catch (e) { console.error(e); showError('開始できませんでした', e); Auto.duel = null; renderBoard(); return; }
   autoAfter();
   timerStart();

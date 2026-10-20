@@ -1122,6 +1122,7 @@ async function beginNetDuel() {
   showLoading(null);
   const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5', errata: r.errata,
     chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: !!r.firstDraw });
+  noteLinkRemoved(decks[idx][1], r.rule || 'mr5');
   d.onSend = (res, i) => Duel.t.sendEvent({ type: 'eng', i, res: JSON.stringify(res, bigReplacer) });
   Auto.on = true; Auto.net = true; Auto.duel = d; Auto.redoLog = null; Auto.resumed = true;
   // 読み込み直したときは、保存していた返答を流し直して続きから
