@@ -108,7 +108,15 @@ function autoActions(inst) {
     const name = cardOf(inst).name;
     return {
       label: g[0].label, kind: g[0].kind, name, question: 'どの方法で召喚しますか？', title2: `「${name}」を${g[0].label}する`,
-      choose: g.map((x, i) => { const sp = p.special_summons[x.res.index]; return { label: (sp && descText(sp.description)) || `通常の${g[0].label}`, res: x.res }; }),   // 説明の無い方法は、ふつうの召喚の方法
+      // 特殊召喚の一覧には方法の説明が付いてこないので、並び順で決める（EDOPro は「通常の方法」→「カードに書かれた別の方法」の順に登録する）。
+      // 別の方法の名前は、そのカードの効果の説明のうち召喚の言葉（例：「エクシーズ召喚」）を含むものから取る
+      choose: g.map((x, i) => {
+        const sp = p.special_summons[x.res.index], code = sp && sp.code;
+        const own = sp && descText(sp.description);
+        const alt = (typeof EDO_STRS !== 'undefined' && EDO_STRS[code] || []).filter(s => s && s.includes(g[0].label.replace('する', '')));
+        const label = own || (i === 0 ? `通常の${g[0].label}` : alt[i - 1] || `別の方法で${g[0].label}`);
+        return { label, res: x.res };
+      }),
     };
   });
   // 召喚しかできないモンスターは、「攻撃表示で召喚」「セット」をそのままボタンにする
