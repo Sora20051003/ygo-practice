@@ -956,7 +956,7 @@ async function confirmDeckRules(deck, go) {
   const ctx = regContext(deck);
   if (ctx.loading) {
     showLoading('禁止・制限リストを読み込み中…');
-    try { await Promise.all([loadRegulation(...ctx.src), loadReleaseDates()]); } catch { /* 読めなくても続ける */ }
+    try { await Promise.all([ctx.src ? loadRegulation(...ctx.src) : null, loadReleaseDates()]); } catch { /* 読めなくても続ける */ }
     showLoading(null);
   }
   const { notAllowed, over } = deckProblems(deck);

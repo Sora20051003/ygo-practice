@@ -106,6 +106,15 @@ function renderRegSelect(deck) {
     sel.append(g);
   }
   if (cur !== 'latest' && cur !== 'none' && !cur.startsWith('custom:') && !dates.includes(cur)) sel.append(el('option', { value: cur, text: `${fmtDate(cur)}〜` }));
+  // もう一方のルール（OCG ⇔ マスターデュエル）のリストも選べるようにする（選ぶとデッキのルールも切り替わる）
+  for (const [of, f] of Object.entries(FORMATS)) {
+    if (of === fmt) continue;
+    const g = el('optgroup', { label: `${f.label}のリスト（選ぶとルールも${f.label}になります）` });
+    const ol = DB.banlists[of] && DB.banlists[of].date;
+    g.append(el('option', { value: `fmt:${of}|latest`, text: `${f.label}・最新${ol ? `（${fmtDate(ol)}〜）` : ''}` }));
+    for (const d of (DB.regDates[of] || []).filter(d => d !== ol && d <= new Date().toISOString().slice(0, 10))) g.append(el('option', { value: `fmt:${of}|${d}`, text: `${f.label}・${fmtDate(d)}〜` }));
+    sel.append(g);
+  }
   // オリジナルのレギュレーション
   const og = el('optgroup', { label: 'オリジナル' });
   for (const r of customRegs()) og.append(el('option', { value: 'custom:' + r.id, text: `★ ${r.name}` }));
@@ -1300,6 +1309,15 @@ function setupDeckView() {
       const cur = deck.reg || 'latest';
       openRegEditor(e.target.value === '__edit' ? cur.slice(7) : null);
       e.target.value = cur;
+      return;
+    }
+    // もう一方のルールのリストを選んだ：ルールごと切り替える
+    if (e.target.value.startsWith('fmt:')) {
+      const [of, reg] = e.target.value.slice(4).split('|');
+      const deck = Decks.current();
+      deck.format = of; deck.reg = reg;
+      Decks.save(); renderDeck(); renderResults();
+      toast(`ルールを${FORMATS[of].label}に切り替えました`);
       return;
     }
     const deck = Decks.current();
