@@ -7,7 +7,7 @@ import os, json, time, urllib.request, urllib.parse, datetime, sys
 UA = {'User-Agent': 'ygo-practice-sample-builder (github.com/Sora20051003/ygo-practice)'}
 MDM = 'https://www.masterduelmeta.com/api/v1/top-decks'
 REG_API = 'https://api.github.com/repos/DawnbrandBots/yaml-yugi-limit-regulation/contents/data/master-duel'
-TYPES_PER_PERIOD = 8
+TYPES_PER_PERIOD = 20
 
 def get(url, tries=4):
     for i in range(tries):

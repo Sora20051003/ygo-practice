@@ -1508,6 +1508,7 @@ function sampleToDeck(s, fmt, reg) {
   }
   return res;
 }
+let sampleFind = '';   // サンプルデッキの絞り込み（期間を変えても残す）
 async function openSamples() {
   const cur = Decks.current();
   let fmt = cur ? deckFormat(cur) : 'ocg';
@@ -1536,11 +1537,14 @@ async function openSamples() {
       const p = sel.value;
       const kinds = [...new Set(data.periods[p].map(s => s.k).filter(k => k && k !== 'ocg'))];
       if (kinds.includes('tcg') || kinds.includes('wc')) list.append(el('p', { class: 'warn', text: 'この期間はOCGの大会のリストが少ないため、' + kinds.map(k => SAMPLE_KINDS[k]).join('・') + 'のリストも使っています。当時のOCGとは、流行っていたデッキや禁止・制限が違うことがあります。' }));
-      let hidden = 0;
+      let hidden = 0, shownOut = 0;
       for (const s of data.periods[p]) {
         const d = sampleToDeck(s, fmt, p === latest ? 'latest' : p);
         // 海外のデッキで、OCG で使えないカードを外すと30枚より少なくなるものは出さない（そのままでは遊べないので）
         if (s.k === 'tcg' && d.main.length < 30) { hidden++; continue; }
+        // 絞り込み：デッキタイプの名前か、入っているカードの名前に含まれていれば出す
+        const q = normalizeText(find.value.trim());
+        if (q && !normalizeText(s.t).includes(q) && ![...d.main, ...d.extra].some(id => DB.byId.get(id).nkey.includes(q))) { shownOut++; continue; }
         const body2 = el('div', { class: 'sample-cards', hidden: true });
         const cardsOf = ids => { const m = new Map(); for (const id of ids) m.set(id, (m.get(id) || 0) + 1); return [...m].map(([id, n]) => `${DB.byId.get(id).name}×${n}`).join('、'); };
         body2.append(...[el('div', null, el('b', { text: `メイン${d.main.length}枚：` }), cardsOf(d.main)),
@@ -1568,9 +1572,12 @@ async function openSamples() {
           body2));
       }
       if (hidden) list.append(el('p', { class: 'muted small-note', text: `OCGで使えないカードが多い海外のデッキ（${hidden}個）は出していません。` }));
+      if (shownOut && !list.querySelector('.sample-item')) list.append(el('p', { class: 'muted', text: '絞り込みに合うデッキがありません。' }));
     };
     sel.addEventListener('change', fill);
-    body.append(el('label', { class: 'auth-field' }, 'レギュレーション（禁止・制限リストの期間）', sel), note, list);
+    const find = el('input', { type: 'search', placeholder: 'デッキ名・カード名で絞り込み（例：スネークアイ、灰流うらら）', class: 'full', value: sampleFind });
+    find.addEventListener('input', () => { sampleFind = find.value; fill(); });
+    body.append(el('label', { class: 'auth-field' }, 'レギュレーション（禁止・制限リストの期間）', sel), note, find, list);
     fill();
   };
   draw();

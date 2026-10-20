@@ -11,7 +11,7 @@ import os, re, json, time, urllib.request, urllib.parse, datetime, sys, html
 UA = {'User-Agent': 'ygo-practice-sample-builder (github.com/Sora20051003/ygo-practice)'}
 DECKS = 'https://ygoprodeck.com/api/decks/getDecks.php'
 REG_API = 'https://api.github.com/repos/DawnbrandBots/yaml-yugi-limit-regulation/contents/data/ocg'
-TYPES_PER_PERIOD = 8
+TYPES_PER_PERIOD = 20
 MIN_OCG = 10          # OCG の入賞リストがこれより少ない期間は、海外の大会のリストも使う
 FULL = bool(os.environ.get('FULL'))
 OUT = 'data/ocg-samples.js'
