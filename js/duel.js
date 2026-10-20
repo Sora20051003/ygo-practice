@@ -594,7 +594,13 @@ function askFirstOrSecond(r) {
   const close = showModal({ title: '先攻・後攻', body, buttons: mine ? [
     { label: '先攻', primary: true, onClick: () => startDuelAs(me) },
     { label: '後攻', onClick: () => startDuelAs(opp) },
-  ] : [], onClose: () => { if (Duel.choosing && Duel.choosing.close === close) { clearInterval(Duel.choosing.timer); Duel.choosing = null; } } });
+  ] : [], onClose: () => {
+    // 選ぶ前に閉じられたときは、もう一度出す（時間切れの自動の決定も止めない）
+    if (Duel.choosing && Duel.choosing.close === close) {
+      clearInterval(Duel.choosing.timer); Duel.choosing = null;
+      setTimeout(() => { if (Duel.room && Duel.room.status === 'choosing') askFirstOrSecond(Duel.room); }, 300);
+    }
+  } });
   const timer = setInterval(() => {
     sec.textContent = String(left());
     // 時間切れ：選ぶ人の端末で先攻にする（選ぶ人が通信できないときは、部屋を作った人が代わりに決める）
