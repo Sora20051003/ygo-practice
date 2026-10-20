@@ -436,6 +436,8 @@ class AutoDuel {
       if (ask.player === this.me && (ask.type === MSG.SELECT_IDLECMD || ask.type === MSG.SELECT_BATTLECMD)) { this.justSummoned.clear(); this.justMoved.clear(); }
       this.lastAsk = ask;
       if (replay && replay.length) { const r = replay.shift(); this.replaying = true; try { this.respond(r.res, !r.user, true); } finally { this.replaying = false; } continue; }
+      // 記録の再生：記録した返答が終わったら、そこで止める（CPU や自動の返答で先へ進めない）
+      if (this.replayOnly) { this.pending = ask; return; }
       // 試し発動中（probeActivate）：自分の選択は自動で答え、意味のある選択が出たかを数える
       if (this.probing && ask.player === this.me && ask.type !== MSG.SELECT_IDLECMD && ask.type !== MSG.SELECT_BATTLECMD) {
         if (probeMeaningful(ask, this.probing)) this.probeHits++;

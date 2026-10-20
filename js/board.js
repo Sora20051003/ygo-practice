@@ -54,6 +54,7 @@ function undo() {
   renderBoard();
 }
 function persist() {
+  if (typeof recFrame === 'function') recFrame();   // 盤面の記録（手動）
   if (Board.S && Board.S.auto) return;   // 自動処理の盤面は autoplay.js が別に保存する
   // 対戦中は対戦用の盤面として別に保存する（一人回しの盤面を上書きしないように）
   if (typeof Duel !== 'undefined' && Duel.active) { store.set('ygo.duel.board.' + Duel.code, { S: Board.S }); return; }
@@ -492,6 +493,7 @@ function startGame(handIds, checked) {
   closeAllModals();
   Board.S = buildState(deck, handIds);
   Board.initial = JSON.stringify(Board.S);
+  if (typeof recManualStart === 'function') recManualStart();   // 新しい対局の記録を始める
   Board.history = []; Board.future = [];
   Board.pick = null;
   persist();
@@ -818,6 +820,7 @@ function setupBoardView() {
   $('#b-rule').value = masterRule();
   $('#b-rule').onchange = e => { store.set('ygo.masterRule', e.target.value); toast(MASTER_RULES[e.target.value].note + '（次に開始したときから。効果を自動処理）'); };
   $('#b-errata').value = errataMode();
+  $('#b-records').onclick = () => { closePause(); openRecords(); };
   $('#b-errata').onchange = e => { store.set('ygo.errata', e.target.value); toast((e.target.value === 'pre' ? 'エラッタのあったカード（' + Object.keys(ERRATA).length + '種類）をエラッタ前の効果で処理します' : 'エラッタ後の今の効果で処理します') + '（次に開始したときから。効果を自動処理）'); };
   setupRotateHint();
   // ポーズ画面（設定・デッキ選択・やり直し）

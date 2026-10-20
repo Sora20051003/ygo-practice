@@ -731,6 +731,7 @@ function onDuelRoom(r) {
     }
     // フェイズが変わったら盤面を描き直す（光らせる・カードのボタンをフェイズに合わせるため）
     if (r.phase !== Duel.lastPhase && Board.S) { Duel.lastPhase = r.phase; renderBoard(); }
+    if (typeof recDuelFrame === 'function' && !Auto.net) recDuelFrame();
     if (r.status === 'ended' && !Duel.endedShown) {
       Duel.endedShown = true;
       const why = r.endReason === 'timeout' ? (r.winner === me ? '相手の持ち時間がなくなりました。' : 'あなたの持ち時間がなくなりました。') : '';
@@ -738,6 +739,8 @@ function onDuelRoom(r) {
       // 2人とも：開いている選択の窓などを閉じ、盤面を閉じて「対戦」のページに戻ってから結果を出す
       // （盤面の上に出すだけだと、効果の選択の窓などに隠れて、終わったことに気づけないことがある）
       // 部屋を出るのは少し待ってから（降参などの知らせが相手に届く前に通信を切らないように）
+      // 対戦の記録を自動で保存する（あとで「盤面の記録」から再生・共有できる）
+      if (typeof saveRecord === 'function') { const rec = currentRecord(); if (rec) saveRecord(rec, undefined, true).then(m => { if (m) toast('対戦を記録に保存しました（「📼 盤面の記録」から再生できます）'); }); }
       closeAllModals();
       if (typeof closePromptModal === 'function') closePromptModal();
       endDuelBoard();
@@ -758,6 +761,7 @@ function onDuelOpp(state) {
   const start = state.plogCount - lines.length;
   for (let i = Math.max(Duel.oppLogSeen, start); i < state.plogCount; i++) feed(`${oppName()}：${lines[i - start]}`, 'opp');
   Duel.oppLogSeen = Math.max(Duel.oppLogSeen, state.plogCount);
+  if (typeof recDuelFrame === 'function') recDuelFrame();
   if (Duel.active) renderBoard();
   renderDuelPanel();
 }
@@ -809,6 +813,7 @@ function beginDuelBoard() {
   }
   Board.initial = null; Board.history = []; Board.pick = null;
   document.body.classList.add('dueling');
+  if (typeof recDuelStart === 'function' && !(Rec.duel && Rec.duel.code === Duel.code)) recDuelStart();   // 対戦の記録（手動）
   switchView('board');
   persist();
   renderBoard();
@@ -1007,6 +1012,7 @@ function renderDuelLobby() {
       el('details', { class: 'duel-more' },
         el('summary', { text: '部屋コードで入る' }),
         el('div', { class: 'row' }, codeInput, el('button', { class: 'btn primary', text: '参加する', onclick: () => duelJoin(codeInput.value) }))),
+      el('button', { class: 'btn', text: '📼 盤面の記録（対戦の記録を見る）', onclick: () => openRecords() }),
       last && last.code ? el('button', { class: 'btn', text: `前回の部屋（${last.code}）に戻る`, onclick: () => { Duel.deckId = last.deckId; if (last.host) duelCreate(last.code); else duelJoin(last.code); } }) : null,
       el('p', { class: 'muted small-note', text: 'ログインしていなくても対戦できます（誰でも使える公開の中継サーバーを通して対戦します。部屋を作った人がアプリを閉じると部屋はなくなります）。' })));
     box.append(friendsPanel(false));
@@ -1155,6 +1161,8 @@ function setupDuel() {
   $('#dp-send').onclick = send;
   chat.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
+  // 記録の共有リンク（…#rec=… / #recid=…）で開かれたら再生する
+  if (typeof openRecordFromHash === 'function') { openRecordFromHash(); window.addEventListener('hashchange', openRecordFromHash); }
   // 招待リンク（…#room=ABCDEF）で開かれたら、その部屋に入る
   const m = location.hash.match(/room=([A-Z0-9]{6})/i);
   if (m && duelMe()) {
