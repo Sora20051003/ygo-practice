@@ -1375,3 +1375,15 @@ details.multi.active > summary { color: var(--accent); font-weight: 700; }
 .slot-add { flex: none; padding: 4px 10px; font-size: 16px; border: 1px dashed var(--line); border-radius: 8px; }
 .slot-rename { flex: none; padding: 4px 8px; font-size: 12px; color: var(--muted); }
 body.dueling .b-slots, body.replaying .b-slots { display: none; }
+
+/* ---------- 対戦のチャット（右下のボタンと小さな窓） ---------- */
+.duel-chat-fab { position: fixed; right: 16px; bottom: 16px; z-index: 880; width: 52px; height: 52px; border-radius: 50%; border: none; background: var(--accent); color: var(--accent-text); font-size: 24px; cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
+.duel-chat-fab .tab-badge { position: absolute; top: -4px; right: -4px; margin: 0; }
+.duel-chat-pop { position: fixed; right: 16px; bottom: 78px; z-index: 890; width: min(360px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 14px; background: var(--panel); border: 1px solid var(--accent); box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
+.duel-chat-pop .dp-chatlog { max-height: min(45vh, 320px); min-height: 120px; }
+.dcp-head { align-items: center; }
+@media (max-width: 720px) {
+  .duel-chat-fab { bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .duel-chat-pop { bottom: calc(136px + env(safe-area-inset-bottom)); }
+}
+body.replaying .duel-chat-fab { display: none; }

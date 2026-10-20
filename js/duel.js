@@ -547,7 +547,7 @@ async function duelJoin(code) {
 
 function enterRoom(code) {
   Duel.code = code;
-  Duel.feed = []; Duel.chat = []; Duel.seen = new Set(); Duel.opp = null; Duel.oppLogSeen = 0; Duel.lastSent = ''; Duel.turnKey = '';
+  Duel.feed = []; Duel.chat = []; Duel.chatUnread = 0; Duel.seen = new Set(); Duel.opp = null; Duel.oppLogSeen = 0; Duel.lastSent = ''; Duel.turnKey = '';
   Duel.deckId = Duel.deckId || Decks.currentId;
   store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
   Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => { if (!(Duel.room && Duel.room.status === 'ended')) toast('通信エラー：' + e.message); } });
@@ -568,6 +568,7 @@ function leaveRoom() {
   if (Duel.active) endDuelBoard();
   Duel.t = null; Duel.code = null; Duel.room = null; Duel.opp = null;
   store.set('ygo.duel.current', null);
+  updateChatFab();
   renderDuelLobby();
 }
 
@@ -984,6 +985,7 @@ function emzSharedEl(i) {
 
 // ---------- 画面：ロビー（「対戦」タブ） ----------
 function renderDuelLobby() {
+  updateChatFab();   // 対戦のチャットのボタン（部屋に入っている間だけ）
   const box = $('#duel-lobby');
   if (!box) return;
   box.innerHTML = '';
@@ -1086,6 +1088,8 @@ function addChat(who, text, mine) {
   if (Duel.chat.length > 200) Duel.chat.shift();
   renderDuelChat();
   if (!mine && ![...$$('.dp-chatlog')].some(l => l.offsetParent)) toast(`💬 ${who}：${text}`);   // チャット欄が見えていないときだけ
+  // 対戦のチャットの窓を開いていないときは、右下のボタンに読んでいない数を出す
+  if (!mine && !$('#duel-chat-pop')) { Duel.chatUnread++; updateChatFab(); }
 }
 function renderDuelChat() {
   // 対戦の盤面の欄と、部屋の画面の欄の両方
@@ -1481,3 +1485,34 @@ function duelDeckCheck(deck, r) {
   return bad.length ? el('div', { class: 'warn small-note' }, bad.map(t => el('div', { text: '⚠ ' + t })))
     : el('p', { class: 'ok-note small-note', text: '✓ このデッキは選んだレギュレーションで使えます' });
 }
+
+// ---------- 対戦のチャット（DM とは別の窓） ----------
+// 部屋に入っている間は画面の右下に「💬」のボタンを出し、押すと対戦のチャットを小さな窓で開く（盤面を見たまま話せる）
+Duel.chatUnread = 0;
+function updateChatFab() {
+  let fab = $('#duel-chat-fab');
+  if (!Duel.code) { if (fab) fab.remove(); closeChatPop(); Duel.chatUnread = 0; return; }
+  if (!fab) {
+    fab = el('button', { id: 'duel-chat-fab', class: 'duel-chat-fab', title: '対戦のチャット（DMとは別）', onclick: () => ($('#duel-chat-pop') ? closeChatPop() : openChatPop()) });
+    document.body.append(fab);
+  }
+  fab.innerHTML = '';
+  fab.append('💬', Duel.chatUnread ? el('span', { class: 'tab-badge', text: String(Math.min(99, Duel.chatUnread)) }) : '');
+}
+function openChatPop() {
+  closeChatPop();
+  const input = el('input', { type: 'text', placeholder: 'メッセージを入力（Enter で送信）', maxlength: 200 });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) sendChat(input); });
+  const pop = el('div', { id: 'duel-chat-pop', class: 'duel-chat-pop' },
+    el('div', { class: 'row between dcp-head' },
+      el('b', { text: `💬 対戦のチャット${Duel.room && oppUid() ? '（' + oppName() + '）' : ''}` }),
+      el('button', { class: 'btn small', text: '閉じる', onclick: closeChatPop })),
+    el('ol', { class: 'log dp-feed dp-chatlog' }),
+    el('div', { class: 'row chat-row' }, input, el('button', { class: 'btn small primary', text: '送信', onclick: () => sendChat(input) })));
+  document.body.append(pop);
+  Duel.chatUnread = 0;
+  renderDuelChat();
+  updateChatFab();
+  setTimeout(() => input.focus(), 0);
+}
+function closeChatPop() { const p = $('#duel-chat-pop'); if (p) p.remove(); }
