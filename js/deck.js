@@ -1474,7 +1474,10 @@ async function loadSamples(fmt) {
   if (sampleData(fmt)) return sampleData(fmt);
   const v = '?v=' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');
   // OCG もマスターデュエルのリストを元にするので、両方読む
+  // 一度読んだファイルは読み直さない（同じ名前の変数を2回作るとエラーになる）
+  const loaded = { md: () => typeof MD_SAMPLES !== 'undefined', ocg: () => typeof OCG_SAMPLE_PICKS !== 'undefined' };
   for (const k of fmt === 'md' ? ['md'] : ['md', 'ocg']) {
+    if (loaded[k]()) continue;
     try { await loadScript(SAMPLE_FILES[k] + v); } catch { /* 無ければ空 */ }
   }
   if (fmt === 'ocg') ocgSamples = buildOcgSamples();
