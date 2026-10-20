@@ -96,7 +96,10 @@ def fetch(fmt, stop_before=None, need_date=True):
     known = sorted((d['deckNum'], d['_date']) for d in out if d['_date'] and d.get('deckNum'))
     for d in out:
         if not d['_date'] and known and d.get('deckNum'):
-            d['_date'] = min(known, key=lambda k: abs(k[0] - d['deckNum']))[1]
+            near = min(known, key=lambda k: abs(k[0] - d['deckNum']))
+            # 登録番号が近い（同じころに登録された）ときだけ、その日付を使う
+            if abs(near[0] - d['deckNum']) <= 2000:
+                d['_date'] = near[1]
     print(fmt, len(out), 'decks', file=sys.stderr)
     return [d for d in out if d["_date"] or not need_date]
 
@@ -129,8 +132,9 @@ def main():
     pool = []
     for fmt, k in [('Tournament Meta Decks OCG', 'ocg'), ('Tournament Meta Decks OCG (Asian-English)', 'ae')]:
         pool += [dict(d, _k=k) for d in fetch(fmt, None if FULL or not old else first)]
+    # 海外の大会：ふだんは新しい期間の分だけ（OCG の入賞リストが少ない期間の穴埋め）
+    pool += [dict(d, _k='tcg') for d in fetch('Tournament Meta Decks', None if FULL or not old else first)]
     if FULL or not old:
-        pool += [dict(d, _k='tcg') for d in fetch('Tournament Meta Decks')]
         for d in fetch("World Championship Decks", need_date=False):
             y = re.search(r'(20\d\d)', d.get('deck_name') or '')
             if y:
@@ -163,7 +167,10 @@ def main():
             if key not in best or rank > best[key][0]:
                 best[key] = (rank, d, t)
         out = []
-        for key in sorted(score, key=lambda k: -score[k])[:TYPES_PER_PERIOD]:
+        # OCG（とアジア）の大会で入賞したデッキタイプを先に、足りない分を海外の大会から
+        is_ocg = lambda k: best[k][1]['_k'] in ('ocg', 'ae')
+        order = sorted(score, key=lambda k: (not is_ocg(k), -score[k]))
+        for key in order[:TYPES_PER_PERIOD]:
             d, t = best[key][1], best[key][2]
             def conv(lst):
                 cnt = {}

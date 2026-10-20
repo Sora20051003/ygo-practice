@@ -47,6 +47,8 @@ jobs:
           if [ -f data/md-samples.js ]; then git add data/md-samples.js; fi
           git add data/ocg-samples.js
           git commit -m "発売日・カードデータを自動更新"
+          # 作っている間にほかの更新が送られていることがあるので、取り込んでから送る
+          git pull --rebase
           git push
           # 自動の記録では公開が始まらないことがあるので、明示的に公開をやり直す
           gh api -X POST "repos/${{ github.repository }}/pages/builds" || true
