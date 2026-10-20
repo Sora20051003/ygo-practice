@@ -328,7 +328,20 @@ function jpCard(c, big = false) {
     el('div', { class: 'jp-pscale l' }, el('span', { text: '◆' }), el('b', { text: c.ls })),
     fitLater(el('div', { class: 'jp-pdesc', text: p }), 3.2),
     el('div', { class: 'jp-pscale r' }, el('span', { text: '◆' }), el('b', { text: c.rs }))) : null;
-  if (pend) art.style.height = `${ptop - 26.5}cqw`;
+  if (pend) {
+    // イラストを切らずに全部見せる：欄の高さに合わせて、イラストの縦横の比率のまま幅を決めて真ん中に置く
+    const h = ptop - 26.5;
+    art.style.height = `${h}cqw`;
+    const fit = img => {
+      if (!img.naturalWidth || !img.naturalHeight) return;
+      const w = Math.min(86.8, h * img.naturalWidth / img.naturalHeight);
+      art.style.width = `${w}cqw`;
+      art.style.left = `${(100 - w) / 2}cqw`;
+    };
+    art.addEventListener('load', e => { if (e.target.tagName === 'IMG') fit(e.target); }, true);   // load は伝わらないので「捕まえる」側で受ける
+    const img0 = art.querySelector('img');
+    if (img0 && img0.complete) fit(img0);
+  }
 
   // カードの高さは 145.76cqw（59:86）。ペンデュラムの緑色は、P効果の欄の上の端から
   return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}`, title: c.name, style: pend ? `--pg:${(ptop / 145.76 * 100).toFixed(1)}%` : null },
