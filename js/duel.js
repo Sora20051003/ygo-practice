@@ -550,7 +550,7 @@ function enterRoom(code) {
   Duel.feed = []; Duel.chat = []; Duel.seen = new Set(); Duel.opp = null; Duel.oppLogSeen = 0; Duel.lastSent = ''; Duel.turnKey = '';
   Duel.deckId = Duel.deckId || Decks.currentId;
   store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
-  Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => toast('通信エラー：' + e.message) });
+  Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => { if (!(Duel.room && Duel.room.status === 'ended')) toast('通信エラー：' + e.message); } });
   // 部屋を作った人：持ち時間を部屋に書く（最初は一人回しの制限時間の設定と同じ）
   if (Duel.t.isHost && Duel.t.room && Duel.t.room.timeLimit === undefined) {
     // 最初のレギュレーションは、部屋を作った人のデッキと同じ（オリジナルなら中身ごと）
@@ -607,7 +607,16 @@ function onDuelRoom(r) {
       Duel.endedShown = true;
       const why = r.endReason === 'timeout' ? (r.winner === me ? '相手の持ち時間がなくなりました。' : 'あなたの持ち時間がなくなりました。') : '';
       const text = why + (r.winner === me ? 'あなたの勝ちです！' : r.winner ? `${oppName()} の勝ちです` : '対戦が終了しました');
-      showModal({ title: '対戦終了', body: el('p', { text }), buttons: [{ label: '盤面を閉じて部屋を出る', primary: true, onClick: () => leaveRoom() }] });
+      // 2人とも：開いている選択の窓などを閉じ、盤面を閉じて「対戦」のページに戻ってから結果を出す
+      // （盤面の上に出すだけだと、効果の選択の窓などに隠れて、終わったことに気づけないことがある）
+      // 部屋を出るのは少し待ってから（降参などの知らせが相手に届く前に通信を切らないように）
+      closeAllModals();
+      if (typeof closePromptModal === 'function') closePromptModal();
+      endDuelBoard();
+      switchView('duel');
+      setTimeout(() => { if (Duel.room && Duel.room.status === 'ended') leaveRoom(); }, 1500);
+      const reason = r.endReason === 'timeout' ? '' : r.winner === me ? '（相手が降参しました）' : '';
+      showModal({ title: '対戦終了', body: el('p', { text: text + (r.winner === me && !why && r.surrendered ? reason : '') }), buttons: [{ label: 'OK', primary: true, onClick: () => {} }] });
     }
   }
   renderDuelLobby();
@@ -1007,7 +1016,7 @@ function setupDuel() {
   $('#dp-dice').onclick = () => Duel.t.sendEvent({ type: 'dice', result: (crypto.getRandomValues(new Uint8Array(1))[0] % 6) + 1 });
   $('#dp-surrender').onclick = () => showModal({
     title: '降参', body: el('p', { text: '降参して対戦を終えますか？' }),
-    buttons: [{ label: '降参する', primary: true, onClick: () => { Duel.t.sendEvent({ type: 'surrender' }); Duel.t.updateRoom({ status: 'ended', winner: oppUid() }); } }],
+    buttons: [{ label: '降参する', primary: true, onClick: () => { Duel.t.sendEvent({ type: 'surrender' }); Duel.t.updateRoom({ status: 'ended', winner: oppUid(), surrendered: true }); } }],
   });
   $('#dp-leave').onclick = () => showModal({
     title: '対戦を終える', body: el('p', { text: '対戦を終えて部屋を出ますか？（相手には「終了」と表示されます）' }),
