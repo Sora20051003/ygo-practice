@@ -1509,9 +1509,9 @@ function sampleToDeck(s, fmt, reg) {
   const ctx = fmt ? regContext({ format: fmt, reg: reg || 'latest' }) : null;
   const used = new Map();
   for (const [sec, list] of [['main', s.m], ['extra', s.x]]) {
-    for (const [v, n] of list || []) {
-      const c = sampleCard(v);
-      if (!c) { res.unknown.push(String(v)); continue; }
+    for (const [v, n, name] of list || []) {
+      const c = sampleCard(v) || (name ? sampleCard(name) : null);   // 番号が合わないときは英語名で探す
+      if (!c) { res.unknown.push(name || String(v)); continue; }
       let cnt = n;
       if (ctx) {
         const lim = cardAllowed(c, fmt) ? limitIn(c, ctx) : 0;

@@ -91,7 +91,9 @@ def main():
                 res = []
                 for e in lst or []:
                     name = (e.get('card') or {}).get('name') or ''
-                    res.append([by_name.get(name) or by_key.get(norm(name)) or name, e.get('amount') or 1])
+                    cid = by_name.get(name) or by_key.get(norm(name))
+                    # 番号がアプリのカードデータと違うこともあるので、英語名も入れておく（3つ目）
+                    res.append([cid, e.get('amount') or 1, name] if cid else [name, e.get('amount') or 1])
                 return res
             tt = d.get('tournamentType') or {}
             src = (tt.get('name') + ' ' + (d.get('tournamentPlacement') or '')).strip() if tt else ((d.get('rankedType') or {}).get('name') or '')
