@@ -571,6 +571,45 @@ function leaveRoom() {
   renderDuelLobby();
 }
 
+// ---------- 先攻・後攻を選ぶ ----------
+// コイントスで表が出た人が選ぶ。CHOOSE_SEC 秒たっても選ばなければ先攻にする
+const CHOOSE_SEC = 30;
+function startDuelAs(first) {
+  const r = Duel.room;
+  if (!r || r.status !== 'choosing') return;
+  const seed = Array.from(crypto.getRandomValues(new Uint32Array(4)), String);   // 効果を自動処理する対戦で、2人のエンジンを同じにするための乱数の種
+  const name = uid => (uid === r.host ? r.hostName : r.guestName);
+  Duel.t.sendEvent({ type: 'sys', text: `${name(r.coinWinner)} が${first === r.coinWinner ? '先攻' : '後攻'}を選びました。${name(first)} の先攻です` });
+  Duel.t.updateRoom({ status: 'playing', turn: 1, turnPlayer: first, first, phase: 'DP', seed });
+}
+function askFirstOrSecond(r) {
+  if (Duel.choosing) return;
+  const me = Duel.me.uid, opp = r.host === me ? r.guest : r.host;
+  const mine = r.coinWinner === me;
+  const left = () => Math.max(0, Math.ceil(((r.chooseUntil || Date.now()) - Date.now()) / 1000));
+  const sec = el('b', { text: String(left()) });
+  const body = mine
+    ? el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: '🪙 コイントス：あなたが表でした！' }), el('p', null, '先攻か後攻かを選んでください（あと ', sec, ' 秒。選ばなければ先攻になります）'))
+    : el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: `🪙 コイントス：${oppName()} が表でした` }), el('p', null, `${oppName()} が先攻か後攻かを選んでいます…（あと `, sec, ' 秒）'));
+  const close = showModal({ title: '先攻・後攻', body, buttons: mine ? [
+    { label: '先攻', primary: true, onClick: () => startDuelAs(me) },
+    { label: '後攻', onClick: () => startDuelAs(opp) },
+  ] : [], onClose: () => { if (Duel.choosing && Duel.choosing.close === close) { clearInterval(Duel.choosing.timer); Duel.choosing = null; } } });
+  const timer = setInterval(() => {
+    sec.textContent = String(left());
+    // 時間切れ：選ぶ人の端末で先攻にする（選ぶ人が通信できないときは、部屋を作った人が代わりに決める）
+    if (left() <= 0 && (mine || (r.host === me && left() <= 0 && Date.now() - (r.chooseUntil || 0) > 5000))) startDuelAs(mine ? me : r.coinWinner);
+  }, 500);
+  Duel.choosing = { close, timer };
+}
+function closeFirstOrSecond() {
+  if (!Duel.choosing) return;
+  const c = Duel.choosing;
+  Duel.choosing = null;
+  clearInterval(c.timer);
+  c.close();
+}
+
 // ---------- 受信 ----------
 function onDuelRoom(r) {
   const prev = Duel.room;
@@ -578,14 +617,14 @@ function onDuelRoom(r) {
   const me = Duel.me.uid;
   // 相手が来た・準備した
   if (prev && !prev.guest && r.guest && r.host === me) feed(`${r.guestName} が部屋に入りました`, 'sys');
-  // 両方準備OKなら、部屋を作った人がコイントスで先攻を決めて開始する
+  // 両方準備OKなら、部屋を作った人がコイントスをする。表が出た人が先攻・後攻を選ぶ（status: 'choosing'）
   if (r.status === 'waiting' && r.host === me && r.guest && r.ready && r.ready[r.host] && r.ready[r.guest]) {
-    const first = Math.random() < 0.5 ? r.host : r.guest;
-    Duel.t.sendEvent({ type: 'sys', text: `コイントスの結果、${first === r.host ? r.hostName : r.guestName} の先攻です` });
-    const seed = Array.from(crypto.getRandomValues(new Uint32Array(4)), String);   // 効果を自動処理する対戦で、2人のエンジンを同じにするための乱数の種
-    Duel.t.updateRoom({ status: 'playing', turn: 1, turnPlayer: first, first, phase: 'DP', seed });
-    return;   // 開始の変更が届いたときに、もう一度ここが呼ばれる（古い情報で処理を続けないように）
+    const coinWinner = Math.random() < 0.5 ? r.host : r.guest;
+    Duel.t.sendEvent({ type: 'sys', text: `コイントスの結果、${coinWinner === r.host ? r.hostName : r.guestName} が表でした。先攻か後攻かを選びます` });
+    Duel.t.updateRoom({ status: 'choosing', coinWinner, chooseUntil: Date.now() + CHOOSE_SEC * 1000 });
+    return;   // 変更が届いたときに、もう一度ここが呼ばれる（古い情報で処理を続けないように）
   }
+  if (r.status === 'choosing') askFirstOrSecond(r); else closeFirstOrSecond();
   if (r.status === 'playing' && !Duel.active) { Duel.timeoutSent = false; if (r.mode === 'auto') beginNetDuel(); else beginDuelBoard(); }
   if (Duel.active) {
     // ターンが変わったら、自分の盤面のターン数・通常召喚・使用済みを更新
@@ -918,7 +957,7 @@ function renderDuelLobby() {
             Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra } : null });
           },
         }),
-        el('p', { class: 'muted small-note', text: '2人とも「準備OK」になると、コイントスで先攻を決めて対戦が始まります。' })),
+        el('p', { class: 'muted small-note', text: '2人とも「準備OK」になるとコイントスをして、表が出た人が先攻か後攻かを選びます。' })),
     el('button', { class: 'btn small danger', text: '部屋を出る', onclick: leaveRoom })));
   // 相手を待っている間は、フレンドをこの部屋に招待できる
   if (r && r.host === me.uid && !r.guest && r.status === 'waiting' && !/^MATCH/.test(Duel.code) && Friends.list.length) box.append(friendsPanel(true));
