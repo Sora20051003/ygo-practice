@@ -20,17 +20,20 @@ jobs:
         run: python3 .github/scripts/build_release_dates.py
       - name: 自動処理用の EDOPro カードデータを作り直す
         run: python3 .github/scripts/build_edo_cards.py
+      - name: マスターデュエルのサンプルデッキを作り直す（失敗しても、ほかの更新は続ける）
+        run: python3 .github/scripts/build_md_samples.py || echo "サンプルデッキの更新に失敗"
       - name: 変わっていれば記録して公開
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- data/release-dates.js data/edo-cards.js; then
+          if git diff --quiet -- data/release-dates.js data/edo-cards.js data/md-samples.js && [ -z "$(git ls-files --others --exclude-standard data/md-samples.js)" ]; then
             echo "変更なし"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/release-dates.js data/edo-cards.js
+          if [ -f data/md-samples.js ]; then git add data/md-samples.js; fi
           git commit -m "発売日・カードデータを自動更新"
           git push
           # 自動の記録では公開が始まらないことがあるので、明示的に公開をやり直す
