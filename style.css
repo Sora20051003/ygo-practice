@@ -1286,3 +1286,6 @@ body.land .phase-banner { padding: 8px 14px; }
 .dm-msg.me .dm-bubble { background: var(--accent); color: #fff; border-color: transparent; }
 .dm-time { color: var(--muted); font-size: 10px; flex: none; }
 .dm-day { align-self: center; color: var(--muted); font-size: 11px; }
+.sample-find { gap: 8px; flex-wrap: wrap; }
+.sample-find input { flex: 1; min-width: 200px; }
+.sample-period { margin: 14px 0 4px; font-size: 14px; border-bottom: 1px solid var(--line); padding-bottom: 3px; }

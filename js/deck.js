@@ -1509,6 +1509,49 @@ function sampleToDeck(s, fmt, reg) {
   return res;
 }
 let sampleFind = '';   // サンプルデッキの絞り込み（期間を変えても残す）
+let sampleScope = 'one';   // 探す範囲（'one'：選んだ期間／'all'：すべての期間）
+
+// サンプルデッキを名前で探す。デッキタイプの名前は英語なので、日本語で入れたときは
+// 「その言葉が名前に入っているカードの英語名」に多く出てくる、めずらしい単語（例：ティアラメンツ → Tearlaments）でも探す。
+// カード名で探すときは、そのカードの名前そのものなら1枚でも、名前の一部なら3枚以上入っているデッキを出す（1枚だけ入れているデッキまで出ないように）
+let enWordCount = null;   // 英語のカード名の単語 → 何枚のカードに出てくるか
+function sampleEnWord(q) {
+  const words = c => [...new Set((c.en || '').toLowerCase().split(/[\s,.:!?"'()/]+/).filter(w => w.length >= 3))];
+  if (!enWordCount) { enWordCount = new Map(); for (const c of DB.cards) for (const w of words(c)) enWordCount.set(w, (enWordCount.get(w) || 0) + 1); }
+  const hits = DB.cards.filter(c => c.en && c.nkey.includes(q));
+  if (!hits.length) return null;
+  const cnt = new Map();
+  for (const c of hits) for (const w of words(c)) cnt.set(w, (cnt.get(w) || 0) + 1);
+  let best = null;
+  for (const [w, n] of cnt) {
+    if (n < hits.length * 0.5) continue;
+    if (!best || enWordCount.get(w) < enWordCount.get(best)) best = w;
+  }
+  return best ? normalizeText(best) : null;
+}
+const sampleCardCache = new Map();
+function sampleCardOf(v, name) {
+  const k = v + '|' + (name || '');
+  if (!sampleCardCache.has(k)) sampleCardCache.set(k, sampleCard(v) || (name ? sampleCard(name) : null));
+  return sampleCardCache.get(k);
+}
+function sampleMatcher(qRaw) {
+  const q = normalizeText(qRaw);
+  if (!q) return null;
+  const en = sampleEnWord(q);
+  const exact = DB.cards.find(c => c.nkey === q);
+  return s => {
+    const t = normalizeText(s.t);
+    if (t.includes(q) || (en && t.includes(en))) return true;
+    let n = 0;
+    for (const [v, cnt, name] of [...(s.m || []), ...(s.x || [])]) {
+      const c = sampleCardOf(v, name);
+      if (!c) continue;
+      if (exact ? c.id === exact.id : c.nkey.includes(q)) { n += cnt || 1; if (exact || n >= 3) return true; }
+    }
+    return false;
+  };
+}
 async function openSamples() {
   const cur = Decks.current();
   let fmt = cur ? deckFormat(cur) : 'ocg';
@@ -1532,52 +1575,74 @@ async function openSamples() {
     const note = fmt === 'md'
       ? el('p', { class: 'muted small-note' }, 'その期間の大会上位・高ランクのデッキから、よく勝っているデッキタイプを順に並べています（出どころ：', el('a', { href: 'https://www.masterduelmeta.com/', target: '_blank', rel: 'noopener', text: 'Master Duel Meta' }), '）。')
       : el('p', { class: 'muted small-note' }, 'その期間の大会で入賞したデッキから、よく勝っているデッキタイプを順に並べています（出どころ：', el('a', { href: 'https://ygoprodeck.com/category/format/tournament%20meta%20decks%20ocg', target: '_blank', rel: 'noopener', text: 'YGOPRODeck' }), '）。OCGの入賞リストは2023年7月から。それより前は海外の大会のリスト（2020年10月から）、さらに前は世界大会の優勝デッキ（2003〜2019年、1年に1つ）を使い、OCGの禁止・制限に合わせて枚数を直します。リストが見つからない期間は選べません。');
+    // 1つのデッキの表示
+    const item = (s, p, d) => {
+      const body2 = el('div', { class: 'sample-cards', hidden: true });
+      const cardsOf = ids => { const m = new Map(); for (const id of ids) m.set(id, (m.get(id) || 0) + 1); return [...m].map(([id, n]) => `${DB.byId.get(id).name}×${n}`).join('、'); };
+      body2.append(...[el('div', null, el('b', { text: `メイン${d.main.length}枚：` }), cardsOf(d.main)),
+        el('div', null, el('b', { text: `EX${d.extra.length}枚：` }), cardsOf(d.extra) || 'なし'),
+        d.fixed.length ? el('div', { class: 'warn', text: FORMATS[fmt].label + 'のルールに合わせて減らしたカード：' + d.fixed.join('、') }) : null,
+        d.fixed.length && d.main.length < 40 ? el('div', { class: 'warn', text: `減らした分、メインデッキが${d.main.length}枚になっています。追加したあと、40枚になるようにカードを足してください。` }) : null,
+        d.unknown.length ? el('div', { class: 'warn', text: 'アプリに無いカード（入りません）：' + d.unknown.join('、') }) : null].filter(Boolean));
+      return el('div', { class: 'sample-item' },
+        el('div', { class: 'sample-head' },
+          el('b', { text: s.t }),
+          el('span', { class: 'muted small-note' }, [s.k && SAMPLE_KINDS[s.k], s.s, s.d && s.d.replace(/-/g, '/'), s.c > 1 && `この期間の入賞${s.c}回`].filter(Boolean).join('・'),
+            s.u && /^https:\/\//.test(s.u) ? el('a', { href: s.u, target: '_blank', rel: 'noopener', text: '　元のリスト' }) : null),
+          el('span', { class: 'muted small-note', text: `メイン${d.main.length}・EX${d.extra.length}` + (d.fixed.length ? `・${d.fixed.length}種類をルールに合わせて調整` : '') })),
+        el('div', { class: 'row' },
+          el('button', { class: 'btn small', text: '中身を見る', onclick: () => { body2.hidden = !body2.hidden; } }),
+          el('button', { class: 'btn small primary', text: '＋ デッキに追加', onclick: () => {
+            const nd = Decks.blank(`${s.t}（${FORMATS[fmt].short}・${p.replace(/-/g, '/')}〜）`, fmt);
+            nd.reg = p === latest ? 'latest' : p;
+            nd.main = d.main; nd.extra = d.extra;
+            Decks.list.push(nd); Decks.currentId = nd.id; Decks.save();
+            renderDeck(); renderResults();
+            close();
+            toast(`「${nd.name}」を追加しました`);
+          } })),
+        body2);
+    };
     const fill = () => {
       list.innerHTML = '';
-      const p = sel.value;
-      const kinds = [...new Set(data.periods[p].map(s => s.k).filter(k => k && k !== 'ocg'))];
-      if (kinds.includes('tcg') || kinds.includes('wc')) list.append(el('p', { class: 'warn', text: 'この期間はOCGの大会のリストが少ないため、' + kinds.map(k => SAMPLE_KINDS[k]).join('・') + 'のリストも使っています。当時のOCGとは、流行っていたデッキや禁止・制限が違うことがあります。' }));
-      let hidden = 0, shownOut = 0;
-      for (const s of data.periods[p]) {
-        const d = sampleToDeck(s, fmt, p === latest ? 'latest' : p);
-        // 海外のデッキで、OCG で使えないカードを外すと30枚より少なくなるものは出さない（そのままでは遊べないので）
-        if (s.k === 'tcg' && d.main.length < 30) { hidden++; continue; }
-        // 絞り込み：デッキタイプの名前か、入っているカードの名前に含まれていれば出す
-        const q = normalizeText(find.value.trim());
-        if (q && !normalizeText(s.t).includes(q) && ![...d.main, ...d.extra].some(id => DB.byId.get(id).nkey.includes(q))) { shownOut++; continue; }
-        const body2 = el('div', { class: 'sample-cards', hidden: true });
-        const cardsOf = ids => { const m = new Map(); for (const id of ids) m.set(id, (m.get(id) || 0) + 1); return [...m].map(([id, n]) => `${DB.byId.get(id).name}×${n}`).join('、'); };
-        body2.append(...[el('div', null, el('b', { text: `メイン${d.main.length}枚：` }), cardsOf(d.main)),
-          el('div', null, el('b', { text: `EX${d.extra.length}枚：` }), cardsOf(d.extra) || 'なし'),
-          d.fixed.length ? el('div', { class: 'warn', text: FORMATS[fmt].label + 'のルールに合わせて減らしたカード：' + d.fixed.join('、') }) : null,
-          d.fixed.length && d.main.length < 40 ? el('div', { class: 'warn', text: `減らした分、メインデッキが${d.main.length}枚になっています。追加したあと、40枚になるようにカードを足してください。` }) : null,
-          d.unknown.length ? el('div', { class: 'warn', text: 'アプリに無いカード（入りません）：' + d.unknown.join('、') }) : null].filter(Boolean));
-        list.append(el('div', { class: 'sample-item' },
-          el('div', { class: 'sample-head' },
-            el('b', { text: s.t }),
-            el('span', { class: 'muted small-note' }, [s.k && SAMPLE_KINDS[s.k], s.s, s.d && s.d.replace(/-/g, '/'), s.c > 1 && `この期間の入賞${s.c}回`].filter(Boolean).join('・'),
-              s.u && /^https:\/\//.test(s.u) ? el('a', { href: s.u, target: '_blank', rel: 'noopener', text: '　元のリスト' }) : null),
-            el('span', { class: 'muted small-note', text: `メイン${d.main.length}・EX${d.extra.length}` + (d.fixed.length ? `・${d.fixed.length}種類をルールに合わせて調整` : '') })),
-          el('div', { class: 'row' },
-            el('button', { class: 'btn small', text: '中身を見る', onclick: () => { body2.hidden = !body2.hidden; } }),
-            el('button', { class: 'btn small primary', text: '＋ デッキに追加', onclick: () => {
-              const nd = Decks.blank(`${s.t}（${FORMATS[fmt].short}・${p.replace(/-/g, '/')}〜）`, fmt);
-              nd.reg = p === latest ? 'latest' : p;
-              nd.main = d.main; nd.extra = d.extra;
-              Decks.list.push(nd); Decks.currentId = nd.id; Decks.save();
-              renderDeck(); renderResults();
-              close();
-              toast(`「${nd.name}」を追加しました`);
-            } })),
-          body2));
+      const all = scope.value === 'all';
+      sel.disabled = all;
+      const qRaw = find.value.trim();
+      const m = sampleMatcher(qRaw);
+      if (all && !m) { list.append(el('p', { class: 'muted', text: '上の欄にデッキ名かカード名を入れると、すべての期間からそのデッキを探して、新しい順に並べます。' })); return; }
+      const ps = all ? periods : [sel.value];
+      if (!all) {
+        const kinds = [...new Set(data.periods[ps[0]].map(s => s.k).filter(k => k && k !== 'ocg'))];
+        if (kinds.includes('tcg') || kinds.includes('wc')) list.append(el('p', { class: 'warn', text: 'この期間はOCGの大会のリストが少ないため、' + kinds.map(k => SAMPLE_KINDS[k]).join('・') + 'のリストも使っています。当時のOCGとは、流行っていたデッキや禁止・制限が違うことがあります。' }));
       }
+      let hidden = 0, found = 0, shownPeriods = 0;
+      const LIMIT = 150;
+      for (const p of ps) {
+        let head = null;
+        for (const s of data.periods[p]) {
+          if (m && !m(s)) continue;   // 絞り込み（先に元のデータで見るので、すべての期間でも速い）
+          if (found >= LIMIT) { found++; continue; }
+          const d = sampleToDeck(s, fmt, p === latest ? 'latest' : p);
+          // 海外のデッキで、OCG で使えないカードを外すと30枚より少なくなるものは出さない（そのままでは遊べないので）
+          if (s.k === 'tcg' && d.main.length < 30) { hidden++; continue; }
+          if (all && !head) { head = el('h3', { class: 'sample-period', text: `${p.replace(/-/g, '/')}〜 のリスト${p === latest ? '（最新）' : ''}` }); list.append(head); shownPeriods++; }
+          list.append(item(s, p, d));
+          found++;
+        }
+      }
+      if (all && found) list.prepend(el('p', { class: 'muted small-note', text: `「${qRaw}」のデッキ：${Math.min(found, LIMIT)}個（${shownPeriods}個の期間）` + (found > LIMIT ? `。多いので新しい${LIMIT}個だけ出しています` : '') }));
       if (hidden) list.append(el('p', { class: 'muted small-note', text: `OCGで使えないカードが多い海外のデッキ（${hidden}個）は出していません。` }));
-      if (shownOut && !list.querySelector('.sample-item')) list.append(el('p', { class: 'muted', text: '絞り込みに合うデッキがありません。' }));
+      if (!found) list.append(el('p', { class: 'muted', text: m ? '絞り込みに合うデッキがありません。' : 'この期間のデッキはありません。' }));
     };
     sel.addEventListener('change', fill);
-    const find = el('input', { type: 'search', placeholder: 'デッキ名・カード名で絞り込み（例：スネークアイ、灰流うらら）', class: 'full', value: sampleFind });
-    find.addEventListener('input', () => { sampleFind = find.value; fill(); });
-    body.append(el('label', { class: 'auth-field' }, 'レギュレーション（禁止・制限リストの期間）', sel), note, find, list);
+    const find = el('input', { type: 'search', placeholder: 'デッキ名・カード名で探す（例：スネークアイ、ティアラメンツ、灰流うらら）', class: 'full', value: sampleFind });
+    // 入力のたびに全部を描き直すと重いので、少し待ってから
+    let findTimer = null;
+    find.addEventListener('input', () => { sampleFind = find.value; clearTimeout(findTimer); findTimer = setTimeout(fill, 250); });
+    // 探す範囲：選んだ期間だけ／すべての期間（歴代）
+    const scope = el('select', null, el('option', { value: 'one', text: '選んだ期間で探す' }), el('option', { value: 'all', text: 'すべての期間で探す（歴代のデッキ）', selected: sampleScope === 'all' }));
+    scope.addEventListener('change', () => { sampleScope = scope.value; fill(); });
+    body.append(el('label', { class: 'auth-field' }, 'レギュレーション（禁止・制限リストの期間）', sel), note, el('div', { class: 'row sample-find' }, find, scope), list);
     fill();
   };
   draw();
