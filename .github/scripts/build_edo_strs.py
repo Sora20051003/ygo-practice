@@ -55,9 +55,23 @@ norm = lambda s: re.sub(r'[^a-z0-9]', '', s.lower())
 STOP = set('a an the of to your you this that it its card cards 1 2 3 from or and in on by with for if is are be can'.split())
 def words(s):
     return {w for w in re.findall(r'[a-z]+', re.sub(r'\bgy\b', 'graveyard', s.lower())) if w not in STOP}
+# 意味が変わる違い（数・だれの、など）。片方にしか無い／食い違うときは別の説明とみなす
+# 例：「Send the top 2 cards of your Deck」と「Send the top 3 cards of your opponent's Deck」は別
+def features(s):
+    t = s.lower()
+    return {
+        'num': set(re.findall(r'\d+', t)),
+        'opp': bool(re.search(r"\bopponent", t)),
+        'either': bool(re.search(r'\beither\b|\bboth\b|\beach player', t)),
+    }
+def conflict(a, b):
+    fa, fb = features(a), features(b)
+    if fa['num'] and fb['num'] and fa['num'] != fb['num']:
+        return True
+    return fa['opp'] != fb['opp'] or fa['either'] != fb['either']
 def sim(a, b):
     A, B = words(a), words(b)
-    if not A or not B:
+    if not A or not B or conflict(a, b):
         return 0
     return len(A & B) / min(len(A), len(B))
 
