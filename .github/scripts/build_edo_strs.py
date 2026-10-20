@@ -74,6 +74,14 @@ def conflict(a, b):
     if fa['num'] and fb['num'] and not (fa['num'] & fb['num']):
         return True
     return bool(fa['owner'] and fb['owner'] and not (fa['owner'] & fb['owner']))
+def jowner(s):
+    if re.search(r'お互い|両方', s):
+        return 'either'
+    if '相手' in s and '自分' not in s:
+        return 'opp'
+    if '自分' in s and '相手' not in s:
+        return 'you'
+    return None
 def sim(a, b):
     A, B = words(a), words(b)
     if not A or not B or conflict(a, b):
@@ -86,14 +94,22 @@ def main():
     table, stat = {}, {'ja': 0, 'phrase': 0, 'en': 0}
     for cid, d in edo.items():
         e, j = en.get(cid) or [''] * 16, ja.get(cid) or [''] * 16
+        # mycard の英語と日本語で説明の数が違うカードは、並びが合っていない（別の説明がずれて入っている）ことがあるので日本語を使わない
+        if sum(1 for x in e if x) != sum(1 for x in j if x):
+            j = [''] * 16
         # EDOPro の説明 i ↔ mycard の説明 k の対応。同じ文 → 似ている文の順に、1つの日本語は1つの説明にだけ使う
         # （同じ日本語が2つの選択肢に出て見分けられなくなるのを防ぐ）。「Affected by …」（適用中の効果の表示）は対応させない
         pairs = []
         for i, s in enumerate(d):
             if not s or s.lower().startswith('affected by'):
                 continue
+            eo = owner(s.lower())
             for k, x in enumerate(e):
                 if not x or not j[k]:
+                    continue
+                # 日本語の説明が「自分」「相手」のどちらかだけを言っていて、英語と食い違うものは使わない
+                jo = jowner(j[k])
+                if eo and jo and jo not in eo:
                     continue
                 if norm(x) == norm(s):
                     pairs.append((2.0 + (k == i), i, k))
