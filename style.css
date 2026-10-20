@@ -359,7 +359,7 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
 /* ペンデュラムは下半分が魔法カードの緑 */
 .cardface.jp.pend {
   background:
-    linear-gradient(to bottom, transparent 0 56%, #36b394 56%, #11755d 100%),
+    linear-gradient(to bottom, transparent 0 var(--pg, 56%), #36b394 var(--pg, 56%), #11755d 100%),
     linear-gradient(160deg, var(--fr1), var(--fr2));
 }
 
@@ -436,7 +436,7 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
 /* ペンデュラム効果の欄と左右のスケール */
 .jp-pbox {
   position: absolute; top: 81.5cqw; left: 6.6cqw; right: 6.6cqw; height: 22.5cqw;
-  display: grid; grid-template-columns: 10cqw 1fr 10cqw;
+  display: grid; grid-template-columns: 8cqw 1fr 8cqw;
   background: rgba(225, 240, 235, 0.55); border: 0.4cqw solid rgba(0, 0, 0, 0.45);
 }
 .jp-pscale { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }

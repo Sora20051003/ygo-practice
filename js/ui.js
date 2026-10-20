@@ -321,12 +321,17 @@ function jpCard(c, big = false) {
       el('span', { text: has(c, T.LINK) ? `LINK-${c.level}` : `DEF/${String(def).padStart(4, ' ')}` })) : null);
 
   // ペンデュラム：イラストの下にP効果の欄と左右のスケール
-  const pbox = pend ? el('div', { class: 'jp-pbox' },
+  // P効果が長いほど欄を高くして（そのぶんイラストを低くして）、文字を読める大きさにする。欄の下の端（104cqw）は同じ
+  const ph = !p.length ? 14 : p.length < 50 ? 16 : p.length < 90 ? 22 : p.length < 130 ? 28 : 33;
+  const ptop = 104 - ph;
+  const pbox = pend ? el('div', { class: 'jp-pbox', style: `top:${ptop}cqw;height:${ph}cqw` },
     el('div', { class: 'jp-pscale l' }, el('span', { text: '◆' }), el('b', { text: c.ls })),
-    fitLater(el('div', { class: 'jp-pdesc', text: p }), Math.min(3.1, descSize(p.length * 1.1))),
+    fitLater(el('div', { class: 'jp-pdesc', text: p }), 3.2),
     el('div', { class: 'jp-pscale r' }, el('span', { text: '◆' }), el('b', { text: c.rs }))) : null;
+  if (pend) art.style.height = `${ptop - 26.5}cqw`;
 
-  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}`, title: c.name },
+  // カードの高さは 145.76cqw（59:86）。ペンデュラムの緑色は、P効果の欄の上の端から
+  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}`, title: c.name, style: pend ? `--pg:${(ptop / 145.76 * 100).toFixed(1)}%` : null },
     el('div', { class: 'jp-head' },
       el('div', { class: 'jp-name', style: `font-size:max(${jpNameSize(c.name)}cqw, 7px)`, text: c.name }),
       el('div', { class: 'jp-attr ' + attr.cls, text: attr.label })),
