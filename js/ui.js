@@ -258,7 +258,7 @@ function fitText(n) {
   const base = +n.dataset.fs;
   n.style.fontSize = base + 'cqw';
   if (n.scrollHeight <= n.clientHeight) return;
-  let lo = 1.2, hi = base;
+  let lo = 0.9, hi = base;
   for (let i = 0; i < 7; i++) {
     const mid = (lo + hi) / 2;
     n.style.fontSize = mid + 'cqw';
@@ -321,30 +321,13 @@ function jpCard(c, big = false) {
       el('span', { text: has(c, T.LINK) ? `LINK-${c.level}` : `DEF/${String(def).padStart(4, ' ')}` })) : null);
 
   // ペンデュラム：イラストの下にP効果の欄と左右のスケール
-  // P効果が長いほど欄を高くして（そのぶんイラストを低くして）、文字を読める大きさにする。欄の下の端（104cqw）は同じ
-  const ph = !p.length ? 14 : p.length < 50 ? 16 : p.length < 90 ? 22 : p.length < 130 ? 28 : 33;
-  const ptop = 104 - ph;
-  const pbox = pend ? el('div', { class: 'jp-pbox', style: `top:${ptop}cqw;height:${ph}cqw` },
+  // 本物のカードと同じ比率：イラストはP効果の欄の下の端まであり、欄はイラストの下の方に半透明で重なる（位置は style.css）
+  const pbox = pend ? el('div', { class: 'jp-pbox' },
     el('div', { class: 'jp-pscale l' }, el('span', { text: '◆' }), el('b', { text: c.ls })),
     fitLater(el('div', { class: 'jp-pdesc', text: p }), 3.2),
     el('div', { class: 'jp-pscale r' }, el('span', { text: '◆' }), el('b', { text: c.rs }))) : null;
-  if (pend) {
-    // イラストを切らずに全部見せる：欄の高さに合わせて、イラストの縦横の比率のまま幅を決めて真ん中に置く
-    const h = ptop - 26.5;
-    art.style.height = `${h}cqw`;
-    const fit = img => {
-      if (!img.naturalWidth || !img.naturalHeight) return;
-      const w = Math.min(86.8, h * img.naturalWidth / img.naturalHeight);
-      art.style.width = `${w}cqw`;
-      art.style.left = `${(100 - w) / 2}cqw`;
-    };
-    art.addEventListener('load', e => { if (e.target.tagName === 'IMG') fit(e.target); }, true);   // load は伝わらないので「捕まえる」側で受ける
-    const img0 = art.querySelector('img');
-    if (img0 && img0.complete) fit(img0);
-  }
 
-  // カードの高さは 145.76cqw（59:86）。ペンデュラムの緑色は、P効果の欄の上の端から
-  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}`, title: c.name, style: pend ? `--pg:${(ptop / 145.76 * 100).toFixed(1)}%` : null },
+  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}`, title: c.name },
     el('div', { class: 'jp-head' },
       el('div', { class: 'jp-name', style: `font-size:max(${jpNameSize(c.name)}cqw, 7px)`, text: c.name }),
       el('div', { class: 'jp-attr ' + attr.cls, text: attr.label })),
