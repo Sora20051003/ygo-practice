@@ -770,7 +770,7 @@ function promptModal(body, buttons = [], title) {
   const sheet = el('div', { class: 'ap-sheet', id: 'ap-sheet' },
     el('div', { class: 'ap-sheet-head' },
       el('b', { text: title || promptTitle(p) }),
-      el('button', { class: 'btn small', text: '盤面を見る', title: '左の「選択画面を開く」でまた出せます', onclick: () => closePromptModal() })),
+      el('button', { class: 'btn small', text: '盤面を見る', title: '選択を一時的に隠して盤面を見ます（画面下の「選択に戻る」で戻れます）', onclick: () => peek() })),
     el('div', { class: 'ap-sheet-body' }, body),
     buttons.length ? el('div', { class: 'ap-sheet-foot' }, buttons.map(b =>
       el('button', { class: 'btn' + (b.primary ? ' primary' : ''), text: b.label, onclick: () => { if (b.onClick() !== false) closePromptModal(); } }))) : null);
@@ -779,10 +779,18 @@ function promptModal(body, buttons = [], title) {
     const row = body.matches && body.matches('.stack') ? [...body.children].filter(n => n.classList.contains('row')).pop() : null;
     if (row && row === body.lastElementChild) sheet.append(el('div', { class: 'ap-sheet-foot' }, row));
   }
+  // 盤面を見る：選択の帯を隠すだけにして、画面下に「選択に戻る」を出す（閉じてしまうと戻り方が分かりにくいので）
+  let back = null;
+  function peek() {
+    sheet.hidden = true;
+    back = el('button', { class: 'btn primary ap-peek-back', text: '↩ 選択に戻る', onclick: () => { sheet.hidden = false; back.remove(); back = null; fitSheet(sheet); } });
+    document.body.append(back);
+  }
   document.body.append(sheet);
   fitSheet(sheet);
   const close = () => {
     sheet.remove();
+    if (back) { back.remove(); back = null; }
     if (Auto.selectable) { Auto.selectable = null; Auto.pickFromBoard = null; renderBoard(); }
     autoPanel();
   };

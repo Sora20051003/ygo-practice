@@ -1353,3 +1353,7 @@ body.replaying .mobile-bar, body.replaying #b-pause, body.replaying #pause { dis
 .replay-bar .rp-btns > .btn { flex: 1; }
 .replay-bar .rp-label { min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 body.replaying #view-board { padding-bottom: 150px; }
+/* 「盤面を見る」で選択を隠したとき、画面下に出す「選択に戻る」 */
+.ap-peek-back { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 950; padding: 12px 22px; font-size: 16px; border-radius: 999px; box-shadow: 0 6px 20px rgba(0, 0, 0, .5); }
+@media (min-width: 721px) { .ap-peek-back { bottom: 24px; } }
+.ap-sheet[hidden] { display: none !important; }
