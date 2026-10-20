@@ -17,7 +17,7 @@ PHRASES = {
     'add to hand': '手札に加える', 'add to your hand': '手札に加える', 'add 1 card to your hand': '1枚を手札に加える', 'search': 'デッキから手札に加える',
     'draw': 'ドローする', 'draw 1 card': '1枚ドローする', 'draw 2 cards': '2枚ドローする', 'destroy': '破壊する', 'destroy 1 card': '1枚を破壊する',
     'banish': '除外する', 'send to the gy': '墓地へ送る', 'send to gy': '墓地へ送る', 'negate': '無効にする', 'negate the activation': '発動を無効にする',
-    'negate the effect': '効果を無効にする', 'set': 'セットする', 'set 1 spell/trap': '魔法・罠を1枚セットする', 'change battle position': '表示形式を変更する',
+    'negate the effect': '効果を無効にする', 'negate that effect': 'その効果を無効にする', 'negate that activation': 'その発動を無効にする', 'negate the summon': '召喚を無効にする', 'set': 'セットする', 'set 1 spell/trap': '魔法・罠を1枚セットする', 'change battle position': '表示形式を変更する',
     'change position': '表示形式を変更する', 'gain lp': 'LPを回復する', 'inflict damage': 'ダメージを与える', 'return to hand': '手札に戻す',
     'return to the hand': '手札に戻す', 'return to the deck': 'デッキに戻す', 'shuffle into the deck': 'デッキに戻す', 'attach': 'X素材にする',
     'attach material': 'X素材にする', 'detach': 'X素材を取り除く', 'equip': '装備する', 'take control': 'コントロールを得る',
@@ -67,25 +67,38 @@ def main():
     table, stat = {}, {'ja': 0, 'phrase': 0, 'en': 0}
     for cid, d in edo.items():
         e, j = en.get(cid) or [''] * 16, ja.get(cid) or [''] * 16
+        # EDOPro の説明 i ↔ mycard の説明 k の対応。同じ文 → 似ている文の順に、1つの日本語は1つの説明にだけ使う
+        # （同じ日本語が2つの選択肢に出て見分けられなくなるのを防ぐ）。「Affected by …」（適用中の効果の表示）は対応させない
+        pairs = []
+        for i, s in enumerate(d):
+            if not s or s.lower().startswith('affected by'):
+                continue
+            for k, x in enumerate(e):
+                if not x or not j[k]:
+                    continue
+                if norm(x) == norm(s):
+                    pairs.append((2.0 + (k == i), i, k))
+                else:
+                    sc = sim(s, x)
+                    if sc >= 0.75:
+                        pairs.append((sc + 0.01 * (k == i), i, k))
+        pairs.sort(reverse=True)
+        got, used = {}, set()
+        for sc, i, k in pairs:
+            if i in got or k in used:
+                continue
+            got[i] = (k, sc >= 2)
+            used.add(k)
         row = []
         for i, s in enumerate(d):
             if not s:
                 row.append('')
                 continue
-            label = None
-            if j[i] and norm(e[i]) == norm(s):
-                label = j[i]                                    # 同じ番号で一致
-            else:
-                for k, x in enumerate(e):                        # 別の番号で一致
-                    if x and j[k] and norm(x) == norm(s):
-                        label = j[k]; break
-            if not label:
-                # 言い回しが違うだけ：いちばん似ている説明（同じ点なら同じ番号を優先）。十分似ていて、ほかの説明とはっきり区別できるときだけ
-                cands = sorted(((sim(s, x), k == i, k) for k, x in enumerate(e) if x and j[k]), reverse=True)
-                if cands and cands[0][0] >= 0.75 and (len(cands) == 1 or cands[0][0] - cands[1][0] >= 0.25 or cands[0][1]):
-                    label = j[cands[0][2]]; stat['similar'] = stat.get('similar', 0) + 1
-            if label:
+            if i in got:
+                label = j[got[i][0]]
                 stat['ja'] += 1
+                if not got[i][1]:
+                    stat['similar'] = stat.get('similar', 0) + 1
             elif s.lower().rstrip('.') in PHRASES:
                 label = PHRASES[s.lower().rstrip('.')]; stat['phrase'] += 1
             else:
