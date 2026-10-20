@@ -711,7 +711,10 @@ function onDuelRoom(r) {
   }
   if (r.status === 'rps') { showRps(r); if (r.host === me) judgeRps(r); } else closeRps();
   if (r.status === 'choosing') askFirstOrSecond(r); else closeFirstOrSecond();
-  if (r.status === 'playing' && !Duel.active) { Duel.timeoutSent = false; if (r.mode === 'auto') beginNetDuel(); else beginDuelBoard(); }
+  if (r.status === 'playing' && !Duel.active) {
+    // 始まったら、先攻か後攻かを画面の真ん中に大きく出す（入り直したときは出さない）
+    if (prev && prev.status !== 'playing' && r.first) showPhaseBanner(r.first === me ? 'あなたは先攻' : 'あなたは後攻', `${r.first === r.host ? r.hostName : r.guestName} の先攻で始めます`, r.first !== me, true);
+    Duel.timeoutSent = false; if (r.mode === 'auto') beginNetDuel(); else beginDuelBoard(); }
   if (Duel.active) {
     // ターンが変わったら、自分の盤面のターン数・通常召喚・使用済みを更新
     const key = r.turn + ':' + r.turnPlayer;

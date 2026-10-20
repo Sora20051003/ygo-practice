@@ -1349,15 +1349,15 @@ function announceActivation(uid) {
 // ---------- フェイズが変わったとき、画面の真ん中に大きく出す ----------
 // 続けて変わったとき（ドロー→スタンバイ→メイン1 など）は順番に短めに出す
 const PhaseBanner = { queue: [], running: false, last: '' };
-function showPhaseBanner(main, sub, opp) {
-  PhaseBanner.queue.push({ main, sub, opp });
+function showPhaseBanner(main, sub, opp, big) {   // big：先攻・後攻など、大きく長めに出すもの
+  PhaseBanner.queue.push({ main, sub, opp, big });
   if (!PhaseBanner.running) nextPhaseBanner();
 }
 function nextPhaseBanner() {
   const b = PhaseBanner.queue.shift();
   if (!b) { PhaseBanner.running = false; return; }
   PhaseBanner.running = true;
-  const n = el('div', { class: 'phase-banner' + (b.opp ? ' opp' : '') }, el('b', { text: b.main }), b.sub ? el('small', { text: b.sub }) : null);
+  const n = el('div', { class: 'phase-banner' + (b.opp ? ' opp' : '') + (b.big ? ' big' : '') }, el('b', { text: b.main }), b.sub ? el('small', { text: b.sub }) : null);
   document.body.append(n);
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const C = 'translate(-50%, -50%)';
@@ -1367,7 +1367,7 @@ function nextPhaseBanner() {
   // 演出が終わったら次へ（画面が裏にあるときなど、終わりの知らせが来ないこともあるので時間でも進める）
   let over = false;
   const done = () => { if (over) return; over = true; n.remove(); nextPhaseBanner(); };
-  const ms = PhaseBanner.queue.length ? 650 : 1000;
+  const ms = b.big ? 2200 : PhaseBanner.queue.length ? 650 : 1000;
   n.animate(kf, { duration: ms, easing: 'ease-out', fill: 'both' }).finished.then(done, done);
   setTimeout(done, ms + 150);
 }
