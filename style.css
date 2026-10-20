@@ -171,7 +171,7 @@ textarea { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 .d-fmt.l2 { color: #b7950b; border-color: #d4ac0d; }
 
 /* ---------- 対戦 ---------- */
-.duel-lobby { padding: 16px; display: flex; justify-content: center; }
+.duel-lobby { padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .duel-card { width: min(640px, 100%); display: flex; flex-direction: column; gap: 12px; }
 .duel-card h2 { margin: 0; font-size: 20px; }
 .duel-card h3 { margin: 0 0 6px; font-size: 14px; }
@@ -686,13 +686,14 @@ details summary { cursor: pointer; margin: 10px 0 4px; font-size: 13px; color: v
   .hand .bcard { width: 62px; }
   .badge { font-size: 8.5px; }
   .mobile-bar {
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    /* 見えているボタンの数だけ横に並べる（手動は6個、自動処理は5個） */
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 5px;
     position: sticky; bottom: 0; z-index: 30; padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
     background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
   }
   .mobile-bar button {
     padding: 10px 2px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2);
-    color: var(--text); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+    color: var(--text); font: inherit; font-size: 12px; white-space: nowrap; overflow: hidden; font-weight: 700; cursor: pointer;
   }
   .mobile-bar #mb-draw { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .sheet-log { max-height: 60vh; min-height: 0; }
@@ -1289,3 +1290,31 @@ body.land .phase-banner { padding: 8px 14px; }
 .sample-find { gap: 8px; flex-wrap: wrap; }
 .sample-find input { flex: 1; min-width: 200px; }
 .sample-period { margin: 14px 0 4px; font-size: 14px; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+
+/* ---------- スマホの見直し ---------- */
+@media (max-width: 720px) {
+  /* フレンド欄：コードを1行に、入力欄は小さめ */
+  .friend-mycode .room-code { font-size: 20px; letter-spacing: .08em; white-space: nowrap; }
+  .friends-box .room-input { font-size: 16px; letter-spacing: .03em; min-width: 0; flex: 1; }
+  .friend-list li .btn.small { padding: 6px 9px; }
+  /* 相手（CPU・対戦相手）の帯：名前・手札・ライフを1行に収める */
+  .opp-bar { gap: 6px; padding: 6px 8px; flex-wrap: nowrap; }
+  .opp-name { white-space: nowrap; flex: none; font-size: 13px; }
+  .opp-hand { flex: 1; min-width: 0; overflow: hidden; }
+  .opp-hand .cardface.back.mini { width: 16px; flex: none; }
+  .lp-box { white-space: nowrap; flex: none; padding: 2px 10px; }
+  .lp-box b { font-size: 15px; }
+  /* フェイズの帯：フェイズのボタンは2段目に（名前が重ならないように） */
+  #phase-bar .ph-chips { order: 3; flex-basis: 100%; }
+  #phase-bar .ph-end { margin-left: auto; }
+  #phase-bar .ph-chip b { font-size: 11px; letter-spacing: 0; }
+  /* 盤面の山札・墓地などの名前：はみ出して隣と重ならないように */
+  .pile .zone-label { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: clip; }
+}
+/* 対戦の画面：長いデッキ名などで横にはみ出さないように */
+.duel-card { min-width: 0; max-width: 100%; }
+.duel-card .auth-field, .duel-quick > * { min-width: 0; }
+.duel-card select, .duel-card input:not([type=checkbox]):not([type=radio]) { max-width: 100%; min-width: 0; }
+.duel-card select { width: 100%; text-overflow: ellipsis; }
+.chat-row > button { flex: none; width: auto; }
+.chat-row input { flex: 1; min-width: 0; }

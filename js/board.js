@@ -719,7 +719,7 @@ function renderBoard() {
   }
   if (!S) {
     field.append(el('div', { class: 'empty-board' },
-      el('p', { text: '左の「シャッフルして開始」でデッキから初手を引きます。' }),
+      el('p', { text: '「シャッフルして開始」でデッキから初手を引きます。' }),
       el('p', { class: 'muted', text: 'デッキは「デッキ作成」タブで作れます。' })));
     $('#hand').innerHTML = '';
     $('#b-log').innerHTML = '';

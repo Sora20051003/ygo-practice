@@ -451,10 +451,13 @@ function renderDetail(box, c, extra) {
     if (has(c, T.LINK)) stats.push(linkArrowsText(c));
   }
   const jaBox = el('div', { class: 'ja-text' }, el('div', { class: 'card-text muted', text: '日本語の効果を読み込み中…' }));
+  // カードの絵（アプリで描いたもの）には効果文も描くので、効果文がまだ無いときは、読み込めたら描き直す
+  const textBefore = c.jaText;
+  const img = detailImage(c);
   const enBox = el('div', { class: 'card-text', text: '英語テキストを読み込み中…' });
   box.append(...[
     extra,
-    detailImage(c),
+    img,
     el('div', { class: 'detail-head ' + frameClass(c) },
       el('div', { class: 'd-name', text: c.name }),
       c.ruby && c.ruby !== c.name ? el('div', { class: 'd-ruby', text: c.ruby }) : null,
@@ -479,6 +482,7 @@ function renderDetail(box, c, extra) {
 
   fetchCardTexts(c).then(t => {
     if (!jaBox.isConnected) return;
+    if (img && img.isConnected && c.jaText && c.jaText !== textBefore) img.replaceWith(detailImage(c));
     jaBox.innerHTML = '';
     if (t && t.ja) {
       if (t.jaP) jaBox.append(el('div', { class: 'text-label', text: 'ペンデュラム効果' }), el('div', { class: 'card-text', text: t.jaP }),
