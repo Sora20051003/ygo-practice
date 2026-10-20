@@ -137,6 +137,7 @@ async function init() {
   renderDeck();
   renderResults();
   setupBoardView();
+  setupSlots();   // 一人回しのページ（複数の盤面）
   setupDuel();
   switchView(store.get('ygo.view', 'deck'));
   startRemoteSync(applyRemoteDecks);
