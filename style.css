@@ -1358,3 +1358,7 @@ body.replaying #view-board { padding-bottom: 150px; }
 @media (min-width: 721px) { .ap-peek-back { bottom: 24px; } }
 .ap-sheet[hidden] { display: none !important; }
 .errata-label { color: #b06bd6; }
+.stats-panel { display: flex !important; flex-direction: column; gap: 8px; min-width: 260px; }
+.stat-row { display: grid; grid-template-columns: auto 1fr auto 1fr; align-items: center; gap: 6px; }
+.stat-row input { width: 100%; min-width: 0; }
+details.multi.active > summary { color: var(--accent); font-weight: 700; }

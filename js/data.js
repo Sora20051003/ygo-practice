@@ -492,7 +492,10 @@ const splitTerms = s => (s || '').split(/[\s　]+/).map(normalizeText).filter(Bo
 // and: すべての語を含む / or: どれかの語を含む
 const matchTerms = (hay, terms, mode) => (mode === 'or' ? terms.some(t => hay.includes(t)) : terms.every(t => hay.includes(t)));
 
-function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new' }) {
+function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new', atkMin = null, atkMax = null, defMin = null, defMax = null }) {
+  // 攻撃力・守備力の範囲（片方だけでもよい）。「？」（マイナスの値）と、守備力の無いリンクモンスターは、指定したら出さない
+  const inRange = (v, lo, hi) => v >= 0 && (lo == null || v >= lo) && (hi == null || v <= hi);
+  const useAtk = atkMin != null || atkMax != null, useDef = defMin != null || defMax != null;
   const subs = (Array.isArray(sub) ? sub : (sub ? [sub] : [])).map(s => SUB_FILTERS[s]).filter(Boolean);
   const subOk = c => (subMode === 'and' ? subs.every(f => f(c)) : subs.some(f => f(c)));
   const terms = splitTerms(q);
@@ -518,6 +521,8 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
     if (races.length && !(isMonster(c) && races.includes(c.race))) continue;
     if (useStars && !starOk(c)) continue;
     if (markers.length && !markerOk(c)) continue;
+    if (useAtk && !(isMonster(c) && inRange(c.atk, atkMin, atkMax))) continue;
+    if (useDef && !(isMonster(c) && !has(c, T.LINK) && inRange(c.def, defMin, defMax))) continue;
     if (terms.length && !matchTerms(c.key, terms, qMode)) continue;
     if (textTerms.length && !(c.tkey && matchTerms(c.tkey, textTerms, textMode))) continue;
     out.push(c);
@@ -530,7 +535,10 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
     name: (a, b) => (a.ruby || a.name).localeCompare(b.ruby || b.name, 'ja'),
     level: (a, b) => b.level - a.level || b.atk - a.atk,
     atk: (a, b) => b.atk - a.atk,
+    // 守備力順：リンクモンスター（守備力が無い）と魔法・罠は後ろ
+    def: (a, b) => defOf(b) - defOf(a) || b.atk - a.atk,
   };
+  function defOf(c) { return isMonster(c) && !has(c, T.LINK) ? c.def : -9; }
   const s = sorters[sort] || sorters.new;
   out.sort((a, b) => matchRank(a) - matchRank(b) || s(a, b));
   return out;

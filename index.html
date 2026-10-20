@@ -13,7 +13,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="stylesheet" href="style.css?v=20261020-143445">
+<link rel="stylesheet" href="style.css?v=20261020-145406">
 </head>
 <body>
 <header class="topbar">
@@ -73,11 +73,18 @@
           <details id="f-rank" class="multi"><summary>ランク</summary><div class="multi-panel nums"></div></details>
           <details id="f-link" class="multi"><summary>リンク</summary><div class="multi-panel nums"></div></details>
           <details id="f-marker" class="multi"><summary>リンクマーカー</summary><div class="multi-panel arrows"></div></details>
+          <details id="f-stats" class="multi"><summary>攻撃力・守備力</summary><div class="multi-panel stats-panel">
+            <div class="stat-row"><span>攻撃力</span><input type="number" id="f-atk-min" min="0" step="100" inputmode="numeric" placeholder="下限"><span>〜</span><input type="number" id="f-atk-max" min="0" step="100" inputmode="numeric" placeholder="上限"></div>
+            <div class="stat-row"><span>守備力</span><input type="number" id="f-def-min" min="0" step="100" inputmode="numeric" placeholder="下限"><span>〜</span><input type="number" id="f-def-max" min="0" step="100" inputmode="numeric" placeholder="上限"></div>
+            <div class="muted small-note">片方だけでも指定できます（例：攻撃力 〜1500）。「？」のカードと、守備力の無いリンクモンスターは、指定すると出ません。</div>
+            <button type="button" class="btn small" id="f-stats-clear">クリア</button>
+          </div></details>
           <select id="f-sort">
             <option value="new">新しい順</option>
             <option value="name">名前順</option>
             <option value="level">レベル順</option>
             <option value="atk">攻撃力順</option>
+            <option value="def">守備力順</option>
           </select>
         </div>
         <div class="search-tools">
@@ -410,23 +417,23 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261020-143445"></script>
-<script src="js/consts.js?v=20261020-143445"></script>
-<script src="js/ui.js?v=20261020-143445"></script>
+<script src="js/version.js?v=20261020-145406"></script>
+<script src="js/consts.js?v=20261020-145406"></script>
+<script src="js/ui.js?v=20261020-145406"></script>
 <script src="data/errata-texts.js"></script>
-<script src="js/data.js?v=20261020-143445"></script>
-<script src="js/cloud-config.js?v=20261020-143445"></script>
-<script src="js/auth.js?v=20261020-143445"></script>
-<script src="js/admin.js?v=20261020-143445"></script>
-<script src="js/deck.js?v=20261020-143445"></script>
-<script src="js/board.js?v=20261020-143445"></script>
-<script src="js/engine.js?v=20261020-143445"></script>
-<script src="js/autoplay.js?v=20261020-143445"></script>
-<script src="js/glow.js?v=20261020-143445"></script>
-<script src="js/duel.js?v=20261020-143445"></script>
-<script src="js/friends.js?v=20261020-143445"></script>
-<script src="js/replay.js?v=20261020-143445"></script>
-<script src="js/imgdeck.js?v=20261020-143445"></script>
-<script src="js/app.js?v=20261020-143445"></script>
+<script src="js/data.js?v=20261020-145406"></script>
+<script src="js/cloud-config.js?v=20261020-145406"></script>
+<script src="js/auth.js?v=20261020-145406"></script>
+<script src="js/admin.js?v=20261020-145406"></script>
+<script src="js/deck.js?v=20261020-145406"></script>
+<script src="js/board.js?v=20261020-145406"></script>
+<script src="js/engine.js?v=20261020-145406"></script>
+<script src="js/autoplay.js?v=20261020-145406"></script>
+<script src="js/glow.js?v=20261020-145406"></script>
+<script src="js/duel.js?v=20261020-145406"></script>
+<script src="js/friends.js?v=20261020-145406"></script>
+<script src="js/replay.js?v=20261020-145406"></script>
+<script src="js/imgdeck.js?v=20261020-145406"></script>
+<script src="js/app.js?v=20261020-145406"></script>
 </body>
 </html>

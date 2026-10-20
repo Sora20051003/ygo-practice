@@ -283,6 +283,10 @@ function setupSearch() {
     });
   }
   for (const id of ['#f-kind', '#f-sort']) $(id).addEventListener('change', run);
+  // 攻撃力・守備力の範囲：入力のたびに少し待ってから探し直す。見出しに指定中の範囲を出す
+  let statTimer = null;
+  for (const id of STAT_INPUTS) $(id).addEventListener('input', () => { updateStatSummary(); clearTimeout(statTimer); statTimer = setTimeout(run, 300); });
+  $('#f-stats-clear').addEventListener('click', () => { for (const id of STAT_INPUTS) $(id).value = ''; updateStatSummary(); run(); });
   // 未発売のカードを出さない（レギュレーションの時点で）
   const hide = $('#f-hide-unrel');
   hide.checked = store.get('ygo.hideUnrel', true);
@@ -293,6 +297,8 @@ function setupSearch() {
     $('#qt').value = '';
     $('#f-kind').value = '';
     $('#f-sort').value = 'new';
+    for (const id of STAT_INPUTS) $(id).value = '';
+    updateStatSummary();
     for (const seg of ['#q-mode', '#qt-mode']) $$(seg + ' button').forEach(b => b.classList.toggle('on', b.dataset.mode === 'and'));
     for (const box of $$('details.multi')) {
       $$('input[type=checkbox]', box).forEach(i => { i.checked = false; });
@@ -376,6 +382,7 @@ function renderResults() {
   let res = searchCards({
     format: fmt, q: $('#q').value, qMode: segMode('#q-mode'), text, textMode: segMode('#qt-mode'), kind: $('#f-kind').value, sub: getMulti('#f-sub'), subMode: $('#f-sub').dataset.mode,
     attr: getMulti('#f-attr'), race: getMulti('#f-race'), level: getMulti('#f-level'), rank: getMulti('#f-rank'), link: getMulti('#f-link'), marker: getMulti('#f-marker'), markerMode: $('#f-marker').dataset.mode, sort: $('#f-sort').value,
+    atkMin: statNum('#f-atk-min'), atkMax: statNum('#f-atk-max'), defMin: statNum('#f-def-min'), defMax: statNum('#f-def-max'),
   });
   // 選んだレギュレーションの時点で未発売のカードは出さない（設定でオフにできる）
   if (hideUnreleased(ctx)) res = res.filter(c => !isUnreleased(c, ctx));
@@ -387,6 +394,16 @@ function renderResults() {
   box.append(frag);
 }
 
+// 攻撃力・守備力の範囲の入力（空なら指定なし）
+const STAT_INPUTS = ['#f-atk-min', '#f-atk-max', '#f-def-min', '#f-def-max'];
+function statNum(sel) { const v = ($(sel) || {}).value; return v == null || String(v).trim() === '' || isNaN(+v) ? null : +v; }
+function updateStatSummary() {
+  const r = (lo, hi) => (lo == null && hi == null ? '' : `${lo ?? ''}〜${hi ?? ''}`);
+  const a = r(statNum('#f-atk-min'), statNum('#f-atk-max')), d = r(statNum('#f-def-min'), statNum('#f-def-max'));
+  const sum = $('#f-stats summary');
+  sum.textContent = a || d ? [a && '攻' + a, d && '守' + d].filter(Boolean).join(' ') : '攻撃力・守備力';
+  $('#f-stats').classList.toggle('active', !!(a || d));
+}
 const hideUnreleased = ctx => !!ctx.date && ($('#f-hide-unrel') || {}).checked !== false;
 
 // 検索結果の1行
