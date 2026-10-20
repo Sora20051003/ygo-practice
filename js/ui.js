@@ -247,6 +247,35 @@ function stIcon(c) {
 // 効果文の長さに合わせた文字の大きさ（cqw）
 const descSize = len => (len < 70 ? 3.6 : len < 140 ? 3.1 : len < 220 ? 2.7 : len < 320 ? 2.3 : len < 420 ? 2.0 : 1.75);
 
+// 効果文が欄に入りきらないときは、入りきるまで文字を小さくする（見切れ防止）
+// 表示されて大きさが決まった時（と大きさが変わった時）に合わせる。小さいカード（盤面・デッキの一覧）は読めないので何もしない
+function fitText(n) {
+  const card = n.closest('.cardface');
+  // まだ画面に出ていないカードは、出てから合わせる。画面から消えたカードは見張るのをやめる
+  if (!n.isConnected) { if (n._fitShown && textFitter) textFitter.unobserve(n); return; }
+  n._fitShown = true;
+  if (!card || card.clientWidth < 120) return;
+  const base = +n.dataset.fs;
+  n.style.fontSize = base + 'cqw';
+  if (n.scrollHeight <= n.clientHeight) return;
+  let lo = 1.2, hi = base;
+  for (let i = 0; i < 7; i++) {
+    const mid = (lo + hi) / 2;
+    n.style.fontSize = mid + 'cqw';
+    if (n.scrollHeight <= n.clientHeight) lo = mid; else hi = mid;
+  }
+  n.style.fontSize = lo + 'cqw';
+}
+const textFitter = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(es => { for (const e of es) fitText(e.target); }) : null;
+function fitLater(n, size) {
+  n.dataset.fs = size;
+  n.style.fontSize = size + 'cqw';
+  if (textFitter) textFitter.observe(n);
+  // 文字（フォント）の読み込みが終わると大きさが変わるので、その後にもう一度合わせる
+  if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(() => requestAnimationFrame(() => fitText(n)));
+  return n;
+}
+
 // ペンデュラムの文を「P効果」と「モンスター効果（またはフレーバー）」に分ける
 function splitPendulum(text) {
   const m = text.match(/^【[ＰP]スケール[^】]*】\n?([\s\S]*?)\n?【(?:モンスター効果|フレーバーテキスト)】\n?([\s\S]*)$/);
@@ -286,7 +315,7 @@ function jpCard(c, big = false) {
   const def = c.def < 0 ? '?' : c.def;
   const box = el('div', { class: 'jp-box' },
     mon ? el('div', { class: 'jp-type', text: `【${typeLine(c)}】` }) : null,
-    el('div', { class: 'jp-desc' + (flavor ? ' flavor' : ''), style: `font-size:${descSize(main.length)}cqw`, text: main }),
+    fitLater(el('div', { class: 'jp-desc' + (flavor ? ' flavor' : ''), text: main }), descSize(main.length)),
     mon ? el('div', { class: 'jp-stat' },
       el('span', { text: `ATK/${String(atk).padStart(4, ' ')}` }),
       el('span', { text: has(c, T.LINK) ? `LINK-${c.level}` : `DEF/${String(def).padStart(4, ' ')}` })) : null);
@@ -294,7 +323,7 @@ function jpCard(c, big = false) {
   // ペンデュラム：イラストの下にP効果の欄と左右のスケール
   const pbox = pend ? el('div', { class: 'jp-pbox' },
     el('div', { class: 'jp-pscale l' }, el('span', { text: '◆' }), el('b', { text: c.ls })),
-    el('div', { class: 'jp-pdesc', style: `font-size:${Math.min(2.8, descSize(p.length * 1.6))}cqw`, text: p }),
+    fitLater(el('div', { class: 'jp-pdesc', text: p }), Math.min(2.8, descSize(p.length * 1.6))),
     el('div', { class: 'jp-pscale r' }, el('span', { text: '◆' }), el('b', { text: c.rs }))) : null;
 
   return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}`, title: c.name },
