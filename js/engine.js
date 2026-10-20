@@ -87,6 +87,10 @@ function engineLoad(onStatus) {
     if (typeof EDO_CARDS === 'undefined') {
       try { await loadScript('data/edo-cards.js?d=' + new Date().toISOString().slice(0, 10)); } catch (e) { console.warn('EDOPro のカードデータを読めませんでした', e); }
     }
+    // 効果の説明（選択肢の文）。EDOPro の番号順にそろえたもの
+    if (typeof EDO_STRS === 'undefined') {
+      try { await loadScript('data/edo-strs.js?d=' + new Date().toISOString().slice(0, 10)); } catch (e) { console.warn('効果の説明のデータを読めませんでした', e); }
+    }
     onStatus && onStatus('自動処理の準備中…（共通スクリプトを読み込んでいます）');
     const texts = await Promise.all(CORE_SCRIPTS.map(n => fetchScript(n, n)));
     CORE_SCRIPTS.forEach((n, i) => { if (texts[i]) Engine.scripts.set(n, texts[i]); });
@@ -236,7 +240,8 @@ function descText(desc) {
   if (code === TOOL_CODE) return TOOL_LABELS[idx] || '練習ツール';
   if (code) {
     const c = DB.byId.get(code);
-    const s = c && c.jaStrs && c.jaStrs[idx];
+    // EDOPro の番号順の説明があればそれを使う（YGOPro 用の日本語の説明は番号の並びが違うことが多く、別の効果の説明になってしまう）
+    const s = typeof EDO_STRS !== 'undefined' ? (EDO_STRS[code] || [])[idx] : (c && c.jaStrs && c.jaStrs[idx]);
     return s || `「${cardName(code)}」の効果${idx + 1}`;
   }
   const s = Engine.sys.get(idx) || '';
