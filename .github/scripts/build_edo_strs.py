@@ -57,18 +57,23 @@ def words(s):
     return {w for w in re.findall(r'[a-z]+', re.sub(r'\bgy\b', 'graveyard', s.lower())) if w not in STOP}
 # 意味が変わる違い（数・だれの、など）。片方にしか無い／食い違うときは別の説明とみなす
 # 例：「Send the top 2 cards of your Deck」と「Send the top 3 cards of your opponent's Deck」は別
+# だれの（自分・相手・両方）：「your Deck」「your opponent's field」「you control」などの言い回しだけを見る
+OWN_RE = re.compile(r"\b(your opponent's|opponent's|their|your|either|both players'|each player's|both)\s+(?:extra\s+)?(deck|field|side of the field|graveyard|gy|hand)\b|\b(your opponent|you)\s+controls?\b")
+def owner(t):
+    s = set()
+    for m in OWN_RE.finditer(t):
+        w = m.group(1) or m.group(3)
+        s.add('opp' if re.search(r'opponent|their', w) else 'either' if re.search(r'either|both|each', w) else 'you')
+    return s
 def features(s):
     t = s.lower()
-    return {
-        'num': set(re.findall(r'\d+', t)),
-        'opp': bool(re.search(r"\bopponent", t)),
-        'either': bool(re.search(r'\beither\b|\bboth\b|\beach player', t)),
-    }
+    return {'num': set(re.findall(r'\d+', t)), 'owner': owner(t)}
 def conflict(a, b):
+    # 数が1つも同じでない・だれのが1つも同じでないときは別の説明（例：「自分のデッキの上から2枚」と「相手のデッキの上から3枚」）
     fa, fb = features(a), features(b)
-    if fa['num'] and fb['num'] and fa['num'] != fb['num']:
+    if fa['num'] and fb['num'] and not (fa['num'] & fb['num']):
         return True
-    return fa['opp'] != fb['opp'] or fa['either'] != fb['either']
+    return bool(fa['owner'] and fb['owner'] and not (fa['owner'] & fb['owner']))
 def sim(a, b):
     A, B = words(a), words(b)
     if not A or not B or conflict(a, b):
