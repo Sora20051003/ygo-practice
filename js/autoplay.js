@@ -317,11 +317,11 @@ function autoRedo() {
 }
 
 // ---------- 開始・保存 ----------
-async function autoPrepare(deck) {
+async function autoPrepare(deck, errata = errataMode()) {
   showLoading('自動処理の準備中…');
   try {
     await engineLoad(showLoading);
-    await loadCardScripts([...deck.main, ...(deck.extra || []), OPP_FILLER], showLoading);
+    await loadCardScripts([...deck.main, ...(deck.extra || []), OPP_FILLER], showLoading, errata);
   } finally { showLoading(null); }
 }
 
@@ -336,7 +336,7 @@ async function autoStart(handIds) {
     try { await autoPrepare(opp); } catch (e) { showError('相手のデッキを準備できませんでした', e); return; }
   }
   Auto.redoLog = null;
-  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw(), tools: true, rule: masterRule() });
+  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), errata: errataMode() });
   Auto.deckId = deck.id;
   Auto.duel.cpuSlow = cpuDelay() > 0;
   try { Auto.duel.start(); } catch (e) { console.error(e); showError('開始できませんでした', e); Auto.duel = null; renderBoard(); return; }
@@ -364,7 +364,7 @@ function autoSave() {
   const items = d.history();
   try {
     store.set('ygo.autoBoard', JSON.parse(JSON.stringify({
-      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, items, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode, autoTrigger: d.autoTrigger, firstDraw: d.firstDraw, tools: d.tools, rule: d.rule,
+      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, items, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode, autoTrigger: d.autoTrigger, firstDraw: d.firstDraw, tools: d.tools, rule: d.rule, errata: d.errata,
     }, bigReplacer)));
   } catch { /* 保存できなくても続けられる */ }
 }
@@ -372,8 +372,8 @@ async function autoResume() {
   let saved = null;
   try { saved = JSON.parse(JSON.stringify(store.get('ygo.autoBoard', null)), bigReviver); } catch { saved = null; }
   if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
-  try { await autoPrepare(saved); if (saved.opp) await autoPrepare(saved.opp); } catch { return; }
-  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: !!saved.autoTrigger && store.get('ygo.autoTrigger', false), firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5' });
+  try { await autoPrepare(saved, saved.errata); if (saved.opp) await autoPrepare(saved.opp, saved.errata); } catch { return; }
+  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: !!saved.autoTrigger && store.get('ygo.autoTrigger', false), firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', errata: saved.errata });
   Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;
   try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
   if (autoActive()) autoAfter(true);

@@ -817,6 +817,8 @@ function setupBoardView() {
   for (const [k, r] of Object.entries(MASTER_RULES)) $('#b-rule').append(el('option', { value: k, text: r.label }));
   $('#b-rule').value = masterRule();
   $('#b-rule').onchange = e => { store.set('ygo.masterRule', e.target.value); toast(MASTER_RULES[e.target.value].note + '（次に開始したときから。効果を自動処理）'); };
+  $('#b-errata').value = errataMode();
+  $('#b-errata').onchange = e => { store.set('ygo.errata', e.target.value); toast((e.target.value === 'pre' ? 'エラッタのあったカード（' + Object.keys(ERRATA).length + '種類）をエラッタ前の効果で処理します' : 'エラッタ後の今の効果で処理します') + '（次に開始したときから。効果を自動処理）'); };
   setupRotateHint();
   // ポーズ画面（設定・デッキ選択・やり直し）
   for (const id of ['#b-start', '#b-pickhand', '#b-restart']) $(id).addEventListener('click', closePause, true);
@@ -1223,6 +1225,8 @@ function endTurn() {
 const firstTurnDraw = () => store.get('ygo.firstDraw', false);
 // マスタールール（効果を自動処理するとき）：mr5＝今のルール／mr3＝EXモンスターゾーンなし・ペンデュラムゾーンは両端
 const masterRule = () => { const r = store.get('ygo.masterRule', 'mr5'); return MASTER_RULES[r] ? r : 'mr5'; };
+// エラッタ（効果の変更）があったカードを、エラッタ前の効果で処理するか（'pre'）。ふだんはエラッタ後（'post'）
+const errataMode = () => (store.get('ygo.errata', 'post') === 'pre' ? 'pre' : 'post');
 // そのルールに EXモンスターゾーンがあるか（手動モードなど、ルールの決まりが無い盤面は今のルール）
 const ruleHasEmz = rule => !rule || !MASTER_RULES[rule] || MASTER_RULES[rule].emz;
 

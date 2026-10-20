@@ -97,8 +97,40 @@ function engineLoad(onStatus) {
   return Engine.loading;
 }
 
+// ---------- エラッタ（効果の変更）前の効果 ----------
+// 今のカード（パスワード）→ EDOPro の pre-errata フォルダにある「エラッタ前の効果」のスクリプト
+// （レッドアイズ・ダークネスメタルドラゴンは pre-errata にあるものが今の OCG の効果なので、ここには入れない）
+const ERRATA = {
+  16226786: 16226796, 17412721: 17412731, 21593977: 21593987, 25862681: 25862691, 33900648: 33900658, 3784434: 3784444,
+  39188539: 39188549, 5043010: 5043020, 61665245: 61665255, 63394872: 63394882, 70583986: 70583996, 71525232: 71525242,
+  7563579: 7563589, 76573247: 76573257, 96782886: 96782896, 9995766: 9995776,
+  95727991: 511000228, 32646477: 511000229, 8131171: 511000818, 82301904: 511000819, 17484499: 511000820, 29762407: 511000821,
+  57728570: 511000822, 83555666: 511000824, 43586926: 511000868, 40737112: 511001039, 26202165: 511002631, 23265594: 511002851,
+  65622692: 511002852, 64500000: 511002853, 96300057: 511002901, 16227556: 511002982, 96316857: 511002983, 10248389: 511002991,
+  14878871: 511002992, 50321796: 511002993, 7391448: 511002994, 87910978: 511002995, 61740673: 511002996, 77565204: 511002997,
+  47355498: 511002998, 45894482: 511003006, 21502796: 511003007, 12923641: 511003008, 15894048: 511003009, 78010363: 511003012,
+  28563545: 511003018, 58996430: 511003020, 99173029: 511003021, 13955608: 511003022, 80604091: 511003023, 15800838: 511003026,
+  75043725: 511003027, 80168720: 511003028, 5645210: 511003054, 67159705: 511003055, 61468779: 511003062, 22446869: 511003071,
+  56570271: 511003116, 15259703: 511004007, 68540058: 511006005, 79853073: 511006006, 23995346: 511006007, 55821894: 511006010,
+};
+const ERRATA_MODES = { post: 'エラッタ後の効果（今の効果）', pre: 'エラッタ前の効果' };
+const hasErrata = id => !!ERRATA[id];
+// 対戦で使うスクリプト。errata が 'pre' なら、エラッタのあったカードは「エラッタ前」のものにする
+function scriptFor(name, errata) {
+  if (errata === 'pre') {
+    const m = name.match(/^c(\d+)\.lua$/);
+    if (m && ERRATA[+m[1]] && Engine.scripts.get('pre:' + name)) return Engine.scripts.get('pre:' + name);
+  }
+  return Engine.scripts.get(name) || null;
+}
+
 // デッキのカードのスクリプトを読み込む。スクリプト内で読み込む別スクリプトも追いかける
-async function loadCardScripts(codes, onStatus) {
+async function loadCardScripts(codes, onStatus, errata = 'post') {
+  // エラッタ前の効果で遊ぶときは、そのカードの「エラッタ前」のスクリプトも読む（'pre:c番号.lua' に入れる）
+  if (errata === 'pre') {
+    const pre = [...new Set(codes)].filter(c => ERRATA[c] && !Engine.scripts.has(`pre:c${c}.lua`));
+    await Promise.all(pre.map(async c => { const t = await fetchScript(`c${ERRATA[c]}.lua`, `pre-errata/c${ERRATA[c]}.lua`); Engine.scripts.set(`pre:c${c}.lua`, t || ''); }));
+  }
   const want = [...new Set(codes)].filter(c => !Engine.scripts.has(`c${c}.lua`));
   let done = 0;
   const one = async code => {
@@ -212,7 +244,8 @@ const placeText = (con, loc, seq) => {
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false, rule = 'mr5' }) {
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false, rule = 'mr5', errata = 'post' }) {
+    this.errata = errata === 'pre' ? 'pre' : 'post';   // エラッタのあったカードを、エラッタ前の効果で処理する（'pre'）
     this.rule = MASTER_RULES[rule] ? rule : 'mr5';   // マスタールール mr1〜mr5（mr3 はペンデュラムゾーンが別＝魔法・罠ゾーンの6・7番）
     this.tools = tools && !net;   // 練習ツール（ドローなどのボタン）を使う。前に保存した盤面（ツールなし）と並びが変わらないよう、新しく始めたときだけ
     // net：対戦（2人がそれぞれ同じエンジンを動かす）。{ me: 自分の番号（0＝先攻）, decks: [[先攻のmain, extra], [後攻のmain, extra]] }
@@ -246,10 +279,7 @@ class AutoDuel {
       team1: team(this.me === 0 ? (this.handIds ? 0 : this.handSize) : this.oppDraw()),
       team2: team(this.me === 1 ? (this.handIds ? 0 : 5) : this.oppDraw()),
       cardReader: code => engineCardData(code),
-      scriptReader: name => {
-        const t = Engine.scripts.get(name);
-        return t ? t : null;
-      },
+      scriptReader: name => scriptFor(name, this.errata),
       errorHandler: (type, text) => { if (type === 0) console.warn('ocgcore', text); },
     });
     if (!this.h) throw new Error('対戦を作れませんでした');
@@ -281,7 +311,7 @@ class AutoDuel {
   // 試しに発動してみて、何か起きるか（効果が使える・サーチなどの処理がある）を調べる。
   // 今の対戦をそのまま複製して試すので、本当の盤面は変わらない。index は今の SELECT_IDLECMD の activates の番号
   probeActivate(index) {
-    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net, tools: this.tools, rule: this.rule });
+    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net, tools: this.tools, rule: this.rule, errata: this.errata });
     try {
       t.create();
       t.run(this.history());
@@ -323,7 +353,7 @@ class AutoDuel {
       flags: O.OcgDuelMode['MODE_' + this.rule.toUpperCase()] | (this.firstDraw ? O.OcgDuelMode.FIRST_TURN_DRAW : 0n),
       seed: this.seed, team1: team, team2: team,
       cardReader: code => engineCardData(code),
-      scriptReader: name => Engine.scripts.get(name) || null,
+      scriptReader: name => scriptFor(name, this.errata),
       errorHandler: (type, text) => { if (type === 0) console.warn('ocgcore', text); },
     });
     if (!this.h) throw new Error('対戦を作れませんでした');
@@ -877,7 +907,7 @@ function cpuThink(m, duel, kind) {
   const hist = duel.history();
   // 手順 path を打ったあとの複製（CPU が次の手を選ぶ場面、または相手の番まで進めたもの）
   const play = path => {
-    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule });
+    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata });
     t.noThink = true;
     t.create();
     t.stopAtCpu = true;   // 流し直したあと、今の判断の場面（CPU の番）で止める
@@ -939,7 +969,7 @@ function cpuChainThink(m, duel) {
     if (performance.now() - t0 > 3500) break;   // 考えすぎない
     let t = null;
     try {
-      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule });
+      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata });
       t.noThink = true;
       t.create();
       t.stopAtCpu = true;

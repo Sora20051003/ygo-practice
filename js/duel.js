@@ -892,6 +892,7 @@ function renderDuelLobby() {
       : el('div', { class: 'stack' },
         duelModeSetting(r),
         duelRuleSetting(r),
+        duelErrataSetting(r),
         duelTimeSetting(r),
         duelRegSetting(r),
         duelDeckSetting(r, amReady),
@@ -1068,10 +1069,10 @@ async function beginNetDuel() {
   switchView('board');
   try {
     await engineLoad(showLoading);
-    await loadCardScripts([...decks[0][0], ...decks[0][1], ...decks[1][0], ...decks[1][1], OPP_FILLER], showLoading);
+    await loadCardScripts([...decks[0][0], ...decks[0][1], ...decks[1][0], ...decks[1][1], OPP_FILLER], showLoading, r.errata);
   } catch (e) { showLoading(null); showError('自動処理を準備できませんでした', e); return; }
   showLoading(null);
-  const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5',
+  const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5', errata: r.errata,
     chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: !!r.firstDraw });
   d.onSend = (res, i) => Duel.t.sendEvent({ type: 'eng', i, res: JSON.stringify(res, bigReplacer) });
   Auto.on = true; Auto.net = true; Auto.duel = d; Auto.redoLog = null; Auto.resumed = true;
@@ -1155,6 +1156,15 @@ function duelRuleSetting(r) {
   sel.addEventListener('change', () => Duel.t.updateRoom({ rule: sel.value, ready: {} }));
   return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: 'ルール（マスタールール）' }), sel,
     el('p', { class: 'muted small-note', text: MASTER_RULES[rule].note }));
+}
+// エラッタ（効果の変更）があったカードの効果：部屋を作った人が決める（2人で同じにしないと処理がずれる）
+function duelErrataSetting(r) {
+  const mode = r && r.errata === 'pre' ? 'pre' : 'post';
+  if ((r && r.mode) !== 'auto') return null;
+  if (!(r && r.host === Duel.me.uid)) return el('p', { class: 'muted', text: `エラッタのあったカード：${ERRATA_MODES[mode]}（部屋を作った人が決めます）` });
+  const sel = el('select', { class: 'full' }, Object.entries(ERRATA_MODES).map(([k, t]) => el('option', { value: k, text: t, selected: k === mode })));
+  sel.addEventListener('change', () => Duel.t.updateRoom({ errata: sel.value, ready: {} }));
+  return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: 'エラッタ（効果の変更）があったカード' }), sel);
 }
 
 function duelModeSetting(r) {

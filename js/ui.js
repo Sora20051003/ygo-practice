@@ -454,6 +454,9 @@ function renderDetail(box, c, extra) {
     stats.length ? el('div', { class: 'd-stats', text: stats.join('　') }) : null,
     c.noJp ? el('div', { class: 'warn', text: '日本未発売（TCGのみ）のカードです' }) : null,
     formatInfo(c),
+    typeof hasErrata === 'function' && hasErrata(c.id)
+      ? el('div', { class: 'muted small-note', text: `エラッタ（効果の変更）があったカードです。効果を自動処理するときは、${typeof errataMode === 'function' && errataMode() === 'pre' ? 'エラッタ前の効果で処理します（下の文章は今の効果です）' : 'エラッタ後の今の効果で処理します'}。一人回しの「⏸ ポーズ・設定」（対戦では部屋の設定）で切り替えられます。` })
+      : null,
     el('h4', { text: '効果' }), jaBox,
     el('div', { class: 'd-links' },
       c.cid ? el('a', { class: 'btn small', href: OFFICIAL_DB_URL(c.cid), target: '_blank', rel: 'noopener', text: '公式データベースで見る' }) : null,
