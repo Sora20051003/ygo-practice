@@ -1275,3 +1275,14 @@ body.land .phase-banner { padding: 8px 14px; }
 .friend-req { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .friend-req span { flex: 1; min-width: 0; }
 .room-chat .dp-chatlog { max-height: 200px; }
+
+/* ---------- DM ---------- */
+.tab-badge { display: inline-block; min-width: 1.5em; padding: 0 5px; margin-left: 5px; border-radius: 999px; background: #e74c3c; color: #fff; font-size: 11px; line-height: 1.5em; text-align: center; font-weight: 700; }
+.dm-box { min-width: min(480px, 86vw); }
+.dm-log { list-style: none; margin: 0; padding: 8px; height: min(55vh, 420px); overflow-y: auto; display: flex; flex-direction: column; gap: 6px; background: var(--panel-2); border-radius: 8px; }
+.dm-msg { display: flex; align-items: flex-end; gap: 6px; max-width: 85%; }
+.dm-msg.me { align-self: flex-end; flex-direction: row-reverse; }
+.dm-bubble { padding: 7px 11px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); white-space: pre-wrap; word-break: break-word; }
+.dm-msg.me .dm-bubble { background: var(--accent); color: #fff; border-color: transparent; }
+.dm-time { color: var(--muted); font-size: 10px; flex: none; }
+.dm-day { align-self: center; color: var(--muted); font-size: 11px; }

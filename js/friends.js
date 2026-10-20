@@ -45,7 +45,7 @@ async function startFriends() {
     });
     Friends.client = c;
     c.on('connect', () => {
-      c.subscribe([friendTopic(me, 'inbox'), friendTopic(me, 'req/+'), ...Friends.list.map(f => friendTopic(f.code, 'presence'))], { qos: 1 });
+      c.subscribe([friendTopic(me, 'inbox'), friendTopic(me, 'req/+'), friendTopic(me, 'dm/+'), ...Friends.list.map(f => friendTopic(f.code, 'presence'))], { qos: 1 });
       announcePresence();
     });
     c.on('message', (t, buf) => onFriendMessage(t, buf));
@@ -79,6 +79,8 @@ function onFriendMessage(t, buf) {
     renderFriendsBox();
     return;
   }
+  const dm = t.match(/\/user\/[0-9A-F]{8}\/dm\/([0-9A-F]{8})$/);
+  if (dm) { onDmMessage(dm[1], m); return; }
   const rm = t.match(/\/user\/[0-9A-F]{8}\/req\/([0-9A-F]{8})$/);
   if (rm) {
     const from = rm[1];
@@ -87,7 +89,7 @@ function onFriendMessage(t, buf) {
     if (isFriend(from)) { clearFriendRequest(from); return; }   // もうフレンド：申請を片付けるだけ
     const isNew = !Friends.requests.has(from);
     Friends.requests.set(from, { name: (m.name || '').slice(0, 20), t: m.t });
-    renderFriendsBox();
+    renderFriendsBox(); updateDmBadge();
     if (isNew) toast(`${m.name || 'だれか'}さんからフレンド申請が届きました（「対戦」の画面で追加できます）`);
     return;
   }
@@ -153,6 +155,7 @@ function removeFriend(code) {
   saveFriends();
   if (Friends.client) Friends.client.unsubscribe(friendTopic(code, 'presence'));
   friendPub(code, 'req/' + myFriendCode(), null, true);   // 出していた申請も取り消す
+  friendPub(code, 'dm/' + myFriendCode(), null, true);    // 中継サーバーに残していた DM も消す
   renderFriendsBox();
 }
 
@@ -178,6 +181,7 @@ function friendsPanel(inRoom) {
 function renderFriendsBox() {
   const box = $('#friends-box');
   if (box) fillFriendsBox(box);
+  updateDmBadge();
 }
 function fillFriendsBox(box) {
   const inRoom = !!box.dataset.inRoom;
@@ -203,6 +207,7 @@ function fillFriendsBox(box) {
         return el('li', { class: on ? 'on' : '' },
           el('span', { class: 'friend-dot', title: on ? 'オンライン' : 'オフライン' }),
           el('span', { class: 'friend-name' }, el('b', { text: f.name }), el('small', { class: 'muted', text: `　${fmtFriendCode(f.code)}・${on ? 'オンライン' : 'オフライン'}` })),
+          inRoom ? null : el('button', { class: 'btn small', onclick: () => openDm(f.code) }, '💬 DM', dmUnread(f.code) ? el('span', { class: 'tab-badge', text: String(dmUnread(f.code)) }) : null),
           on ? el('button', { class: 'btn small primary', text: inRoom ? 'この部屋に招待' : '対戦に誘う', onclick: () => inviteFriend(f.code) }) : null,
           inRoom ? null : el('button', { class: 'btn small', text: '削除', onclick: () => { if (confirm(`${f.name}さんをフレンドから削除しますか？`)) removeFriend(f.code); } }));
       }))
@@ -214,4 +219,115 @@ function fillFriendsBox(box) {
 function friendOnline(code) {
   const s = Friends.status.get(code);
   return s && s.online ? 1 : 0;
+}
+
+// ---------- DM（フレンドどうしのメッセージ） ----------
+// 送る側が <base>/user/<相手>/dm/<自分> に「自分が送った最近のメッセージ（30件）」を残しておくメッセージとして出す。
+// 相手は自分あての dm/+ を見ているので、すぐ届く。相手がアプリを閉じていても、次に開いたときに届く。
+// 会話の記録はそれぞれの端末に保存する（ygo.dm）。フレンドでない人からのメッセージは表示しない。
+const DM_KEEP_SENT = 30;     // 中継サーバーに残す、自分が送ったメッセージの数
+const DM_KEEP_LOCAL = 300;   // この端末に残す会話の数（相手ごと）
+Friends.dm = null;           // { コード: [{ id, me: true/false, text, t }] }
+Friends.dmRead = null;       // { コード: 最後に読んだ時刻 }
+Friends.dmOpen = null;       // 開いている DM の画面 { code, draw }
+
+function dmLoad() {
+  if (Friends.dm) return;
+  Friends.dm = store.get('ygo.dm', {}) || {};
+  Friends.dmRead = store.get('ygo.dmRead', {}) || {};
+}
+function dmSave() { store.set('ygo.dm', Friends.dm); store.set('ygo.dmRead', Friends.dmRead); }
+const dmList = code => (dmLoad(), Friends.dm[code] || (Friends.dm[code] = []));
+function dmUnread(code) {
+  dmLoad();
+  const read = Friends.dmRead[code] || 0;
+  return (Friends.dm[code] || []).filter(m => !m.me && m.t > read).length;
+}
+const dmUnreadTotal = () => Friends.list.reduce((n, f) => n + dmUnread(f.code), 0);
+
+function sendDm(code, text) {
+  text = (text || '').trim().slice(0, 300);
+  if (!text) return false;
+  const list = dmList(code);
+  list.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), me: true, text, t: Date.now() });
+  if (list.length > DM_KEEP_LOCAL) list.splice(0, list.length - DM_KEEP_LOCAL);
+  dmSave();
+  const sent = list.filter(m => m.me).slice(-DM_KEEP_SENT).map(m => ({ id: m.id, text: m.text, t: m.t }));
+  const ok = friendPub(code, 'dm/' + myFriendCode(), { name: duelMe().name, msgs: sent }, true);
+  dmRefresh();
+  return ok;
+}
+
+// 相手から届いた（残してあった分も含む）
+function onDmMessage(from, m) {
+  if (!m || !Array.isArray(m.msgs) || !isFriend(from)) return;
+  const list = dmList(from);
+  const have = new Set(list.map(x => x.id));
+  const fresh = m.msgs.filter(x => x && x.id && !have.has(x.id) && typeof x.text === 'string')
+    .map(x => ({ id: String(x.id).slice(0, 20), me: false, text: x.text.slice(0, 300), t: +x.t || Date.now() }));
+  if (!fresh.length) return;
+  list.push(...fresh);
+  list.sort((a, b) => a.t - b.t);
+  if (list.length > DM_KEEP_LOCAL) list.splice(0, list.length - DM_KEEP_LOCAL);
+  const open = Friends.dmOpen && Friends.dmOpen.code === from;
+  if (open) Friends.dmRead[from] = Date.now();
+  dmSave();
+  dmRefresh();
+  if (!open) {
+    const f = Friends.list.find(x => x.code === from);
+    const last = fresh[fresh.length - 1];
+    if (last.t > (Friends.dmRead[from] || 0)) toast(`💬 ${f ? f.name : m.name || 'フレンド'}：${last.text.slice(0, 40)}`);
+  }
+}
+
+// DM の画面
+function openDm(code) {
+  const f = Friends.list.find(x => x.code === code);
+  if (!f) return;
+  const box = el('ol', { class: 'log dm-log' });
+  const input = el('input', { type: 'text', placeholder: 'メッセージを入力（Enter で送信）', maxlength: 300 });
+  const send = () => { if (sendDm(code, input.value)) input.value = ''; input.focus(); };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) send(); });
+  const draw = () => {
+    const list = dmList(code);
+    box.innerHTML = '';
+    if (!list.length) box.append(el('li', { class: 'muted', text: 'まだメッセージはありません。' }));
+    let lastDay = '';
+    for (const m of list) {
+      const d = new Date(m.t);
+      const day = `${d.getMonth() + 1}/${d.getDate()}`;
+      if (day !== lastDay) { box.append(el('li', { class: 'dm-day', text: day })); lastDay = day; }
+      box.append(el('li', { class: 'dm-msg ' + (m.me ? 'me' : 'them') },
+        el('span', { class: 'dm-bubble', text: m.text }),
+        el('small', { class: 'dm-time', text: `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}` })));
+    }
+    box.scrollTop = box.scrollHeight;
+  };
+  Friends.dmRead[code] = Date.now(); dmSave();
+  Friends.dmOpen = { code, draw };
+  showModal({
+    title: `💬 ${f.name}`,
+    body: el('div', { class: 'stack dm-box' }, box,
+      el('div', { class: 'row chat-row' }, input, el('button', { class: 'btn primary', text: '送信', onclick: send })),
+      el('p', { class: 'muted small-note', text: 'メッセージは公開の中継サーバーを通ります（相手がアプリを閉じていても、次に開いたときに届きます）。個人情報は送らないでください。' })),
+    onClose: () => { Friends.dmOpen = null; renderFriendsBox(); updateDmBadge(); },
+  });
+  draw();
+  setTimeout(() => input.focus(), 0);
+  renderFriendsBox(); updateDmBadge();
+}
+function dmRefresh() {
+  if (Friends.dmOpen) Friends.dmOpen.draw();
+  renderFriendsBox();
+  updateDmBadge();
+}
+// 「対戦」のタブに、読んでいない DM の数を出す
+function updateDmBadge() {
+  const tab = $('.tab[data-view="duel"]');
+  if (!tab) return;
+  let b = tab.querySelector('.tab-badge');
+  const n = Friends.list.length ? dmUnreadTotal() + Friends.requests.size : Friends.requests.size;
+  if (!n) { if (b) b.remove(); return; }
+  if (!b) { b = el('span', { class: 'tab-badge' }); tab.append(b); }
+  b.textContent = n > 99 ? '99+' : String(n);
 }
