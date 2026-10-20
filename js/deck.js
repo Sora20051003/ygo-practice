@@ -699,8 +699,8 @@ function readVarint(bytes, pos) {
 const b64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unb64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), ch => ch.charCodeAt(0));
 
-// 古い形式（YGO1-）。読み込みは今も対応。先頭の1バイトでルールを表す（1 = OCG、2 = マスターデュエル）
-const CODE_FORMAT = { ocg: 1, md: 2 };
+// 古い形式（YGO1-）。読み込みは今も対応。先頭の1バイトでルールを表す（1 = OCG、2 = マスターデュエル、3 = TCG（海外））
+const CODE_FORMAT = { ocg: 1, md: 2, tcg: 3 };
 function encodeDeckCode1(deck) {
   const bytes = [CODE_FORMAT[deckFormat(deck)] || 1];
   const name = new TextEncoder().encode(deck.name).slice(0, 60);
@@ -1467,8 +1467,8 @@ function customRegNote(cr) {
 // マスターデュエル：data/md-samples.js（Master Duel Meta の大会上位・高ランクのデッキ。毎日自動で更新）
 // OCG：data/ocg-samples.js（YGOPRODeck の大会入賞デッキ。毎日自動で更新）
 // どちらも { periods: { 'リストの開始日': [{ t: デッキタイプ, s: 出どころ, d: 日付, m: [[カード, 枚数]], x: [...] }] } }
-const SAMPLE_FILES = { md: 'data/md-samples.js', ocg: 'data/ocg-samples.js' };
-const SAMPLE_VARS = { md: () => (typeof MD_SAMPLES !== 'undefined' ? MD_SAMPLES : null), ocg: () => (typeof OCG_SAMPLES !== 'undefined' ? OCG_SAMPLES : null) };
+const SAMPLE_FILES = { md: 'data/md-samples.js', ocg: 'data/ocg-samples.js', tcg: 'data/tcg-samples.js' };
+const SAMPLE_VARS = { md: () => (typeof MD_SAMPLES !== 'undefined' ? MD_SAMPLES : null), ocg: () => (typeof OCG_SAMPLES !== 'undefined' ? OCG_SAMPLES : null), tcg: () => (typeof TCG_SAMPLES !== 'undefined' ? TCG_SAMPLES : null) };
 // OCG のデッキがどの大会のものか（k）
 const SAMPLE_KINDS = { ocg: 'OCGの大会', ae: 'アジアの英語版の大会', tcg: '海外（TCG）の大会', wc: '世界大会の優勝デッキ' };
 const sampleData = fmt => SAMPLE_VARS[fmt]();
@@ -1572,7 +1572,9 @@ async function openSamples() {
     const latest = DB.banlists[fmt] && DB.banlists[fmt].date;
     const sel = el('select', null, periods.map(p => el('option', { value: p, text: `${p.replace(/-/g, '/')}〜 のリスト${p === latest ? '（最新）' : ''}（${data.periods[p].length}個）`, selected: p === pick })));
     const list = el('div', { class: 'sample-list' });
-    const note = fmt === 'md'
+    const note = fmt === 'tcg'
+      ? el('p', { class: 'muted small-note' }, '海外の禁止・制限リストの期間ごとに、海外の大会（YCS・WCQ など）で入賞したデッキから、よく勝っているデッキタイプを順に並べています（出どころ：', el('a', { href: 'https://ygoprodeck.com/category/format/tournament%20meta%20decks', target: '_blank', rel: 'noopener', text: 'YGOPRODeck' }), '）。OCG の大会のデッキとは混ぜていません。2020年より前は世界大会の優勝デッキ（1年に1つ）です。')
+      : fmt === 'md'
       ? el('p', { class: 'muted small-note' }, 'その期間の大会上位・高ランクのデッキから、よく勝っているデッキタイプを順に並べています（出どころ：', el('a', { href: 'https://www.masterduelmeta.com/', target: '_blank', rel: 'noopener', text: 'Master Duel Meta' }), '）。')
       : el('p', { class: 'muted small-note' }, 'その期間の大会で入賞したデッキから、よく勝っているデッキタイプを順に並べています（出どころ：', el('a', { href: 'https://ygoprodeck.com/category/format/tournament%20meta%20decks%20ocg', target: '_blank', rel: 'noopener', text: 'YGOPRODeck' }), '）。OCGの入賞リストは2023年7月から。それより前は海外の大会のリスト（2020年10月から）、さらに前は世界大会の優勝デッキ（2003〜2019年、1年に1つ）を使い、OCGの禁止・制限に合わせて枚数を直します。リストが見つからない期間は選べません。');
     // 1つのデッキの表示
@@ -1611,7 +1613,7 @@ async function openSamples() {
       const m = sampleMatcher(qRaw);
       if (all && !m) { list.append(el('p', { class: 'muted', text: '上の欄にデッキ名かカード名を入れると、すべての期間からそのデッキを探して、新しい順に並べます。' })); return; }
       const ps = all ? periods : [sel.value];
-      if (!all) {
+      if (!all && fmt === 'ocg') {
         const kinds = [...new Set(data.periods[ps[0]].map(s => s.k).filter(k => k && k !== 'ocg'))];
         if (kinds.includes('tcg') || kinds.includes('wc')) list.append(el('p', { class: 'warn', text: 'この期間はOCGの大会のリストが少ないため、' + kinds.map(k => SAMPLE_KINDS[k]).join('・') + 'のリストも使っています。当時のOCGとは、流行っていたデッキや禁止・制限が違うことがあります。' }));
       }
@@ -1624,7 +1626,7 @@ async function openSamples() {
           if (found >= LIMIT) { found++; continue; }
           const d = sampleToDeck(s, fmt, p === latest ? 'latest' : p);
           // 海外のデッキで、OCG で使えないカードを外すと30枚より少なくなるものは出さない（そのままでは遊べないので）
-          if (s.k === 'tcg' && d.main.length < 30) { hidden++; continue; }
+          if (fmt === 'ocg' && s.k === 'tcg' && d.main.length < 30) { hidden++; continue; }
           if (all && !head) { head = el('h3', { class: 'sample-period', text: `${p.replace(/-/g, '/')}〜 のリスト${p === latest ? '（最新）' : ''}` }); list.append(head); shownPeriods++; }
           list.append(item(s, p, d));
           found++;

@@ -160,9 +160,11 @@ async function updateCards(onStatus) {
 const FORMATS = {
   ocg: { label: 'OCG', short: 'OCG', list: 'ocg', allowed: c => !c.noJp },
   md: { label: 'マスターデュエル', short: 'MD', list: 'master-duel', allowed: c => c.md },
+  // 海外（TCG）：海外で発売済みのカード（発売日の表に TCG の日付があるもの。表をまだ読んでいなければ英語名があるもの）
+  tcg: { label: 'TCG（海外）', short: 'TCG', list: 'tcg', allowed: c => (typeof RELEASE_DATES !== 'undefined' && RELEASE_DATES.tcg ? !!(c.cid && RELEASE_DATES.tcg[c.cid]) : !!c.en) },
 };
 const BANLIST_URL = key => `https://dawnbrandbots.github.io/yaml-yugi-limit-regulation/${key}/current.vector.json`;
-DB.banlists = { ocg: null, md: null };
+DB.banlists = { ocg: null, md: null, tcg: null };
 
 // 保存済みのリストがあればすぐそれを使い、無いときだけ取りに行く（起動を待たせないため）
 const BANLIST_TTL = 6 * 60 * 60 * 1000;   // 6時間たったら新しいリストが出ていないか確認する
@@ -171,7 +173,8 @@ async function loadBanlists(force = false) {
   try { saved = await idbGet('banlists'); } catch { /* 無ければ取りに行く */ }
   if (saved) DB.banlists = saved.lists;
   DB.banlistFetched = saved ? saved.fetched : 0;
-  if (!saved || force) await refreshBanlists();
+  // 保存してあるものに無いルール（あとから足した TCG など）があれば取り直す
+  if (!saved || force || Object.keys(FORMATS).some(f => !saved.lists || !saved.lists[f])) await refreshBanlists();
 }
 
 // 新しいリストを取りに行く。適用日が変わったルールの一覧を返す（変化なしなら空）
@@ -236,7 +239,7 @@ async function loadRegDates(force = false) {
   let saved = null;
   try { saved = await idbGet('regDates2'); } catch { /* 無ければ取りに行く */ }
   if (saved) { DB.regDates = saved.dates; DB.regNameOnly = new Set(saved.nameOnly || []); }
-  if (saved && !force && Date.now() - saved.fetched < BANLIST_TTL) return;
+  if (saved && !force && Date.now() - saved.fetched < BANLIST_TTL && Object.keys(FORMATS).every(f => saved.dates && saved.dates[f])) return;
   try {
     const dates = {}, nameOnly = [];
     for (const [fmt, f] of Object.entries(FORMATS)) {
@@ -310,8 +313,10 @@ const releaseIndex = {};
 function releaseDate(c, fmt) {
   if (typeof RELEASE_DATES === 'undefined' || !c.cid) return 0;
   const table = RELEASE_DATES[fmt];
+  if (!table) return 0;   // 古い発売日の表（TCG の日付が無い）
   if (table[c.cid]) return table[c.cid];
   if (fmt === 'md') return 99999999;   // マスターデュエルは実装順がばらばらなので、不明なら「最近実装」とみなす
+  if (fmt === 'tcg') return 99999999;   // 海外の日付が無い＝海外では未発売（日本だけのカード）
   if (!releaseIndex[fmt]) releaseIndex[fmt] = Object.keys(table).map(Number).sort((a, b) => a - b);
   const ids = releaseIndex[fmt];
   let lo = 0, hi = ids.length - 1, best = -1;

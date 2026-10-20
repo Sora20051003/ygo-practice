@@ -432,7 +432,7 @@ function formatInfo(c) {
   if (typeof FORMATS === 'undefined' || !c.cid) return null;
   return el('div', { class: 'd-formats' }, Object.entries(FORMATS).map(([fmt, f]) => {
     let state, cls;
-    if (!cardAllowed(c, fmt)) { state = fmt === 'md' ? '未実装' : '使用不可'; cls = 'x'; }
+    if (!cardAllowed(c, fmt)) { state = fmt === 'md' ? '未実装' : fmt === 'tcg' ? '未発売' : '使用不可'; cls = 'x'; }
     else { const l = limitOf(c, fmt); state = l < 3 ? LIMIT_LABEL[l] : '制限なし'; cls = l < 3 ? 'l' + l : 'ok'; }
     return el('span', { class: 'd-fmt ' + cls }, el('b', { text: f.short }), state);
   }));

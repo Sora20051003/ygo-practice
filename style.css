@@ -1269,8 +1269,8 @@ body.land .phase-banner { padding: 8px 14px; }
 .friend-mycode { align-items: center; gap: 10px; flex-wrap: wrap; }
 .friend-list { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .friend-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; }
-.friend-name { flex: 1; min-width: 0; }
-.friend-name small { white-space: nowrap; }
+.friend-name { flex: 1; min-width: 0; overflow: hidden; }
+.friend-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .friend-dot { width: 10px; height: 10px; border-radius: 50%; background: #777; flex: none; }
 .friend-list li.on .friend-dot { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
 .friend-req { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 14%, transparent); }
@@ -1279,7 +1279,10 @@ body.land .phase-banner { padding: 8px 14px; }
 
 /* ---------- DM ---------- */
 .tab-badge { display: inline-block; min-width: 1.5em; padding: 0 5px; margin-left: 5px; border-radius: 999px; background: #e74c3c; color: #fff; font-size: 11px; line-height: 1.5em; text-align: center; font-weight: 700; }
-.dm-box { min-width: min(480px, 86vw); }
+.dm-box { min-width: 0; }
+/* DM の窓：中身に合わせた幅（横にはみ出してスクロールが出ないように） */
+.modal:has(.dm-box) { width: min(520px, calc(100vw - 32px)); }
+.dm-box .chat-row { flex-wrap: nowrap; }
 .dm-log { list-style: none; margin: 0; padding: 8px; height: min(55vh, 420px); overflow-y: auto; display: flex; flex-direction: column; gap: 6px; background: var(--panel-2); border-radius: 8px; }
 .dm-msg { display: flex; align-items: flex-end; gap: 6px; max-width: 85%; }
 .dm-msg.me { align-self: flex-end; flex-direction: row-reverse; }
@@ -1316,5 +1319,6 @@ body.land .phase-banner { padding: 8px 14px; }
 .duel-card .auth-field, .duel-quick > * { min-width: 0; }
 .duel-card select, .duel-card input:not([type=checkbox]):not([type=radio]) { max-width: 100%; min-width: 0; }
 .duel-card select { width: 100%; text-overflow: ellipsis; }
-.chat-row > button { flex: none; width: auto; }
+.row.chat-row > .btn, .chat-row > button { flex: none; width: auto; padding-left: 18px; padding-right: 18px; }
 .chat-row input { flex: 1; min-width: 0; }
+@media (max-width: 720px) { .modal:has(.dm-box) { width: 100%; } }
