@@ -15,6 +15,7 @@ TYPES_PER_PERIOD = 20
 MIN_OCG = 10          # OCG の入賞リストがこれより少ない期間は、海外の大会のリストも使う
 FULL = bool(os.environ.get('FULL'))
 OUT = 'data/ocg-samples.js'
+OUT_TCG = 'data/tcg-samples.js'
 
 def get(url, tries=5, raw=False):
     for i in range(tries):
@@ -109,36 +110,20 @@ def ids(s):
     except Exception:
         return []
 
-def main():
-    files = get(REG_API)
-    today = datetime.date.today().isoformat()
-    starts = sorted({m.group(1) for f in files for m in [re.match(r'(\d{4}-\d{2}-\d{2})\.(vector|name)\.json$', f['name'])] if m and m.group(1) <= today})
-    # カード番号 → 元のカード（イラスト違いの番号もまとめる）と英語名
-    cards = get('https://db.ygoprodeck.com/api/v7/cardinfo.php')['data']
-    canon = {}
-    for c in cards:
-        for im in c.get('card_images') or [{'id': c['id']}]:
-            canon[im['id']] = (c['id'], c['name'])
-        canon[c['id']] = (c['id'], c['name'])
-    old = {}
+def list_starts(key, today):
+    files = get(REG_API.rsplit('/', 1)[0] + '/' + key)
+    return sorted({m.group(1) for f in files for m in [re.match(r'(\d{4}-\d{2}-\d{2})\.(vector|name)\.json$', f['name'])] if m and m.group(1) <= today})
+
+def load_old(path):
     try:
-        with open(OUT, encoding='utf-8') as fp:
+        with open(path, encoding='utf-8') as fp:
             txt = fp.read()
-        old = json.loads(txt[txt.index('{'):txt.rindex('}') + 1]).get('periods', {})
+        return json.loads(txt[txt.index('{'):txt.rindex('}') + 1]).get('periods', {})
     except Exception:
-        pass
-    redo = starts if FULL or not old else starts[-2:]   # ふだんは新しい2つの期間だけ作り直す
-    first = redo[0]
-    pool = []
-    for fmt, k in [('Tournament Meta Decks OCG', 'ocg'), ('Tournament Meta Decks OCG (Asian-English)', 'ae')]:
-        pool += [dict(d, _k=k) for d in fetch(fmt, None if FULL or not old else first)]
-    # 海外の大会：ふだんは新しい期間の分だけ（OCG の入賞リストが少ない期間の穴埋め）
-    pool += [dict(d, _k='tcg') for d in fetch('Tournament Meta Decks', None if FULL or not old else first)]
-    if FULL or not old:
-        for d in fetch("World Championship Decks", need_date=False):
-            y = re.search(r'(20\d\d)', d.get('deck_name') or '')
-            if y:
-                pool.append(dict(d, _k='wc', _date=y.group(1) + '-08-15'))   # 世界大会はだいたい8月
+        return {}
+
+def build(starts, old, redo, pool, choose, prefer, conv):
+    """期間ごとに、よく勝っているデッキタイプを選ぶ。choose(その期間のデッキ) → 使うデッキ、prefer(デッキ) → 先に並べるか"""
     period_of = lambda day: max([s for s in starts if s <= day], default=None)
     by = {}
     for d in pool:
@@ -147,11 +132,7 @@ def main():
             by.setdefault(p, []).append(d)
     periods = {p: old[p] for p in starts if p in old and p not in redo}
     for p in redo:
-        ds = by.get(p, [])
-        ocg = [d for d in ds if d['_k'] in ('ocg', 'ae')]
-        use = ocg if len(ocg) >= MIN_OCG else (ocg + [d for d in ds if d['_k'] == 'tcg'])
-        if not use:
-            use = [d for d in ds if d['_k'] == 'wc']
+        use = choose(by.get(p, []))
         if not use:
             if p in old:
                 periods[p] = old[p]
@@ -160,27 +141,16 @@ def main():
         for d in use:
             t = deck_type(d)
             key = t.lower()
-            w = weight(d) * (1 if d['_k'] in ('ocg', 'ae', 'wc') else 0.8)
+            w = weight(d) * (1 if prefer(d) else 0.8)
             score[key] = score.get(key, 0) + w
             count[key] = count.get(key, 0) + 1
-            rank = (d['_k'] in ('ocg', 'ae'), weight(d), d['_date'], d.get('deckNum') or 0)
+            rank = (prefer(d), weight(d), d['_date'], d.get('deckNum') or 0)
             if key not in best or rank > best[key][0]:
                 best[key] = (rank, d, t)
         out = []
-        # OCG（とアジア）の大会で入賞したデッキタイプを先に、足りない分を海外の大会から
-        is_ocg = lambda k: best[k][1]['_k'] in ('ocg', 'ae')
-        order = sorted(score, key=lambda k: (not is_ocg(k), -score[k]))
+        order = sorted(score, key=lambda k: (not prefer(best[k][1]), -score[k]))
         for key in order[:TYPES_PER_PERIOD]:
             d, t = best[key][1], best[key][2]
-            def conv(lst):
-                cnt = {}
-                order = []
-                for i in ids(lst):
-                    cid, name = canon.get(i, (i, ''))
-                    if cid not in cnt:
-                        order.append((cid, name))
-                    cnt[cid] = cnt.get(cid, 0) + 1
-                return [[cid, cnt[cid], name] if name else [cid, cnt[cid]] for cid, name in order]
             src = ' '.join(x for x in [d.get('tournamentName') or '', placement(d)] if x) if d['_k'] != 'wc' else (d.get('deck_name') or '')
             if not d.get('tournamentName') and d['_k'] != 'wc':
                 src = (d.get('deck_excerpt') or '').split('/', 1)[-1].strip() or src
@@ -188,12 +158,63 @@ def main():
                         'p': round(score[key], 1), 'c': count[key], 'm': conv(d.get('main_deck')), 'x': conv(d.get('extra_deck'))})
         periods[p] = out
         print(p, len(use), 'decks ->', [(o['t'], o['k']) for o in out], file=sys.stderr)
-    js = ('// OCG のサンプルデッキ（.github/scripts/build_ocg_samples.py が自動で作る。手で書き換えない）\n'
+    return dict(sorted(periods.items()))
+
+def write(path, var, head, periods, today):
+    js = head + 'const ' + var + ' = ' + json.dumps({'generated': today, 'periods': periods}, ensure_ascii=False, separators=(',', ':')) + ';\n'
+    with open(path, 'w', encoding='utf-8') as fp:
+        fp.write(js)
+
+def main():
+    today = datetime.date.today().isoformat()
+    starts = list_starts('ocg', today)
+    tstarts = list_starts('tcg', today)   # 海外（TCG）の禁止・制限リストの期間
+    # カード番号 → 元のカード（イラスト違いの番号もまとめる）と英語名
+    cards = get('https://db.ygoprodeck.com/api/v7/cardinfo.php')['data']
+    canon = {}
+    for c in cards:
+        for im in c.get('card_images') or [{'id': c['id']}]:
+            canon[im['id']] = (c['id'], c['name'])
+        canon[c['id']] = (c['id'], c['name'])
+    def conv(lst):
+        cnt, order = {}, []
+        for i in ids(lst):
+            cid, name = canon.get(i, (i, ''))
+            if cid not in cnt:
+                order.append((cid, name))
+            cnt[cid] = cnt.get(cid, 0) + 1
+        return [[cid, cnt[cid], name] if name else [cid, cnt[cid]] for cid, name in order]
+    old, told = load_old(OUT), load_old(OUT_TCG)
+    full = FULL or not old or not told
+    redo = starts if full else starts[-2:]      # ふだんは新しい2つの期間だけ作り直す
+    tredo = tstarts if full else tstarts[-2:]
+    first = min(redo[0], tredo[0])
+    pool = []
+    for fmt, k in [('Tournament Meta Decks OCG', 'ocg'), ('Tournament Meta Decks OCG (Asian-English)', 'ae')]:
+        pool += [dict(d, _k=k) for d in fetch(fmt, None if full else first)]
+    pool += [dict(d, _k='tcg') for d in fetch('Tournament Meta Decks', None if full else first)]
+    if full:
+        for d in fetch("World Championship Decks", need_date=False):
+            y = re.search(r'(20\d\d)', d.get('deck_name') or '')
+            if y:
+                pool.append(dict(d, _k='wc', _date=y.group(1) + '-08-15'))   # 世界大会はだいたい8月
+
+    # OCG：OCG（とアジア）の大会を先に。少ない期間は海外の大会、それも無ければ世界大会
+    def choose_ocg(ds):
+        ocg = [d for d in ds if d['_k'] in ('ocg', 'ae')]
+        use = ocg if len(ocg) >= MIN_OCG else (ocg + [d for d in ds if d['_k'] == 'tcg'])
+        return use or [d for d in ds if d['_k'] == 'wc']
+    periods = build(starts, old, redo, pool, choose_ocg, lambda d: d['_k'] in ('ocg', 'ae', 'wc'), conv)
+    write(OUT, 'OCG_SAMPLES', '// OCG のサンプルデッキ（.github/scripts/build_ocg_samples.py が自動で作る。手で書き換えない）\n'
           '// 禁止・制限リストの期間ごとに、YGOPRODeck（https://ygoprodeck.com/）の大会入賞デッキから選んだもの。\n'
           '// k：ocg＝OCGの大会 / ae＝アジアの英語版の大会 / tcg＝海外の大会 / wc＝世界大会の優勝デッキ\n'
-          '// m / x：[カードのパスワード, 枚数, 英語名]、t：デッキタイプ、s：大会・順位、d：日付、p：勝ち具合の点数、c：その期間の入賞数\n'
-          'const OCG_SAMPLES = ' + json.dumps({'generated': today, 'periods': dict(sorted(periods.items()))}, ensure_ascii=False, separators=(',', ':')) + ';\n')
-    with open(OUT, 'w', encoding='utf-8') as fp:
-        fp.write(js)
+          '// m / x：[カードのパスワード, 枚数, 英語名]、t：デッキタイプ、s：大会・順位、d：日付、p：勝ち具合の点数、c：その期間の入賞数\n', periods, today)
+
+    # 海外（TCG）：海外の大会だけ（OCG の大会とは混ぜない）。無い期間は世界大会
+    def choose_tcg(ds):
+        return [d for d in ds if d['_k'] == 'tcg'] or [d for d in ds if d['_k'] == 'wc']
+    tperiods = build(tstarts, told, tredo, pool, choose_tcg, lambda d: True, conv)
+    write(OUT_TCG, 'TCG_SAMPLES', '// 海外（TCG）のサンプルデッキ（.github/scripts/build_ocg_samples.py が自動で作る。手で書き換えない）\n'
+          '// 海外の禁止・制限リストの期間ごとに、YGOPRODeck の海外の大会入賞デッキ（世界大会の優勝デッキを含む）から選んだもの。形は ocg-samples.js と同じ\n', tperiods, today)
 
 main()

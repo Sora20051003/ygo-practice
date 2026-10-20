@@ -29,7 +29,7 @@ jobs:
         env:
           FULL: ${{ inputs.full }}
         run: python3 .github/scripts/build_md_samples.py || echo "サンプルデッキの更新に失敗"
-      - name: OCG のサンプルデッキを作り直す（失敗しても、ほかの更新は続ける）
+      - name: OCG のサンプルデッキを作り直す・海外（TCG）のサンプルデッキも作る（失敗しても、ほかの更新は続ける）
         env:
           FULL: ${{ inputs.full }}
         run: python3 .github/scripts/build_ocg_samples.py || echo "OCG のサンプルデッキの更新に失敗"
@@ -37,7 +37,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- data/release-dates.js data/edo-cards.js data/md-samples.js data/ocg-samples.js; then
+          # 新しく作ったファイル（まだ記録していないもの）も含めて、data/ に変化があるか
+          if [ -z "$(git status --porcelain -- data/)" ]; then
             echo "変更なし"
             exit 0
           fi
@@ -46,6 +47,7 @@ jobs:
           git add data/release-dates.js data/edo-cards.js
           if [ -f data/md-samples.js ]; then git add data/md-samples.js; fi
           git add data/ocg-samples.js
+          if [ -f data/tcg-samples.js ]; then git add data/tcg-samples.js; fi
           git commit -m "発売日・カードデータを自動更新"
           # 作っている間にほかの更新が送られていることがあるので、取り込んでから送る
           git pull --rebase

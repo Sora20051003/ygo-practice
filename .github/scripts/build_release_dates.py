@@ -1,6 +1,7 @@
 """カードの発売日の対応表 data/release-dates.js を作り直す（GitHub Actions で毎日実行）。
 
   OCG          : YGOPRODeck の misc_info.ocg_date（OCGでの初登場日）
+  TCG（海外）   : YGOPRODeck の misc_info.tcg_date（TCGでの初登場日）
   マスターデュエル: Master Duel Meta の release（実装日）
 
 KONAMI のカード番号（cid）→ 日付（YYYYMMDD の数値）。中身が変わったときだけファイルを書き換える。
@@ -29,7 +30,7 @@ def to_num(d):
 
 def main():
     print("[1/3] YGOPRODeck から OCG の発売日を取得")
-    ocg, name_to_cid = {}, {}
+    ocg, tcg, name_to_cid = {}, {}, {}
     for c in get_json("https://db.ygoprodeck.com/api/v7/cardinfo.php?misc=yes")["data"]:
         m = (c.get("misc_info") or [{}])[0]
         cid = m.get("konami_id")
@@ -38,7 +39,9 @@ def main():
         name_to_cid[c["name"]] = cid
         if m.get("ocg_date"):
             ocg[cid] = to_num(m["ocg_date"])
-    print(f"  OCG: {len(ocg)}枚")
+        if m.get("tcg_date"):
+            tcg[cid] = to_num(m["tcg_date"])
+    print(f"  OCG: {len(ocg)}枚・TCG: {len(tcg)}枚")
 
     print("[2/3] Master Duel Meta からマスターデュエルの実装日を取得")
     md = {}
@@ -57,11 +60,11 @@ def main():
         print(f"  {page}ページ目: 累計{len(md)}枚")
 
     # 取得に失敗して極端に少ないときは上書きしない（壊れたデータを公開しないため）
-    if len(ocg) < 10000 or len(md) < 10000:
-        raise SystemExit(f"件数が少なすぎるため中止しました（OCG {len(ocg)} / MD {len(md)}）")
+    if len(ocg) < 10000 or len(md) < 10000 or len(tcg) < 10000:
+        raise SystemExit(f"件数が少なすぎるため中止しました（OCG {len(ocg)} / TCG {len(tcg)} / MD {len(md)}）")
 
     body = lambda h: ",".join(f"{k}:{h[k]}" for k in sorted(h, key=str))
-    data_part = f"ocg:{{{body(ocg)}}},md:{{{body(md)}}}"
+    data_part = f"ocg:{{{body(ocg)}}},md:{{{body(md)}}},tcg:{{{body(tcg)}}}"
     old = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
     if data_part in old:
         print("[3/3] 変更なし")
@@ -73,7 +76,7 @@ def main():
     )
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(js, encoding="utf-8")
-    print(f"[3/3] 更新しました（OCG {len(ocg)}枚・MD {len(md)}枚）")
+    print(f"[3/3] 更新しました（OCG {len(ocg)}枚・TCG {len(tcg)}枚・MD {len(md)}枚）")
 
 
 if __name__ == "__main__":
