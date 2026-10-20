@@ -86,7 +86,8 @@ def sim(a, b):
     A, B = words(a), words(b)
     if not A or not B or conflict(a, b):
         return 0
-    return len(A & B) / min(len(A), len(B))
+    # 似ている度合い（短い方がどれだけ含まれるか）。同じくらいなら、全体でより多く重なる方を選ぶ
+    return len(A & B) / min(len(A), len(B)) + 0.1 * len(A & B) / len(A | B)
 
 def main():
     edo, en, ja = strs(get(EDO)), strs(get(MC_EN)), strs(get(MC_JA))
@@ -109,7 +110,7 @@ def main():
                     continue
                 # 日本語の説明が「自分」「相手」のどちらかだけを言っていて、英語と食い違うものは使わない
                 jo = jowner(j[k])
-                if eo and jo and jo not in eo:
+                if jo and (not eo or jo not in eo):
                     continue
                 if norm(x) == norm(s):
                     pairs.append((2.0 + (k == i), i, k))
