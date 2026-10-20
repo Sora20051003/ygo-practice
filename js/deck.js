@@ -1465,38 +1465,19 @@ function customRegNote(cr) {
 
 // ---------- サンプルデッキ ----------
 // マスターデュエル：data/md-samples.js（Master Duel Meta の大会上位・高ランクのデッキ。毎日自動で更新）
-// OCG：data/ocg-samples.js（手作りの代表的なデッキ。大会のリストそのものではない）
+// OCG：data/ocg-samples.js（YGOPRODeck の大会入賞デッキ。毎日自動で更新）
 // どちらも { periods: { 'リストの開始日': [{ t: デッキタイプ, s: 出どころ, d: 日付, m: [[カード, 枚数]], x: [...] }] } }
 const SAMPLE_FILES = { md: 'data/md-samples.js', ocg: 'data/ocg-samples.js' };
-let ocgSamples = null;
-const sampleData = fmt => (fmt === 'md' ? (typeof MD_SAMPLES !== 'undefined' ? MD_SAMPLES : null) : ocgSamples);
+const SAMPLE_VARS = { md: () => (typeof MD_SAMPLES !== 'undefined' ? MD_SAMPLES : null), ocg: () => (typeof OCG_SAMPLES !== 'undefined' ? OCG_SAMPLES : null) };
+// OCG のデッキがどの大会のものか（k）
+const SAMPLE_KINDS = { ocg: 'OCGの大会', ae: 'アジアの英語版の大会', tcg: '海外（TCG）の大会', wc: '世界大会の優勝デッキ' };
+const sampleData = fmt => SAMPLE_VARS[fmt]();
 async function loadSamples(fmt) {
+  // 一度読んだファイルは読み直さない（同じ名前の変数を2回作るとエラーになる）
   if (sampleData(fmt)) return sampleData(fmt);
   const v = '?v=' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');
-  // OCG もマスターデュエルのリストを元にするので、両方読む
-  // 一度読んだファイルは読み直さない（同じ名前の変数を2回作るとエラーになる）
-  const loaded = { md: () => typeof MD_SAMPLES !== 'undefined', ocg: () => typeof OCG_SAMPLE_PICKS !== 'undefined' };
-  for (const k of fmt === 'md' ? ['md'] : ['md', 'ocg']) {
-    if (loaded[k]()) continue;
-    try { await loadScript(SAMPLE_FILES[k] + v); } catch { /* 無ければ空 */ }
-  }
-  if (fmt === 'ocg') ocgSamples = buildOcgSamples();
+  try { await loadScript(SAMPLE_FILES[fmt] + v); } catch { /* 無ければ空 */ }
   return sampleData(fmt);
-}
-// OCG：選んだデッキタイプごとに、マスターデュエルのいちばん新しい大会上位のリストを使う
-function buildOcgSamples() {
-  if (typeof OCG_SAMPLE_PICKS === 'undefined' || typeof MD_SAMPLES === 'undefined') return null;
-  const mdPeriods = Object.keys(MD_SAMPLES.periods).sort().reverse();
-  const periods = {};
-  for (const [p, pick] of Object.entries(OCG_SAMPLE_PICKS)) {
-    periods[p] = [];
-    for (const [ja, type] of pick.types) {
-      let found = null;
-      for (const mp of mdPeriods) { found = (MD_SAMPLES.periods[mp] || []).find(s => s.t === type); if (found) break; }
-      if (found) periods[p].push({ ...found, t: ja, s: `マスターデュエルの大会上位のリストを元に（${found.s}）`, ocgFix: true });
-    }
-  }
-  return { periods, notes: Object.fromEntries(Object.entries(OCG_SAMPLE_PICKS).map(([p, x]) => [p, x.note])) };
 }
 // カード（パスワード、または名前）→ アプリのカード
 function sampleCard(v) {
@@ -1549,24 +1530,29 @@ async function openSamples() {
     const list = el('div', { class: 'sample-list' });
     const note = fmt === 'md'
       ? el('p', { class: 'muted small-note' }, 'その期間の大会上位・高ランクのデッキから、よく勝っているデッキタイプを順に並べています（出どころ：', el('a', { href: 'https://www.masterduelmeta.com/', target: '_blank', rel: 'noopener', text: 'Master Duel Meta' }), '）。')
-      : el('p', { class: 'muted small-note', text: 'OCGの大会のリストは自動で取れる公開データが無いため、その期間にOCGの大会で入賞しているデッキタイプを選び、中身はマスターデュエルの大会上位のリストを元に、OCGの禁止・制限に合わせて枚数を直したものです（OCGの大会のリストそのものではありません）。' });
+      : el('p', { class: 'muted small-note' }, 'その期間の大会で入賞したデッキから、よく勝っているデッキタイプを順に並べています（出どころ：', el('a', { href: 'https://ygoprodeck.com/category/format/tournament%20meta%20decks%20ocg', target: '_blank', rel: 'noopener', text: 'YGOPRODeck' }), '）。OCGの入賞リストは2023年7月から。それより前は海外の大会のリスト（2020年10月から）、さらに前は世界大会の優勝デッキ（2003〜2019年、1年に1つ）を使い、OCGの禁止・制限に合わせて枚数を直します。リストが見つからない期間は選べません。');
     const fill = () => {
       list.innerHTML = '';
       const p = sel.value;
-      if (data.notes && data.notes[p]) list.append(el('p', { class: 'muted small-note', text: '選んだデッキタイプ：' + data.notes[p] }));
+      const kinds = [...new Set(data.periods[p].map(s => s.k).filter(k => k && k !== 'ocg'))];
+      if (kinds.includes('tcg') || kinds.includes('wc')) list.append(el('p', { class: 'warn', text: 'この期間はOCGの大会のリストが少ないため、' + kinds.map(k => SAMPLE_KINDS[k]).join('・') + 'のリストも使っています。当時のOCGとは、流行っていたデッキや禁止・制限が違うことがあります。' }));
+      let hidden = 0;
       for (const s of data.periods[p]) {
         const d = sampleToDeck(s, fmt, p === latest ? 'latest' : p);
+        // 海外のデッキで、OCG で使えないカードを外すと30枚より少なくなるものは出さない（そのままでは遊べないので）
+        if (s.k === 'tcg' && d.main.length < 30) { hidden++; continue; }
         const body2 = el('div', { class: 'sample-cards', hidden: true });
         const cardsOf = ids => { const m = new Map(); for (const id of ids) m.set(id, (m.get(id) || 0) + 1); return [...m].map(([id, n]) => `${DB.byId.get(id).name}×${n}`).join('、'); };
-        body2.append(el('div', null, el('b', { text: `メイン${d.main.length}枚：` }), cardsOf(d.main)),
+        body2.append(...[el('div', null, el('b', { text: `メイン${d.main.length}枚：` }), cardsOf(d.main)),
           el('div', null, el('b', { text: `EX${d.extra.length}枚：` }), cardsOf(d.extra) || 'なし'),
           d.fixed.length ? el('div', { class: 'warn', text: FORMATS[fmt].label + 'のルールに合わせて減らしたカード：' + d.fixed.join('、') }) : null,
           d.fixed.length && d.main.length < 40 ? el('div', { class: 'warn', text: `減らした分、メインデッキが${d.main.length}枚になっています。追加したあと、40枚になるようにカードを足してください。` }) : null,
-          d.unknown.length ? el('div', { class: 'warn', text: 'アプリに無いカード（入りません）：' + d.unknown.join('、') }) : null);
+          d.unknown.length ? el('div', { class: 'warn', text: 'アプリに無いカード（入りません）：' + d.unknown.join('、') }) : null].filter(Boolean));
         list.append(el('div', { class: 'sample-item' },
           el('div', { class: 'sample-head' },
             el('b', { text: s.t }),
-            el('span', { class: 'muted small-note', text: [s.s, s.d && s.d.replace(/-/g, '/')].filter(Boolean).join('・') }),
+            el('span', { class: 'muted small-note' }, [s.k && SAMPLE_KINDS[s.k], s.s, s.d && s.d.replace(/-/g, '/'), s.c > 1 && `この期間の入賞${s.c}回`].filter(Boolean).join('・'),
+              s.u && /^https:\/\//.test(s.u) ? el('a', { href: s.u, target: '_blank', rel: 'noopener', text: '　元のリスト' }) : null),
             el('span', { class: 'muted small-note', text: `メイン${d.main.length}・EX${d.extra.length}` + (d.fixed.length ? `・${d.fixed.length}種類をルールに合わせて調整` : '') })),
           el('div', { class: 'row' },
             el('button', { class: 'btn small', text: '中身を見る', onclick: () => { body2.hidden = !body2.hidden; } }),
@@ -1581,6 +1567,7 @@ async function openSamples() {
             } })),
           body2));
       }
+      if (hidden) list.append(el('p', { class: 'muted small-note', text: `OCGで使えないカードが多い海外のデッキ（${hidden}個）は出していません。` }));
     };
     sel.addEventListener('change', fill);
     body.append(el('label', { class: 'auth-field' }, 'レギュレーション（禁止・制限リストの期間）', sel), note, list);

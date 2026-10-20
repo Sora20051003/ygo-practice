@@ -447,7 +447,8 @@ const Duel = {
   me: null,           // { uid, name }
   opp: null,          // 相手の盤面（見てよい情報だけ）
   oppLogSeen: 0,      // 相手のログを何行目まで表示したか
-  feed: [],           // 対戦のログ（チャット・システム・相手の操作）
+  feed: [],           // 対戦のログ（システム・相手の操作）
+  chat: [],           // チャット（ログとは別に出す）
   seen: new Set(),    // 受け取ったイベント（二重表示を防ぐ）
   deckId: null,       // 使うデッキ
   turnKey: '',
@@ -546,7 +547,7 @@ async function duelJoin(code) {
 
 function enterRoom(code) {
   Duel.code = code;
-  Duel.feed = []; Duel.seen = new Set(); Duel.opp = null; Duel.oppLogSeen = 0; Duel.lastSent = ''; Duel.turnKey = '';
+  Duel.feed = []; Duel.chat = []; Duel.seen = new Set(); Duel.opp = null; Duel.oppLogSeen = 0; Duel.lastSent = ''; Duel.turnKey = '';
   Duel.deckId = Duel.deckId || Decks.currentId;
   store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
   Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => toast('通信エラー：' + e.message) });
@@ -632,7 +633,7 @@ function onDuelEvent(ev) {
   const mine = ev.from === Duel.me.uid;
   const who = mine ? 'あなた' : ev.name;
   switch (ev.type) {
-    case 'chat': feed(`${who}：${ev.text}`, mine ? 'me chat' : 'chat'); break;
+    case 'chat': addChat(who, ev.text, mine); break;
     case 'sys': feed(ev.text, 'sys'); break;
     case 'coin': feed(`${who}がコインを投げました → ${ev.result}`, 'sys'); break;
     case 'dice': feed(`${who}がサイコロを振りました → ${ev.result}`, 'sys'); break;
@@ -848,7 +849,7 @@ function renderDuelLobby() {
   if (!Duel.code) {
     const codeInput = el('input', { type: 'text', placeholder: '例：AB3CDE', maxlength: 8, class: 'room-input', autocomplete: 'off' });
     const nameIn = el('input', { type: 'text', value: me.name, maxlength: 20, class: 'full', autocomplete: 'nickname' });
-    nameIn.addEventListener('change', () => { const v = nameIn.value.trim(); try { if (v) localStorage.setItem('ygo.duelName', v); else localStorage.removeItem('ygo.duelName'); } catch { /* 保存できなくてもよい */ } });
+    nameIn.addEventListener('change', () => { const v = nameIn.value.trim(); try { if (v) localStorage.setItem('ygo.duelName', v); else localStorage.removeItem('ygo.duelName'); } catch { /* 保存できなくてもよい */ } announcePresence(); });
     const deckSel = el('select', { class: 'full' }, Decks.list.map(d => el('option', { value: d.id, text: `${d.name}（${FORMATS[deckFormat(d)].short}・メイン${d.main.length}）`, selected: d.id === (Duel.deckId || Decks.currentId) })));
     deckSel.addEventListener('change', () => { Duel.deckId = deckSel.value; });
     Duel.deckId = deckSel.value;
@@ -871,6 +872,7 @@ function renderDuelLobby() {
         el('div', { class: 'row' }, codeInput, el('button', { class: 'btn primary', text: '参加する', onclick: () => duelJoin(codeInput.value) }))),
       last && last.code ? el('button', { class: 'btn', text: `前回の部屋（${last.code}）に戻る`, onclick: () => { Duel.deckId = last.deckId; if (last.host) duelCreate(last.code); else duelJoin(last.code); } }) : null,
       el('p', { class: 'muted small-note', text: 'ログインしていなくても対戦できます（誰でも使える公開の中継サーバーを通して対戦します。部屋を作った人がアプリを閉じると部屋はなくなります）。' })));
+    box.append(friendsPanel(false));
     codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') duelJoin(codeInput.value); });
     return;
   }
@@ -879,6 +881,7 @@ function renderDuelLobby() {
   const deck = Decks.get(Duel.deckId);
   const amReady = r && r.ready && r.ready[me.uid];
   const player = (uid, name) => el('li', null, el('b', { text: name || '（待っています…）' }),
+    uid && uid !== me.uid && !isFriend(friendCodeOfUid(uid)) && friendCodeOfUid(uid).length === 8 ? el('button', { class: 'btn small', text: '👥 フレンドに追加', onclick: () => addFriend(friendCodeOfUid(uid), name) }) : null,
     uid && r.ready && r.ready[uid] ? el('span', { class: 'ready-tag', text: '準備OK' }) : uid ? el('span', { class: 'muted', text: '　デッキを選んでいます' }) : null,
     uid && r.decks && r.decks[uid] ? el('span', { class: 'muted', text: `（${r.decks[uid]}）` }) : null);
   box.append(el('div', { class: 'panel duel-card' },
@@ -908,6 +911,10 @@ function renderDuelLobby() {
         }),
         el('p', { class: 'muted small-note', text: '2人とも「準備OK」になると、コイントスで先攻を決めて対戦が始まります。' })),
     el('button', { class: 'btn small danger', text: '部屋を出る', onclick: leaveRoom })));
+  // 相手を待っている間は、フレンドをこの部屋に招待できる
+  if (r && r.host === me.uid && !r.guest && r.status === 'waiting' && !/^MATCH/.test(Duel.code) && Friends.list.length) box.append(friendsPanel(true));
+  box.append(roomChatBox());
+  renderDuelChat();
 }
 
 // ---------- 画面：対戦中の操作パネル（一人回し画面の左側） ----------
@@ -930,6 +937,45 @@ function renderDuelPanel() {
   $('#dp-end').disabled = !myTurn();
 }
 
+// チャット：ログとは別の欄に出す。相手から届いたときは、盤面を見ていても気づけるよう知らせる
+function addChat(who, text, mine) {
+  Duel.chat.push({ who, text, mine, at: Date.now() });
+  if (Duel.chat.length > 200) Duel.chat.shift();
+  renderDuelChat();
+  if (!mine && ![...$$('.dp-chatlog')].some(l => l.offsetParent)) toast(`💬 ${who}：${text}`);   // チャット欄が見えていないときだけ
+}
+function renderDuelChat() {
+  // 対戦の盤面の欄と、部屋の画面の欄の両方
+  for (const list of $$('.dp-chatlog')) {
+    list.innerHTML = '';
+    if (!Duel.chat.length) list.append(el('li', { class: 'muted', text: 'まだメッセージはありません' }));
+    for (const c of Duel.chat) {
+      const d = new Date(c.at);
+      list.append(el('li', { class: c.mine ? 'me' : '' }, el('span', { class: 'chat-time', text: `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}` }), el('b', { text: c.who + '：' }), c.text));
+    }
+    list.scrollTop = list.scrollHeight;
+  }
+}
+function sendChat(input) {
+  const t = input.value.trim();
+  if (!t || !Duel.t) return;
+  Duel.t.sendEvent({ type: 'chat', text: t.slice(0, 200) });
+  input.value = ''; Duel.chatDraft = '';
+}
+// 部屋の画面のチャット欄
+function roomChatBox() {
+  const input = el('input', { type: 'text', placeholder: 'メッセージを入力', maxlength: 200 });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(input); });
+  // 部屋の画面は描き直されることがあるので、書きかけの文と入力中かどうかを引き継ぐ
+  input.value = Duel.chatDraft || '';
+  input.addEventListener('input', () => { Duel.chatDraft = input.value; });
+  input.addEventListener('focus', () => { Duel.chatFocus = true; });
+  input.addEventListener('blur', () => { setTimeout(() => { if (!input.isConnected) return; Duel.chatFocus = false; }, 0); });
+  if (Duel.chatFocus) setTimeout(() => input.focus(), 0);
+  return el('div', { class: 'panel duel-card room-chat' }, el('h2', { text: '💬 チャット' }), el('ol', { class: 'log dp-feed dp-chatlog' }),
+    el('div', { class: 'row chat-row' }, input, el('button', { class: 'btn small', text: '送信', onclick: () => sendChat(input) })));
+}
+
 function renderDuelFeed() {
   const list = $('#dp-feed');
   if (!list) return;
@@ -939,6 +985,8 @@ function renderDuelFeed() {
 }
 
 function setupDuel() {
+  // フレンド（オンライン表示・招待の受け取り）のため、アプリを開いたら中継サーバーにつなぐ
+  setTimeout(() => startFriends(), 1500);
   const tab = $('.tab[data-view="duel"]');
   if (tab) tab.addEventListener('click', renderDuelLobby);
   // 操作パネルのボタン
@@ -966,7 +1014,7 @@ function setupDuel() {
     buttons: [{ label: '終える', primary: true, onClick: () => { Duel.t.updateRoom({ status: 'ended' }); leaveRoom(); } }],
   });
   const chat = $('#dp-chat');
-  const send = () => { const t = chat.value.trim(); if (!t) return; Duel.t.sendEvent({ type: 'chat', text: t.slice(0, 200) }); chat.value = ''; };
+  const send = () => sendChat(chat);
   $('#dp-send').onclick = send;
   chat.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
