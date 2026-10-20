@@ -468,7 +468,7 @@ function renderDetail(box, c, extra) {
     c.noJp ? el('div', { class: 'warn', text: '日本未発売（TCGのみ）のカードです' }) : null,
     formatInfo(c),
     typeof hasErrata === 'function' && hasErrata(c.id)
-      ? el('div', { class: 'muted small-note', text: `エラッタ（効果の変更）があったカードです。効果を自動処理するときは、${typeof errataMode === 'function' && errataMode() === 'pre' ? 'エラッタ前の効果で処理します（下の文章は今の効果です）' : 'エラッタ後の今の効果で処理します'}。一人回しの「⏸ ポーズ・設定」（対戦では部屋の設定）で切り替えられます。` })
+      ? el('div', { class: 'muted small-note', text: 'エラッタ（効果の変更）があったカードです。効果を自動処理するときにエラッタ前・エラッタ後のどちらの効果を使うかは、デッキ作成でカードごとに選べます（ふだんはエラッタ後。下の文章は今の効果です）。' })
       : null,
     el('h4', { text: '効果' }), jaBox,
     el('div', { class: 'd-links' },

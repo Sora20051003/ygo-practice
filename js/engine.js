@@ -120,19 +120,33 @@ const ERRATA = {
 const ERRATA_MODES = { post: 'エラッタ後の効果（今の効果）', pre: 'エラッタ前の効果' };
 const hasErrata = id => !!ERRATA[id];
 // 対戦で使うスクリプト。errata が 'pre' なら、エラッタのあったカードは「エラッタ前」のものにする
+// エラッタの設定：{ mode: 全体の設定（'pre'／'post'）, pre: エラッタ前にするカード, post: エラッタ後にするカード }
+// カードごとの設定（デッキ作成で選ぶ）が全体の設定より優先。古い形（'pre'／'post' の文字）も受け付ける
+function errataSpec(x) {
+  if (x && typeof x === 'object') return { mode: x.mode === 'pre' ? 'pre' : 'post', pre: (x.pre || []).map(Number), post: (x.post || []).map(Number) };
+  return { mode: x === 'pre' ? 'pre' : 'post', pre: [], post: [] };
+}
+const usePre = (spec, code) => !!ERRATA[code] && (spec.pre.includes(code) || (spec.mode === 'pre' && !spec.post.includes(code)));
+// デッキ（いくつでも）の、カードごとの設定（deck.errata = { カード: 'pre'／'post' }）をまとめる。同じカードで分かれたらエラッタ前
+// （2人の対戦では、同じカードの効果を人ごとに変えられないため）
+function errataOfDecks(mode, ...decks) {
+  const pre = new Set(), post = new Set();
+  for (const d of decks) for (const [id, v] of Object.entries((d && d.errata) || {})) (v === 'pre' ? pre : post).add(+id);
+  for (const id of pre) post.delete(id);
+  return { mode: mode === 'pre' ? 'pre' : 'post', pre: [...pre], post: [...post] };
+}
 function scriptFor(name, errata) {
-  if (errata === 'pre') {
-    const m = name.match(/^c(\d+)\.lua$/);
-    if (m && ERRATA[+m[1]] && Engine.scripts.get('pre:' + name)) return Engine.scripts.get('pre:' + name);
-  }
+  const m = name.match(/^c(\d+)\.lua$/);
+  if (m && usePre(errataSpec(errata), +m[1]) && Engine.scripts.get('pre:' + name)) return Engine.scripts.get('pre:' + name);
   return Engine.scripts.get(name) || null;
 }
 
 // デッキのカードのスクリプトを読み込む。スクリプト内で読み込む別スクリプトも追いかける
 async function loadCardScripts(codes, onStatus, errata = 'post') {
   // エラッタ前の効果で遊ぶときは、そのカードの「エラッタ前」のスクリプトも読む（'pre:c番号.lua' に入れる）
-  if (errata === 'pre') {
-    const pre = [...new Set(codes)].filter(c => ERRATA[c] && !Engine.scripts.has(`pre:c${c}.lua`));
+  const spec = errataSpec(errata);
+  {
+    const pre = [...new Set(codes)].filter(c => usePre(spec, c) && !Engine.scripts.has(`pre:c${c}.lua`));
     await Promise.all(pre.map(async c => { const t = await fetchScript(`c${ERRATA[c]}.lua`, `pre-errata/c${ERRATA[c]}.lua`); Engine.scripts.set(`pre:c${c}.lua`, t || ''); }));
   }
   const want = [...new Set(codes)].filter(c => !Engine.scripts.has(`c${c}.lua`));
@@ -259,7 +273,7 @@ const placeText = (con, loc, seq) => {
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
   constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false, rule = 'mr5', errata = 'post' }) {
-    this.errata = errata === 'pre' ? 'pre' : 'post';   // エラッタのあったカードを、エラッタ前の効果で処理する（'pre'）
+    this.errata = errataSpec(errata);   // エラッタのあったカードを、エラッタ前の効果で処理するか（全体の設定とカードごとの設定）
     this.rule = MASTER_RULES[rule] ? rule : 'mr5';   // マスタールール mr1〜mr5（mr3 はペンデュラムゾーンが別＝魔法・罠ゾーンの6・7番）
     this.tools = tools && !net;   // 練習ツール（ドローなどのボタン）を使う。前に保存した盤面（ツールなし）と並びが変わらないよう、新しく始めたときだけ
     // net：対戦（2人がそれぞれ同じエンジンを動かす）。{ me: 自分の番号（0＝先攻）, decks: [[先攻のmain, extra], [後攻のmain, extra]] }

@@ -317,7 +317,7 @@ function autoRedo() {
 }
 
 // ---------- 開始・保存 ----------
-async function autoPrepare(deck, errata = errataMode()) {
+async function autoPrepare(deck, errata = errataOfDecks(errataMode(), deck)) {
   showLoading('自動処理の準備中…');
   try {
     await engineLoad(showLoading);
@@ -329,14 +329,16 @@ async function autoStart(handIds) {
   const deck = boardDeck();
   if (!deck || !deck.main.length) { toast('メインデッキが空です。先にデッキを作ってください'); return; }
   closeAllModals();
-  try { await autoPrepare(deck); } catch (e) { showError('自動処理を準備できませんでした', e); return; }
+  try { await autoPrepare(deck, errataOfDecks(errataMode(), deck, oppDeck())); } catch (e) { showError('自動処理を準備できませんでした', e); return; }
   const handSize = +$('#b-handsize').value;
   const opp = oppDeck();
+  // エラッタの設定：全体の設定に、デッキ作成で選んだカードごとの設定を重ねる
+  const errata = errataOfDecks(errataMode(), deck, opp);
   if (opp) {
-    try { await autoPrepare(opp); } catch (e) { showError('相手のデッキを準備できませんでした', e); return; }
+    try { await autoPrepare(opp, errata); } catch (e) { showError('相手のデッキを準備できませんでした', e); return; }
   }
   Auto.redoLog = null;
-  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), errata: errataMode() });
+  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), errata });
   Auto.deckId = deck.id;
   Auto.duel.cpuSlow = cpuDelay() > 0;
   noteLinkRemoved(Auto.duel.extra, Auto.duel.rule);
@@ -498,7 +500,7 @@ function oppDeck() {
   let deck = null;
   if (v.startsWith('deck:')) {
     const d = Decks.get(v.slice(5));
-    if (d && d.main.length) deck = { main: d.main.filter(id => DB.byId.has(id)), extra: d.extra.filter(id => DB.byId.has(id)) };
+    if (d && d.main.length) deck = { main: d.main.filter(id => DB.byId.has(id)), extra: d.extra.filter(id => DB.byId.has(id)), errata: d.errata || {} };
   }
   if (!deck) {
     const main = [];

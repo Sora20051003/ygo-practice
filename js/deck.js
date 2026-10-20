@@ -191,6 +191,26 @@ function showDeckCard(c) {
   showCardDetail(c, '#deck-detail', deckCardBar(c));
 }
 
+// エラッタ（効果の変更）があったカード：このデッキで、エラッタ前・エラッタ後のどちらの効果を使うか（deck.errata = { カード: 'pre'／'post' }）
+// 何も選んでいなければ、一人回しの設定（ふだんはエラッタ後）に従う
+const deckErrata = (deck, id) => (deck && deck.errata && deck.errata[id]) || null;
+function errataChoice(deck, c, redraw) {
+  if (typeof hasErrata !== 'function' || !hasErrata(c.id)) return null;
+  const cur = deckErrata(deck, c.id) || (typeof errataMode === 'function' ? errataMode() : 'post');
+  const set = v => {
+    deck.errata = deck.errata || {};
+    deck.errata[c.id] = v;
+    Decks.save();
+    renderDeck();
+    redraw();
+    toast(`このデッキの「${c.name}」は${v === 'pre' ? 'エラッタ前' : 'エラッタ後（今）'}の効果で処理します`);
+  };
+  return el('div', { class: 'd-errata' },
+    el('div', { class: 'small-note muted', text: 'エラッタ（効果の変更）があったカードです。このデッキで使う効果（効果を自動処理するとき）' }),
+    el('div', { class: 'seg full' },
+      el('button', { class: cur === 'post' ? 'on' : '', text: 'エラッタ後（今の効果）', onclick: () => set('post') }),
+      el('button', { class: cur === 'pre' ? 'on' : '', text: 'エラッタ前の効果', onclick: () => set('pre') })));
+}
 function deckCardBar(c) {
   const bar = el('div', { class: 'd-addbar' });
   const draw = () => {
@@ -216,7 +236,8 @@ function deckCardBar(c) {
         el('button', { class: 'btn small', text: `− ${label}から1枚減らす`, disabled: !nMain, onclick: () => removeOne(main) }),
         el('button', { class: 'btn small', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })),
       el('div', { class: 'd-addbtns' },
-        el('button', { class: 'btn small', text: '🔍 関連カードを検索', onclick: () => showRelated(c) })));
+        el('button', { class: 'btn small', text: '🔍 関連カードを検索', onclick: () => showRelated(c) })),
+      errataChoice(deck, c, draw));
   };
   draw();
   return bar;
@@ -568,6 +589,7 @@ function renderDeck() {
       const tile = el('div', { class: 'deck-tile' + (bad.has(c.name) ? ' invalid' : ''), onclick: () => showDeckCard(c) },
         cardFace(c, { small: true }),
         badge ? el('div', { class: 'tile-lim' }, badge) : null,
+        deckErrata(deck, id) === 'pre' ? el('div', { class: 'tile-errata', title: 'エラッタ前の効果で処理', text: '旧' }) : null,
         el('button', { class: 'tile-remove', title: '1枚減らす', text: '−', onclick: e => { e.stopPropagation(); removeFromDeck(sec, i); } }));
       tile.addEventListener('contextmenu', e => { e.preventDefault(); removeFromDeck(sec, i); });
       grid.append(tile);

@@ -1327,3 +1327,5 @@ body.land .phase-banner { padding: 8px 14px; }
 .phase-banner.big { padding: 22px 60px; }
 .phase-banner.big b { font-size: clamp(40px, 8vw, 88px); }
 .phase-banner.big small { font-size: 18px; }
+.tile-errata { position: absolute; left: 2px; bottom: 2px; padding: 0 4px; border-radius: 4px; background: #8e44ad; color: #fff; font-size: 10px; font-weight: 700; line-height: 1.5; }
+.d-errata { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }

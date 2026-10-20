@@ -1043,7 +1043,7 @@ function renderDuelLobby() {
             // レギュレーションに合っていないデッキで準備OKにするときは確かめる
             const p = !amReady && deck ? deckCheckForRoom(deck, r) : null;
             if (p && !p.loading && (p.notAllowed.length || p.over.length) && !confirm('このデッキは選んだレギュレーションに合っていません。このまま準備OKにしますか？')) return;
-            Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra } : null });
+            Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra, errata: deck.errata || {} } : null });
           },
         }),
         el('p', { class: 'muted small-note', text: '2人とも「準備OK」になるとじゃんけんをして、勝った人が先攻か後攻かを選びます。' })),
@@ -1247,6 +1247,8 @@ async function beginNetDuel() {
   const firstUid = r.first || r.turnPlayer, secondUid = firstUid === r.host ? r.guest : r.host;
   const idx = firstUid === me ? 0 : 1;
   const dl = uid => (r.deckList && r.deckList[uid]) || { main: [], extra: [] };
+  // エラッタ：部屋の設定に、2人のデッキのカードごとの設定を重ねる（同じカードで分かれたらエラッタ前）
+  const netErrata = errataOfDecks(r.errata, dl(r.host), dl(r.guest));
   const decks = [firstUid, secondUid].map(u => [dl(u).main || [], dl(u).extra || []]);
   Duel.solo = { S: Board.S, initial: Board.initial, history: Board.history, autoOn: Auto.on, autoDuel: Auto.duel };
   Duel.active = true; Duel.endedShown = false; Duel.netQueue = [];
@@ -1254,10 +1256,10 @@ async function beginNetDuel() {
   switchView('board');
   try {
     await engineLoad(showLoading);
-    await loadCardScripts([...decks[0][0], ...decks[0][1], ...decks[1][0], ...decks[1][1], OPP_FILLER], showLoading, r.errata);
+    await loadCardScripts([...decks[0][0], ...decks[0][1], ...decks[1][0], ...decks[1][1], OPP_FILLER], showLoading, netErrata);
   } catch (e) { showLoading(null); showError('自動処理を準備できませんでした', e); return; }
   showLoading(null);
-  const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5', errata: r.errata,
+  const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5', errata: netErrata,
     chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: !!r.firstDraw });
   noteLinkRemoved(decks[idx][1], r.rule || 'mr5');
   d.onSend = (res, i) => Duel.t.sendEvent({ type: 'eng', i, res: JSON.stringify(res, bigReplacer) });
