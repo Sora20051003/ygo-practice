@@ -1322,3 +1322,5 @@ body.land .phase-banner { padding: 8px 14px; }
 .row.chat-row > .btn, .chat-row > button { flex: none; width: auto; padding-left: 18px; padding-right: 18px; }
 .chat-row input { flex: 1; min-width: 0; }
 @media (max-width: 720px) { .modal:has(.dm-box) { width: 100%; } }
+.rps-hands { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.rps-hand { font-size: 18px; padding: 14px 4px; }

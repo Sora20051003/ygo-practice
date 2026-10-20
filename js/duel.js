@@ -571,8 +571,82 @@ function leaveRoom() {
   renderDuelLobby();
 }
 
+// ---------- じゃんけん ----------
+// 2人がそれぞれ手を選んで部屋に書く（rps.<uid>）。2人とも出したら、部屋を作った人の端末が勝ち負けを決める。
+// あいこはやり直し。RPS_SEC 秒たっても出さない人は、部屋を作った人の端末がランダムに出す
+const RPS_SEC = 20;
+const RPS_HANDS = { g: '✊ グー', c: '✌️ チョキ', p: '✋ パー' };
+const rpsBeats = (a, b) => (a === 'g' && b === 'c') || (a === 'c' && b === 'p') || (a === 'p' && b === 'g');
+function judgeRps(r) {
+  const h = r.rps || {}, a = h[r.host], b = h[r.guest];
+  const timeUp = Date.now() > (r.chooseUntil || 0) + 2000;
+  if ((!a || !b) && timeUp) {
+    // 時間切れ：出していない人の手をランダムに決める
+    const rnd = () => 'gcp'[crypto.getRandomValues(new Uint8Array(1))[0] % 3];
+    Duel.t.updateRoom({ ['rps.' + r.host]: a || rnd(), ['rps.' + r.guest]: b || rnd() });
+    return;
+  }
+  if (!a || !b || Duel.rpsJudged === r.rpsRound) return;
+  Duel.rpsJudged = r.rpsRound;
+  const text = `じゃんけん：${r.hostName} ${RPS_HANDS[a]}・${r.guestName} ${RPS_HANDS[b]}`;
+  if (a === b) {
+    Duel.t.sendEvent({ type: 'sys', text: text + ' → あいこ' });
+    setTimeout(() => Duel.t && Duel.t.updateRoom({ rps: {}, rpsRound: (r.rpsRound || 1) + 1, rpsLast: { [r.host]: a, [r.guest]: b }, chooseUntil: Date.now() + RPS_SEC * 1000 }), 1500);
+    return;
+  }
+  const winner = rpsBeats(a, b) ? r.host : r.guest;
+  Duel.t.sendEvent({ type: 'sys', text: `${text} → ${winner === r.host ? r.hostName : r.guestName} の勝ち` });
+  setTimeout(() => Duel.t && Duel.t.updateRoom({ status: 'choosing', coinWinner: winner, rpsLast: { [r.host]: a, [r.guest]: b }, chooseUntil: Date.now() + CHOOSE_SEC * 1000 }), 1500);
+}
+// じゃんけんの窓。部屋の情報が変わるたびに中身を描き直す
+function showRps(r) {
+  const me = Duel.me.uid, opp = r.host === me ? r.guest : r.host;
+  const h = r.rps || {};
+  if (!Duel.rpsUi) {
+    const body = el('div', { class: 'stack rps-box' });
+    const close = showModal({ title: '✊ じゃんけん', body, onClose: () => {
+      // 決まる前に閉じられたら、もう一度出す
+      if (Duel.rpsUi && Duel.rpsUi.close === close) {
+        clearInterval(Duel.rpsUi.timer); Duel.rpsUi = null;
+        setTimeout(() => { if (Duel.room && Duel.room.status === 'rps') showRps(Duel.room); }, 300);
+      }
+    } });
+    Duel.rpsUi = { close, body, timer: setInterval(() => { const room = Duel.room; if (room && room.status === 'rps') { drawRps(room); if (room.host === Duel.me.uid) judgeRps(room); } }, 500) };
+  }
+  drawRps(r);
+}
+function drawRps(r) {
+  const ui = Duel.rpsUi;
+  if (!ui) return;
+  const me = Duel.me.uid, opp = r.host === me ? r.guest : r.host;
+  const h = r.rps || {}, mine = h[me], theirs = h[opp];
+  const left = Math.max(0, Math.ceil(((r.chooseUntil || Date.now()) - Date.now()) / 1000));
+  const both = mine && theirs;
+  const key = [r.rpsRound, mine, theirs, left].join('|');
+  if (ui.key === key) return;
+  ui.key = key;
+  ui.body.innerHTML = '';
+  const last = r.rpsLast && r.rpsRound > 1 ? el('p', { class: 'muted', text: `あいこでした（あなた ${RPS_HANDS[r.rpsLast[me]] || ''}・${oppName()} ${RPS_HANDS[r.rpsLast[opp]] || ''}）。もう一度！` }) : null;
+  ui.body.append(...[
+    last,
+    el('p', { text: both ? '結果を見ています…' : mine ? `${oppName()} が出すのを待っています…（あと ${left} 秒）` : `勝った人が、先攻か後攻かを選びます。手を選んでください（あと ${left} 秒。出さないとランダムになります）` }),
+    el('div', { class: 'rps-hands' }, Object.entries(RPS_HANDS).map(([k, t]) => el('button', {
+      class: 'btn rps-hand' + (mine === k ? ' primary' : ''), text: t, disabled: !!mine,
+      onclick: () => { if (!(Duel.room && Duel.room.rps && Duel.room.rps[me])) Duel.t.updateRoom({ ['rps.' + me]: k }); },
+    }))),
+    el('p', { class: 'muted small-note', text: `あなた：${mine ? RPS_HANDS[mine] : '選んでいます'}　${oppName()}：${both ? RPS_HANDS[theirs] : theirs ? '出しました' : '選んでいます'}` }),
+  ].filter(Boolean));
+}
+function closeRps() {
+  if (!Duel.rpsUi) return;
+  const ui = Duel.rpsUi;
+  Duel.rpsUi = null;
+  clearInterval(ui.timer);
+  ui.close();
+}
+
 // ---------- 先攻・後攻を選ぶ ----------
-// コイントスで表が出た人が選ぶ。CHOOSE_SEC 秒たっても選ばなければ先攻にする
+// じゃんけんで勝った人が選ぶ。CHOOSE_SEC 秒たっても選ばなければ先攻にする
 const CHOOSE_SEC = 30;
 function startDuelAs(first) {
   const r = Duel.room;
@@ -589,8 +663,8 @@ function askFirstOrSecond(r) {
   const left = () => Math.max(0, Math.ceil(((r.chooseUntil || Date.now()) - Date.now()) / 1000));
   const sec = el('b', { text: String(left()) });
   const body = mine
-    ? el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: '🪙 コイントス：あなたが表でした！' }), el('p', null, '先攻か後攻かを選んでください（あと ', sec, ' 秒。選ばなければ先攻になります）'))
-    : el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: `🪙 コイントス：${oppName()} が表でした` }), el('p', null, `${oppName()} が先攻か後攻かを選んでいます…（あと `, sec, ' 秒）'));
+    ? el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: '✊ じゃんけん：あなたの勝ち！' }), el('p', null, '先攻か後攻かを選んでください（あと ', sec, ' 秒。選ばなければ先攻になります）'))
+    : el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: `✊ じゃんけん：${oppName()} の勝ち` }), el('p', null, `${oppName()} が先攻か後攻かを選んでいます…（あと `, sec, ' 秒）'));
   const close = showModal({ title: '先攻・後攻', body, buttons: mine ? [
     { label: '先攻', primary: true, onClick: () => startDuelAs(me) },
     { label: '後攻', onClick: () => startDuelAs(opp) },
@@ -623,13 +697,13 @@ function onDuelRoom(r) {
   const me = Duel.me.uid;
   // 相手が来た・準備した
   if (prev && !prev.guest && r.guest && r.host === me) feed(`${r.guestName} が部屋に入りました`, 'sys');
-  // 両方準備OKなら、部屋を作った人がコイントスをする。表が出た人が先攻・後攻を選ぶ（status: 'choosing'）
+  // 両方準備OKなら、じゃんけんをする（status: 'rps'）。勝った人が先攻・後攻を選ぶ（status: 'choosing'）
   if (r.status === 'waiting' && r.host === me && r.guest && r.ready && r.ready[r.host] && r.ready[r.guest]) {
-    const coinWinner = Math.random() < 0.5 ? r.host : r.guest;
-    Duel.t.sendEvent({ type: 'sys', text: `コイントスの結果、${coinWinner === r.host ? r.hostName : r.guestName} が表でした。先攻か後攻かを選びます` });
-    Duel.t.updateRoom({ status: 'choosing', coinWinner, chooseUntil: Date.now() + CHOOSE_SEC * 1000 });
+    Duel.t.sendEvent({ type: 'sys', text: 'じゃんけんで、先攻・後攻を選ぶ人を決めます' });
+    Duel.t.updateRoom({ status: 'rps', rps: {}, rpsRound: 1, chooseUntil: Date.now() + RPS_SEC * 1000 });
     return;   // 変更が届いたときに、もう一度ここが呼ばれる（古い情報で処理を続けないように）
   }
+  if (r.status === 'rps') { showRps(r); if (r.host === me) judgeRps(r); } else closeRps();
   if (r.status === 'choosing') askFirstOrSecond(r); else closeFirstOrSecond();
   if (r.status === 'playing' && !Duel.active) { Duel.timeoutSent = false; if (r.mode === 'auto') beginNetDuel(); else beginDuelBoard(); }
   if (Duel.active) {
@@ -963,7 +1037,7 @@ function renderDuelLobby() {
             Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra } : null });
           },
         }),
-        el('p', { class: 'muted small-note', text: '2人とも「準備OK」になるとコイントスをして、表が出た人が先攻か後攻かを選びます。' })),
+        el('p', { class: 'muted small-note', text: '2人とも「準備OK」になるとじゃんけんをして、勝った人が先攻か後攻かを選びます。' })),
     el('button', { class: 'btn small danger', text: '部屋を出る', onclick: leaveRoom })));
   // 相手を待っている間は、フレンドをこの部屋に招待できる
   if (r && r.host === me.uid && !r.guest && r.status === 'waiting' && !/^MATCH/.test(Duel.code) && Friends.list.length) box.append(friendsPanel(true));
