@@ -70,9 +70,10 @@ function autoActions(inst) {
   const same = c => c.controller === con && c.location === loc && c.sequence === seq;
   const out = [];
   const add = (list, label, action, kind) => list.forEach((c, index) => {
-    if (same(c)) out.push({ label: typeof label === 'function' ? label(c) : label, kind: typeof kind === 'function' ? kind(c) : kind, res: { type: p.type === MSG.SELECT_BATTLECMD ? RES.SELECT_BATTLECMD : RES.SELECT_IDLECMD, action, index } });
+    if (same(c)) out.push({ label: typeof label === 'function' ? label(c) : label, title: label === actLabel ? descText(c.description) : '', kind: typeof kind === 'function' ? kind(c) : kind, res: { type: p.type === MSG.SELECT_BATTLECMD ? RES.SELECT_BATTLECMD : RES.SELECT_IDLECMD, action, index } });
   });
-  const actLabel = c => { const t = descText(c.description); return t && !/^発動$/.test(t) ? `効果を発動：${t}` : '効果を発動'; };
+  // ボタンは「効果を発動」だけにする（効果の説明はボタンに指を置いたときに出す。同じカードに複数あれば「1つ目」「2つ目」）
+  function actLabel() { return '効果を発動'; }
   if (p.type === MSG.SELECT_IDLECMD) {
     // 発動しても何も起きない永続・フィールド魔法／永続罠は出さない（セットはできる）
     add(p.activates.map((c, i) => (Auto.useless && Auto.useless.has(i) ? { ...c, controller: -1 } : c)), actLabel, IDLE.ACTIVATE, 'y');
@@ -559,7 +560,7 @@ function autoActionPopup(uid) {
   const acts = autoActions(loc.inst);
   if (!acts.length) return false;
   const box = el('div', { class: 'ap-actions', id: 'ap-actions' },
-    acts.map(a => el('button', { class: 'ap-act' + (a.kind ? ' k-' + a.kind : ''), text: a.label, onclick: e => { e.stopPropagation(); hideActionPopup(); runAction(a); } })),
+    acts.map(a => el('button', { class: 'ap-act' + (a.kind ? ' k-' + a.kind : ''), text: a.label, title: a.title || null, onclick: e => { e.stopPropagation(); hideActionPopup(); runAction(a); } })),
     isMobile() ? el('button', { class: 'ap-act k-info', text: '🔍 詳細', onclick: e => { e.stopPropagation(); hideActionPopup(); showBoardDetail(loc); } }) : null);
   document.body.append(box);
   const r = localRect(node.getBoundingClientRect()), b = { width: box.offsetWidth, height: box.offsetHeight };
@@ -1122,7 +1123,7 @@ function autoRowButtons(inst, onDone) {
   const acts = autoActions(inst);
   if (!acts.length) return null;
   return el('div', { class: 'row-acts' }, acts.map(a => el('button', {
-    class: 'ap-act small' + (a.kind ? ' k-' + a.kind : ''), text: a.label,
+    class: 'ap-act small' + (a.kind ? ' k-' + a.kind : ''), text: a.label, title: a.title || null,
     onclick: e => { e.stopPropagation(); onDone(); runAction(a); },
   })));
 }
