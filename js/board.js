@@ -1106,6 +1106,22 @@ function updateLandscape() {
       if (host) host.remove();
     }
   }
+  // 横画面：左の欄に 相手の情報・手札の枚数とライフ・カードの詳細 をまとめる（手札は盤面の下）
+  const opp = $('#opp-bar'), title = $('#view-board .hand-title'), det = $('#board-detail'), handWrap = $('#view-board .hand-wrap');
+  if (center && opp && title && det && handWrap && layout) {
+    let left = $('#land-left');
+    if (land && opp.parentNode !== left) {
+      if (!left) left = el('div', { class: 'land-left', id: 'land-left' });
+      center.prepend(left);
+      left.append(opp, title, det);
+    }
+    if (!land && left) {
+      center.insertBefore(opp, $('#phase-bar'));
+      handWrap.prepend(title);
+      layout.append(det);
+      left.remove();
+    }
+  }
   if (!land) { closePhasePop(); hideLandDetail(); }
   renderLandRail();
 }
