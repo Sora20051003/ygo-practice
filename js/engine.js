@@ -557,7 +557,10 @@ class AutoDuel {
       case MSG.HINT: if (m.hint_type === 3 && m.player === this.me) this.hint = m.hint; break;
       case MSG.NEW_TURN: this.used = new Map(); this.turn++; this.turnPlayer = m.player; this.addLog(`---- ${m.player === this.me ? '自分' : '相手'}のターン ----`); this.events.push({ t: 'turn', player: m.player, turn: this.turn }); break;
       case MSG.NEW_PHASE: this.phase = m.phase; if (this.turnPlayer === this.me) this.addLog(PHASE_NAME[m.phase] || 'フェイズ'); this.leaving = 0; this.events.push({ t: 'phase', phase: m.phase, player: this.turnPlayer, turn: this.turn }); break;
-      case MSG.DRAW: if (m.player === this.me) this.addLog(`ドロー：${m.drawn.map(d => cardName(d.code & 0x7fffffff)).join('、')}`); break;
+      case MSG.DRAW:
+        if (m.player === this.me) this.addLog(`ドロー：${m.drawn.map(d => cardName(d.code & 0x7fffffff)).join('、')}`);
+        this.events.push({ t: 'draw', player: m.player, n: m.drawn.length });   // ドローの演出用
+        break;
       case MSG.SUMMONING: this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を通常召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
       case MSG.SPSUMMONING: if (this.procCode === m.code && !this.chain.length) { this.markUsed(m.code, 'proc'); this.procCode = 0; } this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を特殊召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
       case MSG.FLIPSUMMONING: this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を反転召喚`); break;

@@ -1588,3 +1588,11 @@ body[data-view="deck"] .d-image { cursor: zoom-in; }
 .card-zoom.art img { height: 100%; object-fit: cover; }
 @keyframes cardZoomFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes cardZoomIn { from { transform: scale(.85); } to { transform: scale(1); } }
+/* ドローの演出：カードの裏と表を重ね、回しながら手札へ（自分のカードは途中で表になる） */
+.draw-ghost { transform-style: preserve-3d; filter: none; }   /* filter があると立体の回転が効かない（影は表と裏に付ける） */
+.draw-ghost-side { filter: drop-shadow(0 6px 10px rgba(0,0,0,.5)); }
+.draw-ghost-side { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.draw-ghost-side > * { width: 100%; height: 100%; }
+.draw-ghost-side.front { transform: rotateY(180deg); }
+/* 発動・キャンセルなどの選択や、カードの上のボタン、窓が出ているあいだは、どこを触ってもドローしない */
+body:has(.ap-sheet) .draw-tap, body:has(.ap-actions) .draw-tap, body:has(#modal-root .modal-back) .draw-tap { display: none !important; }

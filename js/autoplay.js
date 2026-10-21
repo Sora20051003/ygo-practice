@@ -189,6 +189,8 @@ function renderDrawTap() {
   n = el('div', { id: 'draw-tap', class: 'draw-tap', role: 'button' }, el('div', { class: 'draw-tap-label' }, el('b', { text: 'ドローフェイズ' }), el('span', { text: 'タップしてドロー' })));
   n.addEventListener('click', () => {
     const dd = Auto.duel;
+    // 発動・キャンセルなどの選択、カードの上のボタン、窓、ポーズが出ているあいだはドローしない
+    if (document.querySelector('.ap-sheet, .ap-actions, #modal-root .modal-back') || pauseOpen()) return;
     n.remove();
     if (!dd || !dd.drawWait) return;
     try { dd.resumeDraw(); } catch (e) { console.error(e); showError('処理中にエラーが起きました', e); }
@@ -654,6 +656,7 @@ function playEvents(events, before) {
       .finished.then(() => ghost.remove(), () => ghost.remove());
     n++;
   }
+  if (!reduce) playDraws(events, before, after);
   playBattleEffects(events, before, after, reduce);
   // 召喚したゾーンを光らせる
   for (const ev of events) {
@@ -661,6 +664,42 @@ function playEvents(events, before) {
     const sel = ev.con === Auto.duel.me ? `#field .slot[data-zone="${ev.seq >= 5 ? 'emz' : 'm'}"][data-idx="${ev.seq >= 5 ? ev.seq - 5 : ev.seq}"]` : `#field [data-ozone="m"][data-oidx="${ev.seq}"]`;
     const node = $(sel);
     if (node) { node.classList.add('ap-flash'); setTimeout(() => node.classList.remove('ap-flash'), 900); }
+  }
+}
+
+// ドロー：デッキから手札へカードが飛んでいき、途中で表になる（自分）。相手は裏のまま相手の手札へ
+function playDraws(events, before, after) {
+  const me = Auto.duel.me;
+  const mine = events.filter(e => e.t === 'draw' && e.player === me).reduce((s, e) => s + e.n, 0);
+  const theirs = events.filter(e => e.t === 'draw' && e.player !== me).reduce((s, e) => s + e.n, 0);
+  const fly = (from, to, face, i, node) => {
+    if (!from || !to) return;
+    const w = Math.min(to.width || 70, 90), h = w * 1.46;
+    const back = el('div', { class: 'draw-ghost-side back' }, cardFace(null, { faceDown: true }));
+    const front = face ? el('div', { class: 'draw-ghost-side front' }, face) : null;
+    const ghost = el('div', { class: 'ap-ghost draw-ghost' }, back, front);
+    ghost.style.width = w + 'px'; ghost.style.height = h + 'px';
+    document.body.append(ghost);
+    const at = (r, k = 1, ry = 0) => `translate(${r.left + r.width / 2 - w / 2}px, ${r.top + r.height / 2 - h / 2}px) scale(${k}) rotateY(${ry}deg)`;
+    const mid = { left: (from.left + to.left) / 2, top: Math.min(from.top, to.top) - 30, width: to.width, height: to.height };
+    if (node) node.style.visibility = 'hidden';
+    const done = () => { ghost.remove(); if (node) node.style.visibility = ''; };
+    ghost.animate([{ transform: at(from, 0.9, 0) }, { transform: at(mid, 1.2, face ? 90 : 0), offset: 0.5 }, { transform: at(to, 1, face ? 180 : 0) }],
+      { duration: 650, delay: i * 160, easing: 'cubic-bezier(.3,.7,.3,1)', fill: 'both' }).finished.then(done, done);
+  };
+  if (mine) {
+    const deck = before.get(`${me}-${LOC.DECK}`) || after.get(`${me}-${LOC.DECK}`);
+    const cards = $$('#hand .bcard').slice(-Math.min(mine, 8));
+    cards.forEach((node, i) => {
+      const r = localRect(node.getBoundingClientRect());
+      const face = node.firstElementChild ? node.firstElementChild.cloneNode(true) : null;
+      fly(deck, r, face, i, node);
+    });
+  }
+  if (theirs) {
+    const deck = before.get(`${1 - me}-${LOC.DECK}`) || after.get(`${1 - me}-${LOC.DECK}`);
+    const hand = after.get(`${1 - me}-${LOC.HAND}`);
+    for (let i = 0; i < Math.min(theirs, 6); i++) fly(deck, hand && { left: hand.left + 20, top: hand.top, width: 40, height: hand.height }, null, i, null);
   }
 }
 
