@@ -8,6 +8,9 @@
 中身が変わったときだけ書き換える。
 """
 import concurrent.futures
+import datetime
+import os
+import re
 import json
 import pathlib
 import urllib.error
@@ -61,6 +64,39 @@ def main():
                 continue
             alts.setdefault(orig, set()).add(int(k))
 
+    # 前回見つけた絵違い（番号を順に試して見つけたもの）は残す
+    old_text = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+    m = re.search(r"const ALT_ARTS = \{(.*?)\};", old_text)
+    if m:
+        for k, v in re.findall(r"(\d+):\[([\d,]*)\]", m.group(1)):
+            if int(k) in known:
+                alts.setdefault(int(k), set()).update(int(x) for x in v.split(",") if x)
+
+    # どの一覧にも載っていない絵違い（YGOPRODeck に画像だけある）を、カードの番号の次の番号から順に試して探す。
+    #   ・絵違いが分かっているカード：見つかっている一番大きい番号＋2 まで、抜けている番号を全部
+    #   ・ほかのカード：番号＋1・＋2 を、毎日 1/15 ずつ（15日で全部）。FULL=1 のときは全部
+    taken = known | {int(k) for k in (d if EDO.exists() else {})}
+    full_run = os.environ.get("FULL") == "1"
+    day = datetime.date.today().toordinal() % 15
+    probe_ids = {}
+    for orig in known:
+        have = alts.get(orig, set())
+        top = max(have) + 2 if have else orig + 2
+        if not have and not full_run and orig % 15 != day:
+            continue
+        for i in range(orig + 1, min(top, orig + 40) + 1):
+            if i not in taken and i not in have:
+                probe_ids[i] = orig
+
+    def found(i):
+        return i, exists(YGO_ART.format(i))
+
+    with concurrent.futures.ThreadPoolExecutor(6) as ex:
+        for i, ok in ex.map(found, sorted(probe_ids)):
+            if ok:
+                alts.setdefault(probe_ids[i], set()).add(i)
+    print(f"番号を試した数 {len(probe_ids)}")
+
     # 画像があるかを確かめる（YGOPRODeck が一覧に載せているものは確かめない）
     check = sorted({i for s in alts.values() for i in s} - ygo_listed)
     full, missing = set(), set()
@@ -91,8 +127,7 @@ def main():
         f"const ALT_ARTS = {{{body}}};\n"
         f"const ALT_FULL = [{','.join(map(str, sorted(full)))}];\n"
     )
-    old = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
-    if old == js:
+    if old_text == js:
         print("変更なし")
         return
     OUT.write_text(js, encoding="utf-8")
