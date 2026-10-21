@@ -251,13 +251,13 @@ function deckCardBar(c) {
     };
     const label = main === 'extra' ? 'EXデッキ' : 'メインデッキ';
     bar.append(
-      el('div', { class: 'd-addcount', text: `今の枚数：${main === 'extra' ? 'EX' : 'メイン'} ${nMain}枚・サイド ${nSide}枚` }),
+      el('div', { class: 'd-addcount', text: `今の枚数：${main === 'extra' ? 'EX' : 'メイン'} ${nMain}枚` + (deckFormat(deck) === 'md' ? '' : `・サイド ${nSide}枚`) }),
       el('div', { class: 'd-addbtns' },
         el('button', { class: 'btn small primary', text: `＋ ${label}に追加`, onclick: () => { addToDeck(c, main); draw(); } }),
-        el('button', { class: 'btn small', text: '＋ サイドに追加', onclick: () => { addToDeck(c, 'side'); draw(); } })),
+        el('button', { class: 'btn small side-btn', text: '＋ サイドに追加', onclick: () => { addToDeck(c, 'side'); draw(); } })),
       el('div', { class: 'd-addbtns' },
         el('button', { class: 'btn small', text: `− ${label}から1枚減らす`, disabled: !nMain, onclick: () => removeOne(main) }),
-        el('button', { class: 'btn small', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })),
+        el('button', { class: 'btn small side-btn', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })),
       el('div', { class: 'd-addbtns' },
         el('button', { class: 'btn small', text: '🔍 関連カードを検索', onclick: () => showRelated(c) })),
       ...[errataChoice(deck, c, draw), artChoice(deck, c)].filter(Boolean));
@@ -312,8 +312,11 @@ function setupSearch() {
   const hide = $('#f-hide-unrel');
   hide.checked = store.get('ygo.hideUnrel', true);
   hide.addEventListener('change', () => { store.set('ygo.hideUnrel', hide.checked); run(); });
+  // 絵違いがあるカードだけ
+  $('#f-alt').addEventListener('change', run);
   // 検索の条件を全部消す
   $('#f-clear').addEventListener('click', () => {
+    $('#f-alt').checked = false;
     $('#q').value = '';
     $('#qt').value = '';
     $('#f-kind').value = '';
@@ -407,6 +410,7 @@ function renderResults() {
   });
   // 選んだレギュレーションの時点で未発売のカードは出さない（設定でオフにできる）
   if (hideUnreleased(ctx)) res = res.filter(c => !isUnreleased(c, ctx));
+  if ($('#f-alt').checked) res = res.filter(c => altArtsOf(c.id).length);
   $('#result-count').textContent = res.length > MAX_RESULTS
     ? `${res.length}件（上位${MAX_RESULTS}件を表示。条件をしぼってください）`
     : `${res.length}件`;
@@ -438,7 +442,7 @@ function resultRow(c, ctx, text) {
       el('div', { class: 'r-name' }, limitBadge(c, ctx), c.name + (c.noJp ? '（TCG）' : '')),
       el('div', { class: 'r-info', text: info }),
       text ? snippetEl(c.jaText, text) : null),
-    el('button', { class: 'btn small', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),
+    el('button', { class: 'btn small side-btn', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),
     el('button', { class: 'btn small primary', title: 'デッキに追加', text: '＋', onclick: e => { e.stopPropagation(); addToDeck(c); } }),
   );
   row.addEventListener('contextmenu', e => { e.preventDefault(); addToDeck(c); });
@@ -464,6 +468,8 @@ async function showRelated(c) {
   }
   renderResults();
   $('#results').scrollTop = 0;
+  // 近いテーマ・よく一緒に使われるカードは、サンプルデッキ（大会の入賞デッキなど）から調べる。読み込めたら出し直す
+  if (!Related.co) loadCoUse().then(() => { if (Related.card === c) renderResults(); }).catch(() => {});
   // 効果文がまだ無いときは取ってきて、出し直す
   if (!Related.text) {
     const t = await fetchCardTexts(c).catch(() => null);
@@ -493,6 +499,12 @@ function relatedGroups(c, text) {
   // 同じテーマ（カテゴリ）のカード
   const mine = cardThemes(c);
   if (mine.length) add('同じテーマのカード', DB.cards.filter(x => cardThemes(x).some(t => mine.includes(t))));
+  // 近いテーマ・よく一緒に使われるカード（サンプルデッキで、このカードと同じデッキによく入っているもの）
+  const co = coUseOf(c);
+  if (co) {
+    if (co.themes.length) add('近いテーマのカード（よく一緒に使われるテーマ）', DB.cards.filter(x => cardThemes(x).some(t => co.themes.includes(t))));
+    if (co.cards.length) add('よく一緒に使われるカード', co.cards);
+  }
   // 効果にこのカードの名前が書かれているカード
   const quote = `「${c.name}」`;
   add('このカードの名前が効果に書かれているカード', DB.cards.filter(x => x.jaText && x.jaText.includes(quote)));
@@ -500,6 +512,62 @@ function relatedGroups(c, text) {
   const kindRank = x => (isExtraType(x) ? 3 : isMonster(x) ? 0 : has(x, T.SPELL) ? 1 : 2);
   for (const g of groups) g.cards.sort((a, b) => kindRank(a) - kindRank(b) || b.cid - a.cid);
   return groups;
+}
+
+// ---------- サンプルデッキから、一緒に使われるカード・テーマを調べる ----------
+// デッキ＝入っているカードの番号の集まり。全部のルール（OCG・マスターデュエル・海外）のサンプルを使う
+async function loadCoUse() {
+  if (Related.co) return Related.co;
+  const decks = [];
+  for (const fmt of ['ocg', 'md', 'tcg']) {
+    const data = await loadSamples(fmt).catch(() => null);
+    if (!data || !data.periods) continue;
+    for (const list of Object.values(data.periods)) for (const s of list) {
+      const ids = new Set();
+      for (const [v] of [...(s.m || []), ...(s.x || [])]) if (typeof v === 'number' && DB.byId.has(v)) ids.add(v);
+      if (ids.size >= 10) decks.push(ids);
+    }
+  }
+  // カードごと・テーマごとの、入っているデッキの数
+  const cardN = new Map(), themeN = new Map(), deckThemes = [];
+  for (const ids of decks) {
+    // そのデッキで使っているテーマ：違うカードが3種類以上入っているテーマだけ（テーマに入っている汎用カード1枚だけで数えないように）
+    const perTheme = new Map();
+    for (const id of ids) {
+      cardN.set(id, (cardN.get(id) || 0) + 1);
+      const card = DB.byId.get(id);
+      for (const t of cardThemes(card)) { if (!perTheme.has(t)) perTheme.set(t, new Set()); perTheme.get(t).add(card.name); }
+    }
+    const th = new Set([...perTheme].filter(([, names]) => names.size >= 3).map(([t]) => t));
+    for (const t of th) themeN.set(t, (themeN.get(t) || 0) + 1);
+    deckThemes.push(th);
+  }
+  Related.co = { decks, deckThemes, cardN, themeN };
+  return Related.co;
+}
+// 選んだカード（同じ名前の別番号も）が入っているデッキで、よく一緒に入っているカード・テーマ。
+// 「そのデッキの中での割合」が高く、全部のデッキでの割合よりずっと高い（汎用カードではない）ものだけ
+function coUseOf(c) {
+  const co = Related.co;
+  if (!co || !co.decks.length) return null;
+  const same = new Set(DB.cards.filter(x => x.name === c.name).map(x => x.id));
+  const mine = cardThemes(c);
+  // 調べるデッキ：テーマのあるカードは、そのテーマを使っているデッキ（カード1枚だけだとデッキが少ないため）。無ければ、このカードが入っているデッキ
+  let idx = [];
+  if (mine.length) co.deckThemes.forEach((th, i) => { if (mine.some(t => th.has(t))) idx.push(i); });
+  if (idx.length < 3) { idx = []; co.decks.forEach((ids, i) => { for (const id of same) if (ids.has(id)) { idx.push(i); break; } }); }
+  if (idx.length < 3) return null;
+  const N = co.decks.length, n = idx.length;
+  const cnt = new Map(), tcnt = new Map();
+  for (const i of idx) {
+    for (const id of co.decks[i]) if (!same.has(id)) cnt.set(id, (cnt.get(id) || 0) + 1);
+    for (const t of co.deckThemes[i]) tcnt.set(t, (tcnt.get(t) || 0) + 1);
+  }
+  const good = (k, total) => k / n >= 0.25 && (k / n) / (total / N) >= 3;
+  const cards = [...cnt].filter(([id, k]) => good(k, co.cardN.get(id))).sort((a, b) => b[1] - a[1]).slice(0, 60).map(([id]) => DB.byId.get(id));
+  // 近いテーマ：このカードが入っているデッキの半分以上に入っていて、全体よりずっと多いもの（多い順に6つまで）
+  const themes = [...tcnt].filter(([t, k]) => !mine.includes(t) && k / n >= 0.5 && (k / n) / (co.themeN.get(t) / N) >= 4).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t);
+  return { cards, themes };
 }
 
 function renderRelated(box) {
@@ -590,7 +658,10 @@ function renderDeck() {
   if (applySort(deck)) Decks.save();   // 選んでいる並び順に合わせる（追加したカードもここで正しい位置に入る）
   renderDeckList();
   $('#deck-name').textContent = deck.name;
-  $('#deck-sum').textContent = `メイン${deck.main.length}枚・EX${deck.extra.length}枚・サイド${deck.side.length}枚`;
+  // マスターデュエルにはサイドデッキが無いので、サイドデッキの欄と「サイドに追加」を出さない
+  const noSide = deckFormat(deck) === 'md';
+  document.body.classList.toggle('no-side', noSide);
+  $('#deck-sum').textContent = `メイン${deck.main.length}枚・EX${deck.extra.length}枚` + (noSide ? '' : `・サイド${deck.side.length}枚`);
   $('#mt-count').textContent = `（${deck.main.length}）`;
 
   // ルールの切り替えボタンと、ルール違反の警告

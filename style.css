@@ -1557,3 +1557,5 @@ body:not([data-view="board"]) :is(.ap-sheet, .ap-peek-back, .ap-actions, .hand-z
 img.img-full-crop { position: absolute; left: -15.6%; top: 0; width: 131.6% !important; height: auto !important; aspect-ratio: auto !important; max-width: none !important; margin-top: -34.4%; object-fit: fill !important; }
 .art-thumb { width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 4px; background: #000; position: relative; }
 .art-thumb img:not(.img-full-crop) { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* マスターデュエルのデッキ：サイドデッキの欄と「サイドに追加」を隠す */
+body.no-side #view-deck .side-sec, body.no-side #view-deck .side-btn { display: none !important; }

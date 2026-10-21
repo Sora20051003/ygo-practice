@@ -1,16 +1,17 @@
 """絵違い（イラスト違い）の対応表 data/alt-arts.js を作り直す（GitHub Actions で毎日実行）。
 
-絵違いの画像番号は2か所から集める。
+絵違いの画像番号は次の3つから集める。
   ・YGOPRODeck の card_images（同じカードの別のイラスト）
   ・EDOPro のカードデータ（data/edo-cards.js）で、元のカードと同じ内容の別番号（alias）。番号が近いものだけ（別名のカードは除く）
-画像があるかを確かめ、YGOPRODeck のイラスト画像（切り抜き済み）が無く、EDOPro の画像（カード全体）だけがあるものは ALT_FULL に入れる
-（アプリはカード全体の画像からイラストの部分だけを切り出して表示する）。どちらにも画像が無いものは載せない。
+  ・上の2つで分かった絵違いの番号の「間」の番号（例：1・3 が分かっていれば 2）。YGOPRODeck に画像だけあることがある
+    （元の番号のすぐ後ろの番号などは、カードではない画像（スタンプなど）のことが多いので試さない）
+画像があるかを確かめ、YGOPRODeck のイラスト画像（切り抜き済み）が無く、EDOPro の画像（カード全体）だけがあるものは
+FULL_OK（目で確かめて問題なかったもの）だけを ALT_FULL に入れる（アプリはカード全体の画像からイラストを切り出す）。
+EDOPro のカード全体の画像は、新しいカードだと「SAMPLE」の入った宣伝用の画像のことが多いため、確かめていないものは使わない。
+BLOCK は、カードの絵ではない画像（「SAMPLE」・ロゴ入り・吹き出しのスタンプ・空の画像など）。
 中身が変わったときだけ書き換える。
 """
 import concurrent.futures
-import datetime
-import os
-import re
 import json
 import pathlib
 import urllib.error
@@ -22,6 +23,24 @@ OUT = ROOT / "data" / "alt-arts.js"
 EDO = ROOT / "data" / "edo-cards.js"
 YGO_ART = "https://images.ygoprodeck.com/images/cards_cropped/{}.jpg"
 IGNIS_FULL = "https://pics.projectignis.org:2096/pics/{}.jpg"
+
+# EDOPro のカード全体の画像から切り出してよいもの（2026/10/21 に目で確かめた。SAMPLE・ロゴ・文字の入っていないもの）
+FULL_OK = {
+    759395, 1861631, 2419597, 3635139, 7894707, 13021683, 17242023, 24203750, 27096834, 27118422, 28331070,
+    29053657, 30275299, 30397787, 30752325, 33396950, 33396951, 35809263, 37744404, 37970942, 38033120,
+    38817296, 39030884, 46986409, 46986410, 46986411, 46986412, 46986413, 50208445, 54577951, 59242459,
+    65302904, 65305469, 65424482, 66247040, 68468461, 71413902, 71564253, 74364661, 74665151, 76504387,
+    76636979, 79791696, 82344138, 87758526, 88570004, 89631133, 89631134, 89631135, 89631136, 89631137,
+    89631138, 91998122,
+}
+# カードの絵ではない画像（SAMPLE・ロゴ入り・吹き出しのスタンプ・漫画のコマ・空の画像など）
+BLOCK = {
+    64866, 1186448, 9603253, 12908095, 13243125, 14965713, 21522603, 24269962, 29479266, 37458565, 40237840,
+    41350418, 44001994, 45627619, 48171152, 48393694, 49415282, 53183601, 53481939, 54603526, 54725178,
+    65541656, 66664204, 67886896, 70405002, 75787709, 89875647, 90091225, 90960359, 91714773, 92058903,
+    92936365, 93871600, 97268404, 2347658, 38033130, 65741789, 74677431, 90448282, 81172177, 20250830,
+    24224831, 30581602, 13048473, 14898067,
+}
 
 
 def exists(url):
@@ -52,9 +71,11 @@ def main():
     ygo_listed = {i for s in alts.values() for i in s}
 
     # EDOPro のデータ：alias が元のカードで、内容（種類・攻守など）が同じ、番号の近いもの
+    edo_ids = set()
     if EDO.exists():
         text = EDO.read_text(encoding="utf-8")
         d = json.loads(text[text.index("{"): text.rindex("}") + 1])["d"]
+        edo_ids = {int(k) for k in d}
         for k, v in d.items():
             if not isinstance(v, list) or not v[0]:
                 continue
@@ -64,42 +85,22 @@ def main():
                 continue
             alts.setdefault(orig, set()).add(int(k))
 
-    # 前回見つけた絵違い（番号を順に試して見つけたもの）は残す
-    old_text = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
-    m = re.search(r"const ALT_ARTS = \{(.*?)\};", old_text)
-    if m:
-        for k, v in re.findall(r"(\d+):\[([\d,]*)\]", m.group(1)):
-            if int(k) in known:
-                alts.setdefault(int(k), set()).update(int(x) for x in v.split(",") if x)
-
-    # どの一覧にも載っていない絵違い（YGOPRODeck に画像だけある）を、カードの番号の次の番号から順に試して探す。
-    #   ・絵違いが分かっているカード：見つかっている一番大きい番号＋2 まで、抜けている番号を全部
-    #   ・ほかのカード：番号＋1・＋2 を、毎日 1/15 ずつ（15日で全部）。FULL=1 のときは全部
-    taken = known | {int(k) for k in (d if EDO.exists() else {})}
-    full_run = os.environ.get("FULL") == "1"
-    day = datetime.date.today().toordinal() % 15
-    probe_ids = {}
-    for orig in known:
-        have = alts.get(orig, set())
-        top = max(have) + 2 if have else orig + 2
-        if not have and not full_run and orig % 15 != day:
-            continue
-        for i in range(orig + 1, min(top, orig + 40) + 1):
-            if i not in taken and i not in have:
-                probe_ids[i] = orig
-
-    def found(i):
-        return i, exists(YGO_ART.format(i))
-
+    # 分かっている絵違いの番号の「間」の番号を試す
+    taken = known | edo_ids
+    gaps = {}
+    for orig, have in alts.items():
+        for i in range(orig + 1, max(have)):
+            if i not in have and i not in taken:
+                gaps[i] = orig
     with concurrent.futures.ThreadPoolExecutor(6) as ex:
-        for i, ok in ex.map(found, sorted(probe_ids)):
+        for i, ok in ex.map(lambda i: (i, exists(YGO_ART.format(i))), sorted(gaps)):
             if ok:
-                alts.setdefault(probe_ids[i], set()).add(i)
-    print(f"番号を試した数 {len(probe_ids)}")
+                alts[gaps[i]].add(i)
+    print(f"間の番号を試した数 {len(gaps)}")
 
     # 画像があるかを確かめる（YGOPRODeck が一覧に載せているものは確かめない）
     check = sorted({i for s in alts.values() for i in s} - ygo_listed)
-    full, missing = set(), set()
+    full, drop = set(), set()
 
     def probe(i):
         if exists(YGO_ART.format(i)):
@@ -110,11 +111,12 @@ def main():
 
     with concurrent.futures.ThreadPoolExecutor(8) as ex:
         for i, kind in ex.map(probe, check):
-            if kind == "full":
+            if kind == "full" and i in FULL_OK:
                 full.add(i)
-            elif kind is None:
-                missing.add(i)
-    alts = {k: sorted(s - missing) for k, s in alts.items()}
+            elif kind != "art":
+                drop.add(i)   # 画像が無い・確かめていないカード全体の画像
+    drop |= BLOCK
+    alts = {k: sorted(i for i in s if i not in drop and i < 100000000) for k, s in alts.items()}
     alts = {k: v for k, v in alts.items() if v}
 
     if len(cards) < 10000 or len(alts) < 100:
@@ -127,11 +129,12 @@ def main():
         f"const ALT_ARTS = {{{body}}};\n"
         f"const ALT_FULL = [{','.join(map(str, sorted(full)))}];\n"
     )
-    if old_text == js:
+    old = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+    if old == js:
         print("変更なし")
         return
     OUT.write_text(js, encoding="utf-8")
-    print(f"更新しました（絵違いのあるカード {len(alts)}枚・カード全体の画像から切り出す {len(full)}枚・画像なしで除外 {len(missing)}枚）")
+    print(f"更新しました（絵違いのあるカード {len(alts)}枚・カード全体の画像から切り出す {len(full)}枚・使わない画像 {len(drop)}枚）")
 
 
 if __name__ == "__main__":
