@@ -79,6 +79,7 @@ function autoActions(inst) {
     // 発動時に強制で行う処理ができないとき（例：ドロール＆ロックバードの適用中のサーチ）は、エンジンが発動できないものとして扱う）
     p.activates.forEach((c, index) => {
       if (!same(c)) return;
+      if (Auto.noEffect && Auto.noEffect.has(index)) return;   // 発動しても何も起きない表側の魔法・罠の効果
       const place = Auto.useless && Auto.useless.has(index);
       out.push({ label: place ? '発動する（表側で置く）' : actLabel(), title: place ? '今は発動しても効果は起きませんが、表側で置いておけます' : descText(c.description), kind: 'y', res: { type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index } });
     });
@@ -1209,12 +1210,20 @@ function runAction(a) {
 // 発動しても何も起きない永続魔法・永続罠を調べる（試し発動して確かめる）
 function findUseless(d) {
   Auto.useless = new Set();
+  Auto.noEffect = new Set();
   const p = d.pending;
   if (!p || p.type !== MSG.SELECT_IDLECMD || p.player !== d.me || !p.activates.length) return;
   let field = null;
   p.activates.forEach((a, i) => {
     const c = DB.byId.get(a.code);
     if (!c) return;
+    // 場に表側で置いてある魔法・罠（フィールド魔法など）の起動効果：エンジンが「発動できる」と言っても、
+    // 試しに発動して何も起きない（サーチ・特殊召喚・選択なども無い）なら、光らせず、ボタンも出さない
+    if (a.location & (LOC.SZONE | LOC.FZONE) && (has(c, T.SPELL) || has(c, T.TRAP))) {
+      field = field || d.query()[d.me];
+      const s = field.s[a.location === LOC.FZONE ? 5 : a.sequence];
+      if (s && s.position & 5) { if (!d.probeActivate(i)) Auto.noEffect.add(i); return; }
+    }
     // フィールド魔法は効果が使えなくても発動できる（いつでも発動してよい）ので調べない
     const lasting = (has(c, T.SPELL) && has(c, T.CONTINUOUS)) || (has(c, T.TRAP) && has(c, T.CONTINUOUS));
     if (!lasting) return;   // 通常・速攻魔法、通常・カウンター罠は、発動できるかどうかをエンジンが効果の条件まで見て決めている

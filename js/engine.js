@@ -389,6 +389,9 @@ class AutoDuel {
       // 発動したあと、そのカードの効果がすぐ使える
       const q = t.pending;
       if (q && q.type === MSG.SELECT_IDLECMD && q.activates.some(a => a.code === code)) return true;
+      // 発動したあと、できることが増えた（「このターン、もう1度召喚できる」など）
+      const n = (x, k) => (x && x[k] ? x[k].length : 0);
+      if (q && q.type === MSG.SELECT_IDLECMD && ['summons', 'special_summons', 'monster_sets', 'spell_sets'].some(k => n(q, k) > n(p, k))) return true;
       return false;
     } catch (e) {
       console.warn('試し発動に失敗', e);
