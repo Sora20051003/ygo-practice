@@ -749,11 +749,39 @@ const SORT_MODES = { theme: 'テーマごと', type: '種類ごと', manual: '�
 const sortMode = () => store.get('ygo.deckSort', 'theme');
 
 // カードのテーマ（カテゴリ番号）。下位12ビットが同じものは同じテーマ（「〇〇・××」のような派生も含める）
-function cardThemes(c) {
-  const e = typeof EDO_CARDS !== 'undefined' && EDO_CARDS.d[c.id];
-  let list = e && e[1] ? e[1] : null;
-  if (!list) { list = []; for (let s = c.setcode || 0; s > 0; s = Math.floor(s / 65536)) list.push(s % 65536); }
+// カードのテーマ（カテゴリ）。カードデータ（OCG のもの）のテーマを使う。
+// EDOPro のデータは、新しいテーマの番号の付け方がちがい、海外のルールで「〜としても扱う」テーマ（例：「CNo.」を「カオス」としても扱う）も
+// 入っているので混ぜない。カードデータにテーマが無いカード（新しいカードなど）だけ、EDOPro のテーマを、こちらの番号に置き換えて使う
+function ownThemes(c) {
+  const list = [];
+  for (let s = c.setcode || 0; s > 0; s = Math.floor(s / 65536)) list.push(s % 65536);
   return [...new Set(list.map(s => s & 0xfff).filter(Boolean))];
+}
+let edoThemeMap = null;
+function edoThemeToOwn() {
+  if (edoThemeMap) return edoThemeMap;
+  // 両方にテーマがあるカードで、EDOPro の番号ごとに、いっしょに付いているこちらの番号を数え、いちばん多いものに置き換える
+  const count = new Map();
+  for (const c of DB.cards) {
+    const e = EDO_CARDS.d[c.id], own = ownThemes(c);
+    if (!e || !e[1] || !own.length) continue;
+    for (const t of new Set(e[1].map(s => s & 0xfff).filter(Boolean))) {
+      if (!count.has(t)) count.set(t, new Map());
+      const m = count.get(t);
+      for (const o of own) m.set(o, (m.get(o) || 0) + 1);
+    }
+  }
+  edoThemeMap = new Map([...count].map(([t, m]) => [t, [...m].sort((a, b) => b[1] - a[1])[0][0]]));
+  return edoThemeMap;
+}
+function cardThemes(c) {
+  const own = ownThemes(c);
+  if (own.length) return own;
+  const e = typeof EDO_CARDS !== 'undefined' && EDO_CARDS.d[c.id];
+  if (!e || !e[1]) return [];
+  const map = edoThemeToOwn();
+  // 置き換え先が無い（カードデータにまだ無い新しいテーマ）は、こちらの番号とぶつからない番号にする
+  return [...new Set(e[1].map(s => s & 0xfff).filter(Boolean).map(t => map.get(t) ?? 0x10000 + t))];
 }
 
 // テーマごと：デッキ全体で多いテーマから順に固め、テーマ内は種類順。2枚以上ないテーマや汎用カードは最後
