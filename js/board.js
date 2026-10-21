@@ -326,6 +326,8 @@ function openCardMenu(uid, x, y) {
     const l = locate(uid);
     if (l && !isMobile()) showBoardDetail(l);
     if (autoActionPopup(uid)) return;
+    // 今できる操作が無いカード：「今できる操作はありません」のメニューは出さず、カードの説明だけを出す（スマホの縦画面は説明の窓）
+    if (l && !autoActions(l.inst).length) { Board.selected = uid; if (isMobile() && !l.inst.tokenCard) showBoardDetail(l); return; }
   }
   Board.selected = uid;
   const loc = locate(uid);
