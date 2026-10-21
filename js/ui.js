@@ -154,32 +154,24 @@ let altFullSet = null;
 const isAltFull = id => { if (!altFullSet) altFullSet = new Set(typeof ALT_FULL !== 'undefined' ? ALT_FULL : []); return altFullSet.has(id); };
 const IGNIS_FULL = id => `https://pics.projectignis.org:2096/pics/${id}.jpg`;
 // その画像番号の読み込み先
-// オーバーフレームの絵違い（カード全体の画像の下の方に SAMPLE・ロゴがあるので、イラストの上の方だけを切り出す）
-let altOverSet = null;
-const isAltOver = id => { if (!altOverSet) altOverSet = new Set(typeof ALT_OVER !== 'undefined' ? ALT_OVER : []); return altOverSet.has(id); };
-// そのうち SAMPLE・ロゴの無い画像（カード全体をそのままカードとして出せる）
-let altOverCleanSet = null;
-const isOverClean = id => { if (!altOverCleanSet) altOverCleanSet = new Set(typeof ALT_OVER_CLEAN !== 'undefined' ? ALT_OVER_CLEAN : []); return altOverCleanSet.has(id); };
-const altSources = (id, kind) => (isAltFull(id) || isAltOver(id) ? [IGNIS_FULL(id)] : IMG_SOURCES[kind](id));
-function artOf(id, kind = 'art') {
+const altSources = (id, kind) => (isAltFull(id) ? [IGNIS_FULL(id)] : IMG_SOURCES[kind](id));
+function artOf(id) {
   const d = artDeck();
   const a = d && d.arts && d.arts[id];
-  if (!a || a === 'over' || !altArtsOf(id).includes(a)) return id;
-  // カード全体を出すところでは、オーバーフレームの絵違いは元の絵にする（SAMPLE などが写るため）
-  return kind !== 'art' && isAltOver(a) && !isOverClean(a) ? id : a;
+  return a && altArtsOf(id).includes(a) ? a : id;
 }
 
 // 画像を読み込み、すべて失敗したら onFail を呼ぶ（絵違いを選んでいれば、その絵。読めなければ元の絵）
 function cardImg(id, kind, onFail, cls, raw = false) {
-  const art = raw ? id : artOf(id, kind);   // raw：デッキで選んだ絵違いに置き換えず、その番号の絵を出す
+  const art = raw ? id : artOf(id);   // raw：デッキで選んだ絵違いに置き換えず、その番号の絵を出す
   const own = altSources(art, kind);
   const sources = art !== id ? [...own, ...IMG_SOURCES[kind](id)] : own;
   // カード全体の画像からイラストを切り出す絵違い（読めずに元の絵に戻ったら切り出しをやめる）
-  const crop = kind === 'art' && isAltFull(art), over = kind === 'art' && isAltOver(art);
+  const crop = kind === 'art' && isAltFull(art);
   let n = 0;
-  const img = el('img', { class: (cls || '') + (crop || over ? ' img-full-crop' : '') + (over ? ' img-over' : '') + (over && typeof ALT_OVER_TIGHT !== 'undefined' && ALT_OVER_TIGHT.includes(art) ? ' img-over-tight' : ''), src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
+  const img = el('img', { class: (cls || '') + (crop ? ' img-full-crop' : ''), src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
   img.addEventListener('error', () => {
-    if (++n < sources.length) { if (n >= own.length) img.classList.remove('img-full-crop', 'img-over', 'img-over-tight'); img.src = sources[n]; return; }
+    if (++n < sources.length) { if (n >= own.length) img.classList.remove('img-full-crop'); img.src = sources[n]; return; }
     missingImages.add(id + kind);
     onFail && onFail(img);
   });
@@ -235,15 +227,6 @@ const JP_ARROWS = { 0x40: '◤', 0x80: '▲', 0x100: '◥', 0x08: '◀', 0x20: '
 // 日本版カード画像（tools/download-jp-cards.bat で pics/jp に保存）があればそれを、無ければアプリで描いたカードを出す
 const missingJp = new Set();
 function jpPhotoOrDrawn(c, big) {
-  // オーバーフレームの絵違い（SAMPLE などの無い画像）を選んでいれば、その画像をそのままカードとして出す（読めなければアプリで描く）
-  const over = c && c.id && cardStyle !== 'text' ? artOf(c.id) : null;
-  if (over && over !== c.id && isOverClean(over)) {
-    const node = el('div', { class: 'cardface photo jpphoto over-photo ' + frameClass(c), title: c.name });
-    const img = el('img', { src: IGNIS_FULL(over), loading: 'lazy', alt: c.name, draggable: 'false', referrerpolicy: 'no-referrer' });
-    img.addEventListener('error', () => node.replaceWith(jpCard(c, big)));
-    node.append(img);
-    return node;
-  }
   // デッキ画像から切り抜いた画像はそのまま出さず、アプリのカード（名前・効果文などをアプリで描いたもの）にする。
   // 切り抜きは、イラストが取れないカードのイラストとしてだけ使う（jpCard）
   if (!LOCAL_FILES || !c.id || missingJp.has(c.id)) return jpCard(c, big);
