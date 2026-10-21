@@ -1,2 +1,2 @@
 // アプリの版番号。公開するたびに tools/publish.ps1 が書き換える（version.json と同じ値）
-const APP_VERSION = '20261021-120149';
+const APP_VERSION = '20261021-120440';

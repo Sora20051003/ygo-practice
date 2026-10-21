@@ -1544,3 +1544,7 @@ body.land #view-board #board-detail, body.land #view-board #board-detail.show { 
 .hand-zoom { position: fixed; z-index: 59; pointer-events: none; margin: 0; transform: none; box-shadow: 0 8px 24px rgba(0,0,0,.6), 0 0 0 2px var(--accent); border-radius: 6px; }
 /* ポーズ中はカードの説明を消す */
 body.paused #land-left #board-detail { visibility: hidden; }
+/* ポーズ画面は、枠（高さの上限・スクロール）は拡大せず、中身だけ拡大する（特大でも画面からはみ出さずスクロールできる） */
+.pause-box { zoom: 1; }
+.pause-box > * { zoom: var(--fs, 1); }
+.pause-box > * .log { zoom: 1; }
