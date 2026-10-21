@@ -1063,7 +1063,9 @@ function renderDuelLobby() {
             // レギュレーションに合っていないデッキで準備OKにするときは確かめる
             const p = !amReady && deck ? deckCheckForRoom(deck, r) : null;
             if (p && !p.loading && (p.notAllowed.length || p.over.length) && !confirm('このデッキは選んだレギュレーションに合っていません。このまま準備OKにしますか？')) return;
-            Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra, errata: deck.errata || {} } : null });
+            const send = () => Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra, errata: deck.errata || {} } : null });
+            // 準備OKにするとき、エラッタのあるカードの状態を確認する（部屋のエラッタ設定に、デッキのカードごとの設定を重ねたもの）
+            if (!amReady && deck) confirmErrataGo(deck, send, r && r.errata); else send();
           },
         }),
         el('p', { class: 'muted small-note', text: '2人とも「準備OK」になるとじゃんけんをして、勝った人が先攻か後攻かを選びます。' })),

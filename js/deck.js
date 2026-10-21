@@ -194,24 +194,25 @@ function showDeckCard(c) {
 // エラッタ（効果の変更）があったカード：このデッキで、エラッタ前・エラッタ後のどちらの効果を使うか（deck.errata = { カード: 'pre'／'post' }）
 // 何も選んでいなければ、一人回しの設定（ふだんはエラッタ後）に従う
 const deckErrata = (deck, id) => (deck && deck.errata && deck.errata[id]) || null;
-// デッキ作成から一人回し・対戦へ移るとき、エラッタのあったカードが入っていたら、どちらの効果になっているか確認する
-function confirmErrataGo(deck, go) {
+// 一人回し・対戦へ移るとき（画面の切り替え・一人回しの開始・対戦の準備OK）、エラッタのあったカードが入っていたら、
+// どちらの効果になっているかを出して、このまま進んでよいか聞く。同じデッキ・同じ状態で一度「このまま進む」を選んだら、もう聞かない
+let errataOkKey = null;
+function confirmErrataGo(deck, go, mode = typeof errataMode === 'function' ? errataMode() : 'post') {
   const ids = deck && typeof hasErrata === 'function' ? [...new Set([...(deck.main || []), ...(deck.extra || [])])].filter(id => hasErrata(id)) : [];
   if (!ids.length) { go(); return; }
-  const mode = typeof errataMode === 'function' ? errataMode() : 'post';
-  const st = id => deckErrata(deck, id) || mode;
+  const st = id => deckErrata(deck, id) || (mode === 'pre' ? 'pre' : 'post');
   const nm = id => { const c = DB.byId.get(id); return c ? c.name : String(id); };
   const pre = ids.filter(id => st(id) === 'pre'), post = ids.filter(id => st(id) !== 'pre');
-  const line = !post.length ? 'エラッタされているカードが含まれています。エラッタ前の状態になっています'
-    : !pre.length ? 'エラッタされているカードが含まれています。エラッタ後の状態になっています'
-    : 'エラッタされているカードが含まれています。カードによってエラッタ前・エラッタ後の状態になっています';
-  const list = (label, a) => a.length ? el('div', null, el('b', { text: label }), el('ul', null, a.map(id => el('li', { text: nm(id) })))) : null;
-  const body = el('div', { class: 'stack' }, el('p', { text: line }),
-    list('エラッタ前の状態', pre), list('エラッタ後の状態', post),
-    el('p', { class: 'muted', text: '切り替えは、デッキ作成でカードを選んだときの説明から行えます。' }));
+  const key = deck.id + '|' + pre.join(',') + '|' + post.join(',');
+  if (key === errataOkKey) { go(); return; }
+  const list = a => el('ul', null, a.map(id => el('li', { text: nm(id) })));
+  const body = el('div', { class: 'stack' },
+    pre.length ? el('div', null, el('p', { text: 'エラッタされているカードが含まれています　エラッタ前の状態になっています' }), list(pre)) : null,
+    post.length ? el('div', null, el('p', { text: 'エラッタされているカードが含まれています　エラッタ後の状態になっています' }), list(post)) : null,
+    el('p', { class: 'muted', text: 'このまま進みますか？（切り替えは、デッキ作成でカードを選んだときの説明から行えます）' }));
   showModal({ title: 'エラッタの確認', body, buttons: [
-    { label: 'このまま進む', primary: true, onClick: () => { go(); } },
-    { label: 'デッキ作成に戻る', onClick: () => {} },
+    { label: 'このまま進む', primary: true, onClick: () => { errataOkKey = key; go(); } },
+    { label: 'やめる', onClick: () => {} },
   ] });
 }
 function errataChoice(deck, c, redraw) {

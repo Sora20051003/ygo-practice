@@ -488,7 +488,7 @@ function boardDeck() {
 
 function startGame(handIds, checked) {
   const deck0 = boardDeck();
-  if (!checked && deck0 && deck0.main.length) { confirmDeckRules(deck0, () => startGame(handIds, true)); return; }   // デッキの形式（OCG／MD）のルールに合っているか確認
+  if (!checked && deck0 && deck0.main.length) { confirmDeckRules(deck0, () => confirmErrataGo(deck0, () => startGame(handIds, true))); return; }   // デッキの形式（OCG／MD）のルール・エラッタのあるカードを確認
   if (autoActive()) { autoStart(handIds); return; }
   const deck = boardDeck();
   if (!deck || !deck.main.length) { toast('メインデッキが空です。先にデッキを作ってください'); return; }
