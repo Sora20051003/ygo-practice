@@ -335,9 +335,11 @@ function setupSearch() {
   hide.addEventListener('change', () => { store.set('ygo.hideUnrel', hide.checked); run(); });
   // 絵違いがあるカードだけ
   $('#f-alt').addEventListener('change', run);
+  $('#f-over').addEventListener('change', run);
   // 検索の条件を全部消す
   $('#f-clear').addEventListener('click', () => {
     $('#f-alt').checked = false;
+    $('#f-over').checked = false;
     $('#q').value = '';
     $('#qt').value = '';
     $('#f-kind').value = '';
@@ -432,6 +434,7 @@ function renderResults() {
   // 選んだレギュレーションの時点で未発売のカードは出さない（設定でオフにできる）
   if (hideUnreleased(ctx)) res = res.filter(c => !isUnreleased(c, ctx));
   if ($('#f-alt').checked) res = res.filter(c => altArtsOf(c.id).length);
+  if ($('#f-over').checked) res = res.filter(c => altArtsOf(c.id).some(isAltOver));
   $('#result-count').textContent = res.length > MAX_RESULTS
     ? `${res.length}件（上位${MAX_RESULTS}件を表示。条件をしぼってください）`
     : `${res.length}件`;
