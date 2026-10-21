@@ -120,21 +120,27 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') hideMenu(); 
 //          image = カード画像（英語版） / art = イラスト＋日本語名 / text = 文字のみ
 const CARD_STYLES = { jp: '日本語版カード', image: 'カード画像（英語版）', art: 'イラスト＋日本語名', text: '文字のみ' };
 let cardStyle = store.get('ygo.cardStyle3', 'jp');
-// 画像の番号：発売前の仮の番号のままのカードなどは、正式な番号の画像を使う（IMG_IDS：data/alt-arts.js）
+// 画像の番号：発売前の仮の番号のままのカードなどは、正式な番号の画像も試す（IMG_IDS：data/alt-arts.js。まずそのカードの番号、無ければ正式な番号）
 const imgIdOf = id => (typeof IMG_IDS !== 'undefined' && IMG_IDS[id]) || id;
 const IMG_URL = {
-  art: id => `https://images.ygoprodeck.com/images/cards_cropped/${imgIdOf(id)}.jpg`,
-  small: id => `https://images.ygoprodeck.com/images/cards_small/${imgIdOf(id)}.jpg`,
-  full: id => `https://images.ygoprodeck.com/images/cards/${imgIdOf(id)}.jpg`,
+  art: id => `https://images.ygoprodeck.com/images/cards_cropped/${id}.jpg`,
+  small: id => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`,
+  full: id => `https://images.ygoprodeck.com/images/cards/${id}.jpg`,
+};
+// 発売前の仮の番号（100000000 以上）は、画像のサイトでは別のカードに使われていたことがあるので、正式な番号の画像だけを使う
+const webSources = (kind, id) => {
+  const real = imgIdOf(id);
+  if (real === id) return [IMG_URL[kind](id)];
+  return id >= 100000000 ? [IMG_URL[kind](real)] : [IMG_URL[kind](id), IMG_URL[kind](real)];
 };
 // 画像が無いと分かったカード（新しい日本先行カードなど）は、以後は文字で表示する
 const missingImages = new Set();
 
 // 画像の読み込み先の順番。パソコンに保存した画像（tools/download-images.bat で取得）を優先し、無ければネットから読む
 const IMG_SOURCES = {
-  art: id => LOCAL_FILES ? [`pics/art/${id}.jpg`, IMG_URL.art(id)] : [IMG_URL.art(id)],
-  small: id => [IMG_URL.small(id)],
-  full: id => [IMG_URL.full(id)],
+  art: id => LOCAL_FILES ? [`pics/art/${id}.jpg`, ...webSources('art', id)] : webSources('art', id),
+  small: id => webSources('small', id),
+  full: id => webSources('full', id),
 };
 
 // ---------- 絵違い ----------
@@ -167,13 +173,15 @@ function artOf(id) {
 function cardImg(id, kind, onFail, cls, raw = false) {
   const art = raw ? id : artOf(id);   // raw：デッキで選んだ絵違いに置き換えず、その番号の絵を出す
   const own = altSources(art, kind);
-  const sources = art !== id ? [...own, ...IMG_SOURCES[kind](id)] : own;
-  // カード全体の画像からイラストを切り出す絵違い（読めずに元の絵に戻ったら切り出しをやめる）
-  const crop = kind === 'art' && isAltFull(art);
+  // イラストの画像が無いカード（新しいカードなど）は、最後にカード全体の画像からイラストの部分を切り出して使う
+  const fullCrop = kind === 'art' ? webSources('full', id) : [];
+  const sources = [...own, ...(art !== id ? IMG_SOURCES[kind](id) : []), ...fullCrop];
+  // カード全体の画像からイラストを切り出す（EDOPro の画像の絵違い・上のカード全体の画像）
+  const cropAt = i => (i < own.length ? kind === 'art' && isAltFull(art) : i >= sources.length - fullCrop.length);
   let n = 0;
-  const img = el('img', { class: (cls || '') + (crop ? ' img-full-crop' : ''), src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
+  const img = el('img', { class: (cls || '') + (cropAt(0) ? ' img-full-crop' : ''), src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
   img.addEventListener('error', () => {
-    if (++n < sources.length) { if (n >= own.length) img.classList.remove('img-full-crop'); img.src = sources[n]; return; }
+    if (++n < sources.length) { img.classList.toggle('img-full-crop', cropAt(n)); img.src = sources[n]; return; }
     missingImages.add(id + kind);
     onFail && onFail(img);
   });
