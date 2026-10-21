@@ -177,9 +177,9 @@ function cardImg(id, kind, onFail, cls) {
   // カード全体の画像からイラストを切り出す絵違い（読めずに元の絵に戻ったら切り出しをやめる）
   const crop = kind === 'art' && isAltFull(art), over = kind === 'art' && isAltOver(art);
   let n = 0;
-  const img = el('img', { class: (cls || '') + (crop || over ? ' img-full-crop' : '') + (over ? ' img-over' : ''), src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
+  const img = el('img', { class: (cls || '') + (crop || over ? ' img-full-crop' : '') + (over ? ' img-over' : '') + (over && typeof ALT_OVER_TIGHT !== 'undefined' && ALT_OVER_TIGHT.includes(art) ? ' img-over-tight' : ''), src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
   img.addEventListener('error', () => {
-    if (++n < sources.length) { if (n >= own.length) img.classList.remove('img-full-crop', 'img-over'); img.src = sources[n]; return; }
+    if (++n < sources.length) { if (n >= own.length) img.classList.remove('img-full-crop', 'img-over', 'img-over-tight'); img.src = sources[n]; return; }
     missingImages.add(id + kind);
     onFail && onFail(img);
   });
