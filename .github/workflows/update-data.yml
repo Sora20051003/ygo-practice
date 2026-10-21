@@ -54,7 +54,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/release-dates.js data/edo-cards.js
+          git add data/   # 作り直したデータ（発売日・カードデータ・絵違い・サンプルデッキなど）を全部
           if [ -f data/edo-strs.js ]; then git add data/edo-strs.js; fi
           if [ -f data/md-samples.js ]; then git add data/md-samples.js; fi
           git add data/ocg-samples.js
