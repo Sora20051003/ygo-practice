@@ -644,7 +644,7 @@ function slotEl(zone, idx) {
   const slot = el('div', { class: `zone slot z-${zone}`, dataset: { zone, idx } }, el('span', { class: 'zone-label', text: label }));
   if (inst) slot.append(cardEl(inst, zone));
   if (inst && (zone === 'm' || zone === 'emz')) { const b = statBadge(inst.tokenCard || cardOf(inst), inst); if (b) slot.append(b); }
-  const pickable = Board.pick && Board.pick.slots.some(s => s.zone === zone && s.idx === idx);
+  const pickable = Board.pick && Board.pick.slots.some(s => !s.opp && s.zone === zone && s.idx === idx);
   if (pickable) {
     slot.classList.add('pickable');
     slot.addEventListener('click', e => { e.stopPropagation(); Board.pick.done({ zone, idx }); }, true);

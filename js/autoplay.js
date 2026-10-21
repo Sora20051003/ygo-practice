@@ -306,6 +306,7 @@ function toolIndex(n) {
 function autoTool(n) {
   const d = Auto.duel;
   if (!d) { toast('先に「シャッフルして開始」で始めてください'); return; }
+  if (n === 5 && Auto.net) { toast('対戦中は使えません'); return; }
   if (!d.tools) { toast('この盤面は前の版で始めたため使えません。「シャッフルして開始」で始め直すと使えます'); return; }
   const i = toolIndex(n);
   if (i < 0) { toast(d.pending && d.pending.type === MSG.SELECT_IDLECMD ? `今は「${TOOL_LABELS[n]}」ができません` : '自分のメインフェイズで、選択中でないときに使えます'); return; }
@@ -407,7 +408,7 @@ async function autoResume() {
   let saved = null;
   try { saved = JSON.parse(JSON.stringify(store.get('ygo.autoBoard', null)), bigReviver); } catch { saved = null; }
   if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
-  try { await autoPrepare(saved, saved.errata); if (saved.opp) await autoPrepare(saved.opp, saved.errata); } catch { return; }
+  try { await autoPrepare(saved, saved.errata); if (saved.opp) await autoPrepare(saved.opp, saved.errata); const placed = saved.items.filter(x => x.res && x.res.type === RES.ANNOUNCE_CARD).map(x => x.res.card); if (placed.length) await loadCardScripts(placed, null, saved.errata); } catch { return; }
   const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: false, firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', errata: saved.errata });
   Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;
   try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
@@ -1086,15 +1087,24 @@ function openPrompt() {
       break;
     }
     case MSG.ANNOUNCE_CARD: {
+      const forTool = d.chain.length && d.chain[d.chain.length - 1].code === TOOL_CODE;
       const input = el('input', { type: 'text', class: 'full', placeholder: 'カード名で検索' });
       const list = el('div', { class: 'ap-grid' });
       const draw = () => {
         list.innerHTML = '';
         const hits = searchCards({ q: input.value.trim() }).filter(c => Engine.ocg.cardMatchesOpcode(engineCardData(c.id), p.opcodes)).slice(0, 40);
-        for (const c of hits) { const n = promptCard({ code: c.id, controller: me, location: 0, sequence: 0 }); n.onclick = () => answer({ type: RES.ANNOUNCE_CARD, card: c.id }); list.append(n); }
+        for (const c of hits) {
+          const n = promptCard({ code: c.id, controller: me, location: 0, sequence: 0 });
+          // 練習ツール（相手の場にカードを置く）：置くカードの効果（スクリプト）を先に読み込んでから答える
+          n.onclick = async () => {
+            if (forTool) { showLoading('カードの効果を読み込み中…'); try { await loadCardScripts([c.id], null, d.errata); } finally { showLoading(''); } }
+            answer({ type: RES.ANNOUNCE_CARD, card: c.id });
+          };
+          list.append(n);
+        }
       };
       input.addEventListener('input', draw);
-      promptModal(el('div', { class: 'stack' }, input, list));
+      promptModal(el('div', { class: 'stack' }, forTool ? el('p', { class: 'muted', text: '相手の場に置くカードを選んでください（モンスターは相手の場に特殊召喚、魔法・罠は相手の魔法・罠ゾーンに置きます）' }) : null, input, list), [], forTool ? '相手の場に置くカード' : undefined);
       draw();
       setTimeout(() => input.focus(), 0);
       break;
@@ -1121,7 +1131,12 @@ function choosePlace(p, me) {
   const resType = p.type === MSG.SELECT_PLACE ? RES.SELECT_PLACE : RES.SELECT_DISFIELD;
   if (p.count === 1 && places.length === 1) { autoRespond({ type: resType, places }); return; }
   const toSlot = pl => {
-    if (pl.player !== me) return null;
+    // 相手の場（練習ツールで相手の場にカードを置くときなど）：相手のゾーンを押して選ぶ
+    if (pl.player !== me) {
+      if (pl.location === LOC.MZONE) return pl.sequence < 5 ? { opp: true, zone: 'm', idx: pl.sequence } : (pl.sequence < 7 ? { opp: true, zone: 'emz', idx: pl.sequence - 5 } : null);
+      if (pl.location === LOC.SZONE) return pl.sequence < 5 ? { opp: true, zone: 's', idx: pl.sequence } : (pl.sequence === 5 ? { opp: true, zone: 'f', idx: 0 } : null);
+      return null;
+    }
     if (pl.location === LOC.MZONE) return pl.sequence < 5 ? { zone: 'm', idx: pl.sequence } : (pl.sequence < 7 ? { zone: 'emz', idx: pl.sequence - 5 } : null);
     if (pl.location === LOC.SZONE) return pl.sequence < 5 ? { zone: 's', idx: pl.sequence } : (pl.sequence === 5 ? { zone: 'f', idx: 0 } : pl.sequence < 8 ? { zone: 'p', idx: pl.sequence - 6 } : null);
     return null;
@@ -1137,7 +1152,7 @@ function choosePlace(p, me) {
     const slots = rest.map(toSlot);
     if (slots.every(Boolean)) {
       closePromptModal();
-      Board.pick = { uid: null, slots, label: promptTitle(p) + '（光っているゾーンをクリック）', done: s => finish(rest[slots.findIndex(x => x.zone === s.zone && x.idx === s.idx)]) };
+      Board.pick = { uid: null, slots, label: promptTitle(p) + '（光っているゾーンをクリック）', done: s => finish(rest[slots.findIndex(x => x.zone === s.zone && x.idx === s.idx && !!x.opp === !!s.opp)]) };
       renderBoard();
       return;
     }

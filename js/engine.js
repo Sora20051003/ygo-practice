@@ -206,7 +206,7 @@ function noteLinkRemoved(extra, rule) {
 }
 
 const TOOL_CODE = 999990001;
-const TOOL_LABELS = ['1枚ドロー', 'デッキから手札に加える', 'デッキから墓地へ送る', '手札をデッキに戻す', 'デッキをシャッフル'];
+const TOOL_LABELS = ['1枚ドロー', 'デッキから手札に加える', 'デッキから墓地へ送る', '手札をデッキに戻す', 'デッキをシャッフル', '相手の場にカードを置く', '表側で置く', '裏側でセットする'];
 const TOOL_LUA = `local s,id=GetID()
 function s.initial_effect(c)
 	s.add(c,0,s.drtg,s.drop)
@@ -214,6 +214,7 @@ function s.initial_effect(c)
 	s.add(c,2,s.decktg,s.tgop)
 	s.add(c,3,s.handtg,s.tdop)
 	s.add(c,4,s.decktg,s.shop)
+	s.add(c,5,s.opptg,s.oppop)
 end
 function s.add(c,n,tg,op)
 	local e=Effect.CreateEffect(c)
@@ -245,6 +246,35 @@ function s.tdop(e,tp)
 	if #g>0 then Duel.SendtoDeck(g,nil,SEQ_DECKSHUFFLE,REASON_RULE) end
 end
 function s.shop(e,tp) Duel.ShuffleDeck(tp) end
+-- 相手の場に好きなカードを置く（カード名を宣言 → モンスターは相手の場に特殊召喚・魔法罠は相手の魔法罠ゾーンに置く。置く場所は自分で選ぶ）
+function s.opptg(e,tp,eg,ep,ev,re,r,rp,chk) if chk==0 then return Duel.GetLocationCount(1-tp,LOCATION_MZONE,tp)>0 or Duel.GetLocationCount(1-tp,LOCATION_SZONE,tp)>0 end end
+function s.oppop(e,tp)
+	local code=Duel.AnnounceCard(tp)
+	local tc=Duel.CreateToken(1-tp,code)
+	if not tc then return end
+	if tc:IsType(TYPE_MONSTER) then
+		if Duel.GetLocationCount(1-tp,LOCATION_MZONE,tp)<=0 then return end
+		Duel.SpecialSummon(tc,0,tp,1-tp,true,true,POS_FACEUP_ATTACK+POS_FACEUP_DEFENSE+POS_FACEDOWN_DEFENSE)
+	elseif tc:IsType(TYPE_FIELD) then
+		Duel.MoveToField(tc,tp,1-tp,LOCATION_FZONE,POS_FACEUP,true)
+	else
+		if Duel.GetLocationCount(1-tp,LOCATION_SZONE,tp)<=0 then return end
+		local op=Duel.SelectOption(tp,aux.Stringid(id,6),aux.Stringid(id,7))
+		Duel.MoveToField(tc,tp,1-tp,LOCATION_SZONE,op==0 and POS_FACEUP or POS_FACEDOWN,true)
+		if op==1 then
+			-- 置いたターンでも発動できるようにする（相手が伏せていた想定）
+			local e1=Effect.CreateEffect(tc)
+			e1:SetType(EFFECT_TYPE_SINGLE)
+			e1:SetCode(EFFECT_TRAP_ACT_IN_SET_TURN)
+			e1:SetProperty(EFFECT_FLAG_SET_AVAILABLE)
+			e1:SetReset(RESET_EVENT+RESETS_STANDARD)
+			tc:RegisterEffect(e1)
+			local e2=e1:Clone()
+			e2:SetCode(EFFECT_QP_ACT_IN_SET_TURN)
+			tc:RegisterEffect(e2)
+		end
+	end
+end
 `;
 const isToolCode = code => code === TOOL_CODE;
 const cardName = code => { if (code === TOOL_CODE) return '練習ツール'; const c = DB.byId.get(code); return c ? c.name : `カード${code}`; };
@@ -547,7 +577,7 @@ class AutoDuel {
         this.justMoved.add(`${m.to.controller}-${m.to.location}-c${code}`);   // 手札などは位置の番号がずれるので、カードの種類でも覚える
         this.events.push({ t: 'move', code, from: { con: m.from.controller, loc: m.from.location, seq: m.from.sequence }, to: { con: m.to.controller, loc: m.to.location, seq: m.to.sequence }, faceUp: !!(m.to.position & 5) });
         const secret = m.to.controller !== this.me && !(m.to.position & 5) && (m.to.location & (LOC.ONFIELD_ALL | LOC.HAND | LOC.DECK));   // 相手が裏向きにしたカードは名前を伏せる
-        this.addLog(`${secret ? 'カード' : cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}`);
+        this.addLog(m.from.location ? `${secret ? 'カード' : cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}` : `${secret ? 'カード' : cardName(code)}を${placeText(m.to.controller, m.to.location, m.to.sequence)}に置いた（練習の操作）`);
         break;
       }
       case MSG.DAMAGE: this.addLog(`${m.player === this.me ? '自分' : '相手'}に ${m.amount} ダメージ`); this.events.push({ t: 'damage', player: m.player, amount: m.amount }); break;

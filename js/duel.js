@@ -906,9 +906,17 @@ function oppCardEl(p) {
   return node;
 }
 
+// 相手のゾーンを選ぶとき（練習ツールで相手の場にカードを置くなど）：光らせて、押したら選ぶ
+function markOppPick(slot, zone, idx) {
+  const pick = Board.pick;
+  if (!pick || !pick.slots.some(s => s.opp && s.zone === zone && s.idx === idx)) return;
+  slot.classList.add('pickable');
+  slot.addEventListener('click', e => { e.stopPropagation(); Board.pick.done({ opp: true, zone, idx }); }, true);
+}
 function oppSlotEl(zone, idx) {
   const o = curOpp() || emptyPub;
   const slot = el('div', { class: `zone slot opp-zone z-${zone}`, dataset: { ozone: zone, oidx: idx } });
+  markOppPick(slot, zone, idx);
   if (zone === 'p') slot.append(el('span', { class: 'zone-label', text: '相手のPゾーン' }));
   const p = o[zone] && o[zone][idx];
   if (p) slot.append(oppCardEl(p));
@@ -976,7 +984,11 @@ function renderOppRows(field) {
 // 共有のEXモンスターゾーン：自分のカードがあれば自分、無ければ相手（相手の 1-i 番）
 function emzSharedEl(i) {
   const op = curOpp();
-  if (Board.S.emz[i] || !(op && op.emz && op.emz[1 - i])) return slotEl('emz', i);
+  if (Board.S.emz[i] || !(op && op.emz && op.emz[1 - i])) {
+    const s = slotEl('emz', i);
+    if (!Board.S.emz[i]) markOppPick(s, 'emz', 1 - i);   // 相手の場に置くとき：空いている EXモンスターゾーンは相手の分としても選べる
+    return s;
+  }
   const slot = el('div', { class: 'zone slot opp-zone z-emz' }, el('span', { class: 'zone-label', text: '相手のEXモンスター' }));
   slot.append(oppCardEl(op.emz[1 - i]));
   { const b = oppStatBadge(op.emz[1 - i]); if (b) slot.append(b); }
