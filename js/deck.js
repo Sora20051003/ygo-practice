@@ -459,6 +459,7 @@ function renderResults() {
   });
   // 選んだレギュレーションの時点で未発売のカードは出さない（設定でオフにできる）
   if (hideUnreleased(ctx)) res = res.filter(c => !isUnreleased(c, ctx));
+  if (hidePreCards()) res = res.filter(c => !c.pre);   // 発売前（情報が出ているだけ）のカードも出さない
   if ($('#f-alt').checked) res = res.filter(c => altArtsOf(c.id).length);
   $('#result-count').textContent = res.length > MAX_RESULTS
     ? `${res.length}件（上位${MAX_RESULTS}件を表示。条件をしぼってください）`
@@ -479,6 +480,8 @@ function updateStatSummary() {
   $('#f-stats').classList.toggle('active', !!(a || d));
 }
 const hideUnreleased = ctx => !!ctx.date && ($('#f-hide-unrel') || {}).checked !== false;
+// 「レギュレーションの時点で未発売のカードを出さない」にチェックがあれば、発売前のカード（情報が出ているだけで、まだどこでも発売されていない）も出さない
+const hidePreCards = () => ($('#f-hide-unrel') || {}).checked !== false;
 
 // 検索結果の1行
 function resultRow(c, ctx, text) {
@@ -530,7 +533,7 @@ async function showRelated(c) {
 function relatedGroups(c, text) {
   const fmt = curFormat();
   const ctx = regContext(Decks.current()), hide = hideUnreleased(ctx);
-  const usable = x => x.id !== c.id && !isToken(x) && cardAllowed(x, fmt) && !(hide && isUnreleased(x, ctx));
+  const usable = x => x.id !== c.id && !isToken(x) && cardAllowed(x, fmt) && !(hide && isUnreleased(x, ctx)) && !(x.pre && hidePreCards());
   const seen = new Set([c.id]);
   const groups = [];
   const add = (title, list, keep) => {   // keep：並び順をそのままにする
