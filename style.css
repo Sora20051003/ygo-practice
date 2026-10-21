@@ -1519,3 +1519,8 @@ body.land #view-board .hand .bcard, body.land.tilt #view-board .hand .bcard { wi
 .art-opt img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; background: #000; }
 .art-opt small { font-size: 10px; }
 .art-opt.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* 横画面の並び：選択の帯は左の欄（カードの詳細）の右から（位置は JS の fitSheet） */
+body.land .ap-sheet { left: var(--sheet-left, 6px) !important; }
+/* 大きい画面（パソコン）では、左の欄の文字を画面の高さに合わせて少し大きく */
+body.land #view-board #board-detail { font-size: clamp(12px, calc(var(--lh) / 62), 16px); }
+body.land #view-board #board-detail .card-text, body.land #view-board #board-detail > .ja-text .card-text { font-size: clamp(12.5px, calc(var(--lh) / 58), 17px); }

@@ -1074,8 +1074,9 @@ function timeUp() {
 const isPhone = () => matchMedia('(pointer: coarse)').matches && Math.min(innerWidth, innerHeight) <= 520;
 function updateLandscape() {
   const b = document.body;
-  const land = b.dataset.view === 'board' && isPhone();
-  const rotated = land && innerHeight > innerWidth;
+  // パソコン（横長の画面）でもスマホの横画面と同じ並び（スクロールせずに盤面全体が見える）。縦長の画面のパソコン・タブレットは今までの並び
+  const land = b.dataset.view === 'board' && (isPhone() || innerWidth > innerHeight);
+  const rotated = land && isPhone() && innerHeight > innerWidth;
   b.classList.toggle('land', land);
   b.classList.toggle('rotated', rotated);
   b.classList.toggle('tilt', land && store.get('ygo.tilt', true));
@@ -1111,7 +1112,11 @@ function updateLandscape() {
   if (center && opp && title && det && handWrap && layout) {
     let left = $('#land-left');
     if (land && opp.parentNode !== left) {
-      if (!left) left = el('div', { class: 'land-left', id: 'land-left' });
+      if (!left) {
+        left = el('div', { class: 'land-left', id: 'land-left' });
+        // 左の欄の幅が変わったら、選択の帯の位置も合わせ直す
+        if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { if (typeof fitSheet === 'function') fitSheet(); }).observe(left);
+      }
       center.prepend(left);
       left.append(opp, title, det);
     }

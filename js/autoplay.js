@@ -1269,6 +1269,13 @@ function decorateUsed(box, c, text) {
 // 選択の帯が右の詳細欄（カードの説明）と重ならないように、詳細欄の左までにおさめる
 function fitSheet(sheet = $('#ap-sheet')) {
   if (!sheet) return;
+  // 横画面の並び：左の欄（カードの詳細）にかからないよう、選択の帯は左の欄の右から
+  if (typeof isLand === 'function' && isLand()) {
+    const left = $('#land-left');
+    const r = left && left.offsetParent ? localRect(left.getBoundingClientRect()) : null;
+    sheet.style.setProperty('--sheet-left', r ? Math.round(r.right + 6) + 'px' : '6px');
+    return;
+  }
   const det = $('#board-detail');
   const shown = det && det.offsetParent && getComputedStyle(det).display !== 'none';
   const r = shown ? localRect(det.getBoundingClientRect()) : null;
@@ -1279,7 +1286,7 @@ function fitSheet(sheet = $('#ap-sheet')) {
     Object.assign(sheet.style, { left: '', right: '', width: '', transform: '' });
   }
 }
-addEventListener('resize', () => fitSheet());
+addEventListener('resize', () => requestAnimationFrame(() => fitSheet()));
 
 
 // ---------- リンク素材を選ぶとき（マスターデュエル風）----------
