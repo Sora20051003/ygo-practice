@@ -33,12 +33,17 @@ FULL_OK = {
     76636979, 79791696, 82344138, 87758526, 88570004, 89631133, 89631134, 89631135, 89631136, 89631137,
     89631138, 91998122,
 }
+# オーバーフレーム（イラストがカード全体に広がっている）の絵違い。EDOPro の画像には「SAMPLE」やロゴが下の方に入っているので、
+# 枠とその部分を切り捨てて、イラストの上の方だけを出す（2026/10/21 に目で確かめた）
+OVER_OK = {
+    12908095, 13243125, 14965713, 21522603, 24269962, 29479266, 37458565, 40237840, 41350418, 44001994,
+    48393694, 49415282, 53183601, 53481939, 54603526, 54725178, 64866, 65541656, 66664204, 67886896,
+    70405002, 75787709, 89875647, 90091225, 90960359, 91714773, 92058903, 92936365, 93871600, 9603253,
+}
 # カードの絵ではない画像（SAMPLE・ロゴ入り・吹き出しのスタンプ・漫画のコマ・空の画像など）
+#（1186448・48171152 はオーバーフレームだが、ロゴがイラストの上の方にかかるので使わない）
 BLOCK = {
-    64866, 1186448, 9603253, 12908095, 13243125, 14965713, 21522603, 24269962, 29479266, 37458565, 40237840,
-    41350418, 44001994, 45627619, 48171152, 48393694, 49415282, 53183601, 53481939, 54603526, 54725178,
-    65541656, 66664204, 67886896, 70405002, 75787709, 89875647, 90091225, 90960359, 91714773, 92058903,
-    92936365, 93871600, 97268404, 2347658, 38033130, 65741789, 74677431, 90448282, 81172177, 20250830,
+    1186448, 45627619, 48171152, 97268404, 2347658, 38033130, 65741789, 74677431, 90448282, 81172177, 20250830,
     24224831, 30581602, 13048473, 14898067,
 }
 
@@ -89,7 +94,11 @@ def main():
     taken = known | edo_ids
     gaps = {}
     for orig, have in alts.items():
-        for i in range(orig + 1, max(have)):
+        # 元の番号の近く（100以内）の絵違いだけを使う（遠い番号の絵違いがあると、間が何百万にもなるため）
+        near = [i for i in have if 0 < i - orig < 100]
+        if not near:
+            continue
+        for i in range(orig + 1, max(near)):
             if i not in have and i not in taken:
                 gaps[i] = orig
     with concurrent.futures.ThreadPoolExecutor(6) as ex:
@@ -100,7 +109,7 @@ def main():
 
     # 画像があるかを確かめる（YGOPRODeck が一覧に載せているものは確かめない）
     check = sorted({i for s in alts.values() for i in s} - ygo_listed)
-    full, drop = set(), set()
+    full, over, drop = set(), set(), set()
 
     def probe(i):
         if exists(YGO_ART.format(i)):
@@ -113,6 +122,8 @@ def main():
         for i, kind in ex.map(probe, check):
             if kind == "full" and i in FULL_OK:
                 full.add(i)
+            elif kind == "full" and i in OVER_OK:
+                over.add(i)
             elif kind != "art":
                 drop.add(i)   # 画像が無い・確かめていないカード全体の画像
     drop |= BLOCK
@@ -126,15 +137,17 @@ def main():
         "// 絵違い（イラスト違い）の画像番号（GitHub Actions が毎日作り直す .github/scripts/build_alt_arts.py。手で書き換えない）\n"
         "// ALT_ARTS：カードの番号 → 絵違いの画像番号の配列（YGOPRODeck の card_images と EDOPro のデータから）\n"
         "// ALT_FULL：イラストの画像が無く、カード全体の画像（EDOPro）からイラストを切り出して表示する番号\n"
+        "// ALT_OVER：オーバーフレームの絵違い。カード全体の画像（EDOPro）から、枠と下の方（SAMPLE・ロゴ）を除いたイラストの上の方を出す\n"
         f"const ALT_ARTS = {{{body}}};\n"
         f"const ALT_FULL = [{','.join(map(str, sorted(full)))}];\n"
+        f"const ALT_OVER = [{','.join(map(str, sorted(over)))}];\n"
     )
     old = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
     if old == js:
         print("変更なし")
         return
     OUT.write_text(js, encoding="utf-8")
-    print(f"更新しました（絵違いのあるカード {len(alts)}枚・カード全体の画像から切り出す {len(full)}枚・使わない画像 {len(drop)}枚）")
+    print(f"更新しました（絵違いのあるカード {len(alts)}枚・カード全体の画像から切り出す {len(full)}枚・オーバーフレーム {len(over)}枚・使わない画像 {len(drop)}枚）")
 
 
 if __name__ == "__main__":

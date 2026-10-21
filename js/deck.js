@@ -194,6 +194,26 @@ function showDeckCard(c) {
 // エラッタ（効果の変更）があったカード：このデッキで、エラッタ前・エラッタ後のどちらの効果を使うか（deck.errata = { カード: 'pre'／'post' }）
 // 何も選んでいなければ、一人回しの設定（ふだんはエラッタ後）に従う
 const deckErrata = (deck, id) => (deck && deck.errata && deck.errata[id]) || null;
+// デッキ作成から一人回し・対戦へ移るとき、エラッタのあったカードが入っていたら、どちらの効果になっているか確認する
+function confirmErrataGo(deck, go) {
+  const ids = deck && typeof hasErrata === 'function' ? [...new Set([...(deck.main || []), ...(deck.extra || [])])].filter(id => hasErrata(id)) : [];
+  if (!ids.length) { go(); return; }
+  const mode = typeof errataMode === 'function' ? errataMode() : 'post';
+  const st = id => deckErrata(deck, id) || mode;
+  const nm = id => { const c = DB.byId.get(id); return c ? c.name : String(id); };
+  const pre = ids.filter(id => st(id) === 'pre'), post = ids.filter(id => st(id) !== 'pre');
+  const line = !post.length ? 'エラッタされているカードが含まれています。エラッタ前の状態になっています'
+    : !pre.length ? 'エラッタされているカードが含まれています。エラッタ後の状態になっています'
+    : 'エラッタされているカードが含まれています。カードによってエラッタ前・エラッタ後の状態になっています';
+  const list = (label, a) => a.length ? el('div', null, el('b', { text: label }), el('ul', null, a.map(id => el('li', { text: nm(id) })))) : null;
+  const body = el('div', { class: 'stack' }, el('p', { text: line }),
+    list('エラッタ前の状態', pre), list('エラッタ後の状態', post),
+    el('p', { class: 'muted', text: '切り替えは、デッキ作成でカードを選んだときの説明から行えます。' }));
+  showModal({ title: 'エラッタの確認', body, buttons: [
+    { label: 'このまま進む', primary: true, onClick: () => { go(); } },
+    { label: 'デッキ作成に戻る', onClick: () => {} },
+  ] });
+}
 function errataChoice(deck, c, redraw) {
   if (typeof hasErrata !== 'function' || !hasErrata(c.id)) return null;
   const cur = deckErrata(deck, c.id) || (typeof errataMode === 'function' ? errataMode() : 'post');
@@ -545,6 +565,13 @@ async function loadCoUse() {
   Related.co = { decks, deckThemes, cardN, themeN };
   return Related.co;
 }
+// 手札誘発らしいカード：よく使われる一覧にあるか、相手が関わる場面で「このカードを手札から捨てて／墓地へ送って発動」するモンスター
+function handTrapLike(c) {
+  if (!c) return false;
+  if (typeof isHandTrap === 'function' && isHandTrap(c.id)) return true;
+  const t = c.jaText || '';
+  return isMonster(c) && /このカード(を|を自分の)手札から(捨てて|墓地へ送って|除外して)/.test(t) && /相手(ターン|が|の|フィールド)|お互い/.test(t);
+}
 // 選んだカード（同じ名前の別番号も）が入っているデッキで、よく一緒に入っているカード・テーマ。
 // 「そのデッキの中での割合」が高く、全部のデッキでの割合よりずっと高い（汎用カードではない）ものだけ
 function coUseOf(c) {
@@ -564,7 +591,9 @@ function coUseOf(c) {
     for (const t of co.deckThemes[i]) tcnt.set(t, (tcnt.get(t) || 0) + 1);
   }
   const good = (k, total) => k / n >= 0.25 && (k / n) / (total / N) >= 3;
-  const cards = [...cnt].filter(([id, k]) => good(k, co.cardN.get(id))).sort((a, b) => b[1] - a[1]).slice(0, 60).map(([id]) => DB.byId.get(id));
+  // 手札誘発は出さない（そのデッキでしか使われないもの＝入っているデッキの6割以上がこのデッキのものは残す）
+  const generic = (id, k) => handTrapLike(DB.byId.get(id)) && k / co.cardN.get(id) < 0.6;
+  const cards = [...cnt].filter(([id, k]) => good(k, co.cardN.get(id)) && !generic(id, k)).sort((a, b) => b[1] - a[1]).slice(0, 60).map(([id]) => DB.byId.get(id));
   // 近いテーマ：このカードが入っているデッキの半分以上に入っていて、全体よりずっと多いもの（多い順に6つまで）
   const themes = [...tcnt].filter(([t, k]) => !mine.includes(t) && k / n >= 0.5 && (k / n) / (co.themeN.get(t) / N) >= 4).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t);
   return { cards, themes };
@@ -1491,9 +1520,11 @@ function setupDeckView() {
   $('#deck-restore').onclick = restoreBackup;
   $('#deck-play').onclick = () => {
     if (Decks.current().main.length === 0) { toast('メインデッキが空です'); return; }
-    switchView('board');
-    $('#b-deck').value = Decks.currentId;
-    startGame();
+    confirmErrataGo(Decks.current(), () => {
+      switchView('board');
+      $('#b-deck').value = Decks.currentId;
+      startGame();
+    });
   };
 }
 

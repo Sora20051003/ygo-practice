@@ -116,7 +116,12 @@ function checkScriptsLoaded() {
 
 async function init() {
   checkScriptsLoaded();
-  for (const t of $$('.tab')) t.addEventListener('click', () => switchView(t.dataset.view));
+  for (const t of $$('.tab')) t.addEventListener('click', () => {
+    const v = t.dataset.view;
+    // デッキ作成から一人回し・対戦へ移るときは、エラッタのあったカードの状態を確認する
+    if (document.body.dataset.view === 'deck' && v !== 'deck' && typeof confirmErrataGo === 'function') confirmErrataGo(Decks.current(), () => switchView(v));
+    else switchView(v);
+  });
   // ネット版ならログインが終わるまで待つ
   try { await initAuth(); } catch (e) {
     console.error(e);

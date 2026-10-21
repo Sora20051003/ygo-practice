@@ -154,24 +154,29 @@ let altFullSet = null;
 const isAltFull = id => { if (!altFullSet) altFullSet = new Set(typeof ALT_FULL !== 'undefined' ? ALT_FULL : []); return altFullSet.has(id); };
 const IGNIS_FULL = id => `https://pics.projectignis.org:2096/pics/${id}.jpg`;
 // その画像番号の読み込み先
-const altSources = (id, kind) => (isAltFull(id) ? [IGNIS_FULL(id)] : IMG_SOURCES[kind](id));
-function artOf(id) {
+// オーバーフレームの絵違い（カード全体の画像の下の方に SAMPLE・ロゴがあるので、イラストの上の方だけを切り出す）
+let altOverSet = null;
+const isAltOver = id => { if (!altOverSet) altOverSet = new Set(typeof ALT_OVER !== 'undefined' ? ALT_OVER : []); return altOverSet.has(id); };
+const altSources = (id, kind) => (isAltFull(id) || isAltOver(id) ? [IGNIS_FULL(id)] : IMG_SOURCES[kind](id));
+function artOf(id, kind = 'art') {
   const d = artDeck();
   const a = d && d.arts && d.arts[id];
-  return a && altArtsOf(id).includes(a) ? a : id;
+  if (!a || !altArtsOf(id).includes(a)) return id;
+  // カード全体を出すところでは、オーバーフレームの絵違いは元の絵にする（SAMPLE などが写るため）
+  return kind !== 'art' && isAltOver(a) ? id : a;
 }
 
 // 画像を読み込み、すべて失敗したら onFail を呼ぶ（絵違いを選んでいれば、その絵。読めなければ元の絵）
 function cardImg(id, kind, onFail, cls) {
-  const art = artOf(id);
+  const art = artOf(id, kind);
   const own = altSources(art, kind);
   const sources = art !== id ? [...own, ...IMG_SOURCES[kind](id)] : own;
   // カード全体の画像からイラストを切り出す絵違い（読めずに元の絵に戻ったら切り出しをやめる）
-  const crop = kind === 'art' && isAltFull(art);
+  const crop = kind === 'art' && isAltFull(art), over = kind === 'art' && isAltOver(art);
   let n = 0;
-  const img = el('img', { class: (cls || '') + (crop ? ' img-full-crop' : ''), src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
+  const img = el('img', { class: (cls || '') + (crop || over ? ' img-full-crop' : '') + (over ? ' img-over' : ''), src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
   img.addEventListener('error', () => {
-    if (++n < sources.length) { if (n >= own.length) img.classList.remove('img-full-crop'); img.src = sources[n]; return; }
+    if (++n < sources.length) { if (n >= own.length) img.classList.remove('img-full-crop', 'img-over'); img.src = sources[n]; return; }
     missingImages.add(id + kind);
     onFail && onFail(img);
   });
