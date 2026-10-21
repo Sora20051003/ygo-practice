@@ -384,6 +384,7 @@ async function autoStart(handIds) {
   Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: false, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), errata });
   Auto.deckId = deck.id;
   Auto.duel.drawTap = true;   // 自分のドローフェイズは、画面をタッチするまでドローしない
+  Auto.duel.vsCpu = oppMode() === 'cpu';   // CPU との対戦（デッキで対戦）：時間切れで負け
   Auto.duel.cpuSlow = cpuDelay() > 0;
   noteLinkRemoved(Auto.duel.extra, Auto.duel.rule);
   try { Auto.duel.start(); } catch (e) { console.error(e); showError('開始できませんでした', e); Auto.duel = null; renderBoard(); return; }
@@ -422,6 +423,7 @@ async function autoResume() {
   try { await autoPrepare(saved, saved.errata); if (saved.opp) await autoPrepare(saved.opp, saved.errata); const placed = saved.items.filter(x => x.res && x.res.type === RES.ANNOUNCE_CARD).map(x => x.res.card); if (placed.length) await loadCardScripts(placed, null, saved.errata); } catch { return; }
   const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: false, firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', errata: saved.errata });
   d.drawTap = true;
+  d.vsCpu = oppMode() === 'cpu';
   Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;
   try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
   if (autoActive()) autoAfter(true);

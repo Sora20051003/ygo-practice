@@ -1059,6 +1059,18 @@ function renderTimer() {
   box.classList.toggle('danger', !!lim && left <= 10);
 }
 function timeUp() {
+  // CPU との対戦（「デッキで対戦」）は、時間切れで負け。一人回しは今まで通り（知らせて、続けるかを選べる）
+  const d = typeof Auto !== 'undefined' && autoActive() && Auto.duel;
+  if (d && !d.ended && d.vsCpu) {
+    d.ended = '自分の負け（時間切れ）';
+    d.pending = null; d.cpuWait = null; d.drawWait = false;
+    d.addLog(`---- 時間切れ（${timeLabel(timeLimit())}）：自分の負け ----`);
+    closeAllModals();
+    if (typeof closePromptModal === 'function') closePromptModal();
+    d.endReason = `時間切れ（制限時間 ${timeLabel(timeLimit())}）`;
+    autoAfter(true);   // 負けの知らせ（gameOver）もここで出る
+    return;
+  }
   if (typeof log === 'function' && Board.S && !autoActive()) { log(`---- 時間切れ（${timeLabel(timeLimit())}） ----`); finishChange(); }
   showModal({
     title: '⏰ 時間切れ',
