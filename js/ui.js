@@ -120,10 +120,12 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') hideMenu(); 
 //          image = カード画像（英語版） / art = イラスト＋日本語名 / text = 文字のみ
 const CARD_STYLES = { jp: '日本語版カード', image: 'カード画像（英語版）', art: 'イラスト＋日本語名', text: '文字のみ' };
 let cardStyle = store.get('ygo.cardStyle3', 'jp');
+// 画像の番号：発売前の仮の番号のままのカードなどは、正式な番号の画像を使う（IMG_IDS：data/alt-arts.js）
+const imgIdOf = id => (typeof IMG_IDS !== 'undefined' && IMG_IDS[id]) || id;
 const IMG_URL = {
-  art: id => `https://images.ygoprodeck.com/images/cards_cropped/${id}.jpg`,
-  small: id => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`,
-  full: id => `https://images.ygoprodeck.com/images/cards/${id}.jpg`,
+  art: id => `https://images.ygoprodeck.com/images/cards_cropped/${imgIdOf(id)}.jpg`,
+  small: id => `https://images.ygoprodeck.com/images/cards_small/${imgIdOf(id)}.jpg`,
+  full: id => `https://images.ygoprodeck.com/images/cards/${imgIdOf(id)}.jpg`,
 };
 // 画像が無いと分かったカード（新しい日本先行カードなど）は、以後は文字で表示する
 const missingImages = new Set();
@@ -138,7 +140,7 @@ const IMG_SOURCES = {
 // ---------- 絵違い ----------
 // 絵違い（イラスト違い）のあるカードは、デッキごとにどの絵で表示するかを選べる（deck.arts = { カード: 画像番号 }）。
 // 盤面・対戦では使っているデッキ、それ以外（デッキ作成・検索）では今のデッキの選択で表示する
-const altArtsOf = id => (typeof ALT_ARTS !== 'undefined' && ALT_ARTS[id]) || [];
+const altArtsOf = id => (typeof ALT_ARTS !== 'undefined' && (ALT_ARTS[id] || ALT_ARTS[imgIdOf(id)])) || [];
 function artDeck() {
   if (typeof Decks === 'undefined') return null;
   const board = document.getElementById('view-board');

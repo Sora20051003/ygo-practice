@@ -12,10 +12,12 @@ BLOCK は、カードの絵ではない画像（「SAMPLE」・ロゴ入り・�
 中身が変わったときだけ書き換える。
 """
 import concurrent.futures
+import io
 import json
 import pathlib
 import urllib.error
 import urllib.request
+import zipfile
 
 UA = "ygo-practice/0.1 (daily alt art table; github actions)"
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -61,11 +63,38 @@ def exists(url):
     return False
 
 
+# カードデータ（ygocdb）の番号で YGOPRODeck に画像が無いカード（発売前の仮の番号のままのカードなど）：
+# KONAMI のカード番号（cid ＝ YGOPRODeck の konami_id）が同じ YGOPRODeck のカードの番号を、画像の番号として使う
+def image_ids(cards, known):
+    by_konami = {}
+    for c in cards:
+        for m in c.get("misc_info") or []:
+            k = m.get("konami_id")
+            if isinstance(k, int) and k:
+                by_konami[k] = c["id"]
+    try:
+        req = urllib.request.Request("https://ygocdb.com/api/v0/cards.zip", headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=180) as r:
+            z = zipfile.ZipFile(io.BytesIO(r.read()))
+        data = json.loads(z.read(z.namelist()[0]))
+    except Exception as e:
+        print(f"カードデータ（ygocdb）を読めませんでした：{e}")
+        return {}
+    out = {}
+    for e in data.values():
+        i, cid = e.get("id"), e.get("cid")
+        if isinstance(i, int) and i not in known and cid in by_konami and by_konami[cid] != i:
+            out[i] = by_konami[cid]
+    print(f"画像の番号を置き換えるカード {len(out)}枚")
+    return out
+
+
 def main():
-    req = urllib.request.Request("https://db.ygoprodeck.com/api/v7/cardinfo.php", headers={"User-Agent": UA})
+    req = urllib.request.Request("https://db.ygoprodeck.com/api/v7/cardinfo.php?misc=yes", headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=180) as r:
         cards = json.load(r)["data"]
     known = {c["id"] for c in cards}
+    img_ids = image_ids(cards, known)
     alts = {}
     for c in cards:
         for im in c.get("card_images") or []:
@@ -136,6 +165,8 @@ def main():
         "// ALT_FULL：イラストの画像が無く、カード全体の画像（EDOPro）からイラストを切り出して表示する番号\n"
         f"const ALT_ARTS = {{{body}}};\n"
         f"const ALT_FULL = [{','.join(map(str, sorted(full)))}];\n"
+        "// IMG_IDS：カードの番号 → 画像の番号（発売前の仮の番号のままのカードなど。KONAMI のカード番号で YGOPRODeck のカードと対応させる）\n"
+        f"const IMG_IDS = {{{','.join(f'{k}:{v}' for k, v in sorted(img_ids.items()))}}};\n"
     )
     old = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
     if old == js:
