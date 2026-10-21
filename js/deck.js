@@ -237,13 +237,11 @@ function errataChoice(deck, c, redraw) {
 // 絵違いのあるカード：このデッキでどの絵で表示するか（deck.arts = { カード: 画像番号 }。元の絵なら消す）
 function artChoice(deck, c) {
   const alts = typeof altArtsOf === 'function' ? altArtsOf(c.id) : [];
-  // オーバーフレームが出ているが画像の無いカードは「オーバーフレーム（再現）」を選べる（元の絵で、見た目をアプリで再現）
-  const repro = typeof hasOverRepro === 'function' && hasOverRepro(c.id);
-  if (!alts.length && !repro) return null;
+  if (!alts.length) return null;
   const cur = (deck.arts && deck.arts[c.id]) || c.id;
-  const opts = [c.id, ...alts, ...(repro ? ['over'] : [])];
+  const opts = [c.id, ...alts];
   let n = 0;
-  const labels = new Map(opts.map(v => [v, v === c.id ? '元の絵' : v === 'over' ? 'オーバーフレーム（再現）' : isAltOver(v) ? 'オーバーフレーム' : `絵違い${++n}`]));
+  const labels = new Map(opts.map(v => [v, v === c.id ? '元の絵' : isAltOver(v) ? 'オーバーフレーム' : `絵違い${++n}`]));
   const set = v => {
     deck.arts = deck.arts || {};
     if (v === c.id) delete deck.arts[c.id]; else deck.arts[c.id] = v;
@@ -256,7 +254,7 @@ function artChoice(deck, c) {
   return el('div', { class: 'd-errata d-arts' },
     el('div', { class: 'small-note muted', text: `絵違いがあるカードです。このデッキで表示する絵（${opts.length}種類）` }),
     el('div', { class: 'art-pick' }, opts.map(v => el('button', { class: 'art-opt' + (v === cur ? ' on' : ''), title: labels.get(v), onclick: () => set(v) },
-      el('div', { class: 'art-thumb' + (v === 'over' ? ' repro' : '') }, cardImg(v === 'over' ? c.id : v, 'art', img => img.remove(), '', true)),
+      el('div', { class: 'art-thumb' }, cardImg(v, 'art', img => img.remove(), '', true)),
       el('small', { text: labels.get(v) })))));
 }
 function deckCardBar(c) {
@@ -339,11 +337,11 @@ function setupSearch() {
   hide.addEventListener('change', () => { store.set('ygo.hideUnrel', hide.checked); run(); });
   // 絵違いがあるカードだけ
   $('#f-alt').addEventListener('change', run);
-  $('#f-over').addEventListener('change', run);
+  if ($('#f-over')) $('#f-over').addEventListener('change', run);
   // 検索の条件を全部消す
   $('#f-clear').addEventListener('click', () => {
     $('#f-alt').checked = false;
-    $('#f-over').checked = false;
+    if ($('#f-over')) $('#f-over').checked = false;
     $('#q').value = '';
     $('#qt').value = '';
     $('#f-kind').value = '';
@@ -438,7 +436,7 @@ function renderResults() {
   // 選んだレギュレーションの時点で未発売のカードは出さない（設定でオフにできる）
   if (hideUnreleased(ctx)) res = res.filter(c => !isUnreleased(c, ctx));
   if ($('#f-alt').checked) res = res.filter(c => altArtsOf(c.id).length);
-  if ($('#f-over').checked) res = res.filter(c => altArtsOf(c.id).some(isAltOver) || hasOverRepro(c.id));
+  if ($('#f-over') && $('#f-over').checked) res =res.filter(c => altArtsOf(c.id).some(isAltOver));
   $('#result-count').textContent = res.length > MAX_RESULTS
     ? `${res.length}件（上位${MAX_RESULTS}件を表示。条件をしぼってください）`
     : `${res.length}件`;

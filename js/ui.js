@@ -158,18 +158,6 @@ const IGNIS_FULL = id => `https://pics.projectignis.org:2096/pics/${id}.jpg`;
 let altOverSet = null;
 const isAltOver = id => { if (!altOverSet) altOverSet = new Set(typeof ALT_OVER !== 'undefined' ? ALT_OVER : []); return altOverSet.has(id); };
 // そのうち SAMPLE・ロゴの無い画像（カード全体をそのままカードとして出せる）
-// オーバーフレームが出ているが画像の無いカード（LIMIT OVER キャンペーンの特別パック）。元の絵で、オーバーフレームの見た目をアプリで再現する
-// （deck.arts = { カード: 'over' } で選ぶ）
-const OVER_REPRO = new Set([37818794, 32828466, 35952884, 95134948, 6218704, 21637210, 44146295, 48130397, 12381100, 87116928,
-  99585850, 31801517, 13331639, 98630720, 22850702, 91530236]);
-const hasOverRepro = id => OVER_REPRO.has(id);
-// このカードを、アプリが描くカードでオーバーフレームの見た目にするか（再現を選んだ／SAMPLE の入った画像しか無いオーバーフレームの絵違いを選んだ）
-function overStyleOf(id) {
-  const d = artDeck();
-  if (d && d.arts && d.arts[id] === 'over') return hasOverRepro(id);
-  const a = artOf(id);
-  return a !== id && isAltOver(a);
-}
 let altOverCleanSet = null;
 const isOverClean = id => { if (!altOverCleanSet) altOverCleanSet = new Set(typeof ALT_OVER_CLEAN !== 'undefined' ? ALT_OVER_CLEAN : []); return altOverCleanSet.has(id); };
 const altSources = (id, kind) => (isAltFull(id) || isAltOver(id) ? [IGNIS_FULL(id)] : IMG_SOURCES[kind](id));
@@ -363,9 +351,6 @@ function jpCard(c, big = false) {
   const userArt = () => { const m = c.id && UserPics.get(c.id); if (m) art.prepend(el('div', { class: 'jp-userart' }, el('img', { src: m, alt: '', draggable: 'false' }))); };
   if (c.id && cardStyle !== 'text' && !missingImages.has(c.id + 'art')) art.append(cardImg(c.id, 'art', img => { img.remove(); userArt(); }));
   else userArt();
-  // オーバーフレーム：イラストを枠の外（カード全体）まで広げる。下の方はぼかしたイラストをカード全体に敷いてつなぐ
-  const over = c.id && cardStyle !== 'text' && !missingImages.has(c.id + 'art') && overStyleOf(c.id);
-  const overBg = over ? el('div', { class: 'jp-overbg' }, cardImg(c.id, 'art', img => img.remove())) : null;
   if (has(c, T.LINK)) {
     for (const [bit, ch] of Object.entries(JP_ARROWS)) art.append(el('span', { class: `jp-arrow b${bit}` + ((c.def & bit) ? ' on' : ''), text: ch }));
   }
@@ -391,8 +376,7 @@ function jpCard(c, big = false) {
     fitLater(el('div', { class: 'jp-pdesc', text: p }), 3.2),
     el('div', { class: 'jp-pscale r' }, el('span', { text: '◆' }), el('b', { text: c.rs }))) : null;
 
-  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}${over ? ' over' : ''}`, title: c.name },
-    overBg,
+  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}`, title: c.name },
     el('div', { class: 'jp-head' },
       el('div', { class: 'jp-name', style: `font-size:max(${jpNameSize(c.name)}cqw, 7px)`, text: c.name }),
       el('div', { class: 'jp-attr ' + attr.cls, text: attr.label })),
