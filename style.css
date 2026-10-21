@@ -1551,3 +1551,9 @@ body.paused #land-left #board-detail { visibility: hidden; }
 /* 一人回し・対戦の盤面から別の画面（デッキ作成など）へ移ったら、盤面の上に出していたもの（選択の帯・演出・フェイズの表示など）は隠す。
    盤面に戻ると、途中だった選択はまた出る */
 body:not([data-view="board"]) :is(.ap-sheet, .ap-peek-back, .ap-actions, .hand-zoom, .ph-pop, .chain-stack, .cs-rope, .ap-activate, .ap-act-card, .ap-ghost, .fx, .phase-banner, .chain-links, .replay-bar) { display: none !important; }
+/* 絵違いでイラストの画像が無いもの：カード全体の画像からイラストの部分だけを出す（本物のカードの比率で位置を合わせる） */
+:has(> img.img-full-crop) { overflow: hidden; }
+:has(> img.img-full-crop):not(.jp-art) { position: relative; }
+img.img-full-crop { position: absolute; left: -15.6%; top: 0; width: 131.6% !important; height: auto !important; aspect-ratio: auto !important; max-width: none !important; margin-top: -34.4%; object-fit: fill !important; }
+.art-thumb { width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 4px; background: #000; position: relative; }
+.art-thumb img:not(.img-full-crop) { width: 100%; height: 100%; object-fit: cover; display: block; }

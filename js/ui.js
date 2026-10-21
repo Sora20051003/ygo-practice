@@ -149,6 +149,12 @@ function artDeck() {
   }
   return Decks.current();
 }
+// イラストの画像が無い絵違い（EDOPro のカード全体の画像から切り出す）
+let altFullSet = null;
+const isAltFull = id => { if (!altFullSet) altFullSet = new Set(typeof ALT_FULL !== 'undefined' ? ALT_FULL : []); return altFullSet.has(id); };
+const IGNIS_FULL = id => `https://pics.projectignis.org:2096/pics/${id}.jpg`;
+// その画像番号の読み込み先
+const altSources = (id, kind) => (isAltFull(id) ? [IGNIS_FULL(id)] : IMG_SOURCES[kind](id));
 function artOf(id) {
   const d = artDeck();
   const a = d && d.arts && d.arts[id];
@@ -158,11 +164,14 @@ function artOf(id) {
 // 画像を読み込み、すべて失敗したら onFail を呼ぶ（絵違いを選んでいれば、その絵。読めなければ元の絵）
 function cardImg(id, kind, onFail, cls) {
   const art = artOf(id);
-  const sources = art !== id ? [...IMG_SOURCES[kind](art), ...IMG_SOURCES[kind](id)] : IMG_SOURCES[kind](id);
+  const own = altSources(art, kind);
+  const sources = art !== id ? [...own, ...IMG_SOURCES[kind](id)] : own;
+  // カード全体の画像からイラストを切り出す絵違い（読めずに元の絵に戻ったら切り出しをやめる）
+  const crop = kind === 'art' && isAltFull(art);
   let n = 0;
-  const img = el('img', { class: cls || '', src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
+  const img = el('img', { class: (cls || '') + (crop ? ' img-full-crop' : ''), src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
   img.addEventListener('error', () => {
-    if (++n < sources.length) { img.src = sources[n]; return; }
+    if (++n < sources.length) { if (n >= own.length) img.classList.remove('img-full-crop'); img.src = sources[n]; return; }
     missingImages.add(id + kind);
     onFail && onFail(img);
   });

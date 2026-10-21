@@ -231,7 +231,7 @@ function artChoice(deck, c) {
   return el('div', { class: 'd-errata d-arts' },
     el('div', { class: 'small-note muted', text: `絵違いがあるカードです。このデッキで表示する絵（${opts.length}種類）` }),
     el('div', { class: 'art-pick' }, opts.map((v, i) => el('button', { class: 'art-opt' + (v === cur ? ' on' : ''), title: i ? `絵違い${i}` : '元の絵', onclick: () => set(v) },
-      el('img', { src: IMG_URL.art(v), loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' }),
+      el('div', { class: 'art-thumb' }, cardImg(v, 'art', img => img.remove())),
       el('small', { text: i ? `絵違い${i}` : '元の絵' })))));
 }
 function deckCardBar(c) {
@@ -260,7 +260,7 @@ function deckCardBar(c) {
         el('button', { class: 'btn small', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })),
       el('div', { class: 'd-addbtns' },
         el('button', { class: 'btn small', text: '🔍 関連カードを検索', onclick: () => showRelated(c) })),
-      errataChoice(deck, c, draw), artChoice(deck, c));
+      ...[errataChoice(deck, c, draw), artChoice(deck, c)].filter(Boolean));
   };
   draw();
   return bar;

@@ -23,10 +23,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: 発売日の表を作り直す
         run: python3 .github/scripts/build_release_dates.py
-      - name: 絵違いの表を作り直す（失敗しても、ほかの更新は続ける）
-        run: python3 .github/scripts/build_alt_arts.py || echo "絵違いの表の更新に失敗"
       - name: 自動処理用の EDOPro カードデータを作り直す
         run: python3 .github/scripts/build_edo_cards.py
+      - name: 絵違いの表を作り直す（EDOPro のカードデータも使うので、その後に。失敗しても、ほかの更新は続ける）
+        run: python3 .github/scripts/build_alt_arts.py || echo "絵違いの表の更新に失敗"
       - name: 効果の説明（選択肢の文）の表を作り直す（失敗しても、ほかの更新は続ける）
         run: python3 .github/scripts/build_edo_strs.py || echo "効果の説明の更新に失敗"
       - name: マスターデュエルのサンプルデッキを作り直す（失敗しても、ほかの更新は続ける）
