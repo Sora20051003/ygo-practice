@@ -1078,6 +1078,7 @@ function updateLandscape() {
   const rotated = land && innerHeight > innerWidth;
   b.classList.toggle('land', land);
   b.classList.toggle('rotated', rotated);
+  b.classList.toggle('tilt', land && store.get('ygo.tilt', true));
   Rot.on = rotated;
   // 横画面として使える幅と高さ（回したときは入れ替わる）
   b.style.setProperty('--lw', (rotated ? innerHeight : innerWidth) + 'px');
@@ -1088,7 +1089,14 @@ function updateLandscape() {
   if (side && layout && center && pbox) {
     let host = $('#pause-ctrl');
     if (land && side.parentNode === layout) {
-      if (!host) host = el('div', { class: 'pause-ctrl', id: 'pause-ctrl' });
+      if (!host) {
+        host = el('div', { class: 'pause-ctrl', id: 'pause-ctrl' });
+        // 盤面を奥へ傾けて大きく表示する（スマホ横画面だけ）
+        const cb = el('input', { type: 'checkbox' });
+        cb.checked = store.get('ygo.tilt', true);
+        cb.onchange = () => { store.set('ygo.tilt', cb.checked); updateLandscape(); if (typeof drawChainLinks === 'function') requestAnimationFrame(drawChainLinks); };
+        host.append(el('label', { class: 'pause-tilt check' }, cb, '盤面を奥へ傾けて大きく表示する'));
+      }
       pbox.insertBefore(host, pbox.children[1] || null);
       host.append(slots, side);
     }

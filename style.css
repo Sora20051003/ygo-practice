@@ -1464,3 +1464,23 @@ body.land #view-board .ap-chainbox { right: 70px; top: 4px; }
 body.land .pause-ctrl .side-left { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; }
 body.land .pause-ctrl #land-top, body.land #b-pause, body.land #dp-pause { display: none; }
 body.land #view-board .land-rail .lr-phase { margin: auto 0; }
+/* ---------- スマホ横画面：盤面を奥へ傾けて大きく（マスターデュエル風。ポーズ画面で切り替え） ----------
+   40度傾けると見た目の高さは約0.775倍になるので、そのぶんカードを大きくする。
+   傾けても場所の計算上の大きさは変わらないので、上下の余白を負の margin で詰める（上 15.4%・下 7.1%） */
+body.land.tilt #view-board .board-center {
+  grid-template-columns: minmax(0, 1fr) auto 62px;
+  grid-template-areas: "opp field rail" "hand field rail";
+  --cw: min(calc(((var(--lh) - 12px) / 0.775 - 10px) / 4.66), calc((var(--lw) - 268px) / 8.84));
+}
+body.land.tilt #view-board .board-center:has(.field.duel) {
+  --cw: min(calc(((var(--lh) - 12px) / 0.775 - 10px) / 7.86), calc((var(--lw) - 268px) / 8.84));
+}
+body.land.tilt #view-board .field {
+  --fh: calc(var(--cw) * 4.66 + 10px);
+  transform: perspective(calc(var(--fh) * 3)) rotateX(40deg); transform-origin: 50% 50%;
+  margin: calc(var(--fh) * -0.154) calc(var(--cw) * 0.5) calc(var(--fh) * -0.071);
+  align-self: center;
+}
+body.land.tilt #view-board .field.duel { --fh: calc(var(--cw) * 7.86 + 10px); }
+body.land.tilt #view-board .hand .bcard { width: calc(var(--cw) * 0.95); }
+.pause-tilt { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 14px; }
