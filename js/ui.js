@@ -438,13 +438,35 @@ function fetchCardTexts(c) {
 
 // 詳細パネル上部の画像（イラスト表示ならイラスト、カード画像表示ならカード全体）
 function detailImage(c) {
-  if (cardStyle === 'jp') return el('div', { class: 'd-image jp' }, jpPhotoOrDrawn(c, true));
-  const kind = cardStyle === 'image' ? 'full' : 'art';
-  if (!hasImage(c, kind)) return null;
-  const box = el('div', { class: 'd-image ' + kind });
-  box.append(cardImg(c.id, kind, () => box.remove()));
+  const kind = cardStyle === 'jp' ? 'jp' : cardStyle === 'image' ? 'full' : 'art';
+  let box;
+  if (kind === 'jp') box = el('div', { class: 'd-image jp' }, jpPhotoOrDrawn(c, true));
+  else {
+    if (!hasImage(c, kind)) return null;
+    box = el('div', { class: 'd-image ' + kind });
+    box.append(cardImg(c.id, kind, () => box.remove()));
+  }
+  // デッキ作成の画面では、押すと大きく表示する
+  box.addEventListener('click', () => { if (document.body.dataset.view === 'deck') openCardZoom(c, kind); });
   return box;
 }
+
+// カードを画面の真ん中に大きく出す。ほかは暗くする（うっすら見える）。どこかを押すか Esc で閉じる
+function openCardZoom(c, kind) {
+  closeCardZoom();
+  const face = kind === 'jp' ? jpPhotoOrDrawn(c, true) : cardImg(c.id, kind, () => {});
+  const back = el('div', { class: 'card-zoom-back', id: 'card-zoom', title: '押すと閉じます' },
+    el('div', { class: 'card-zoom ' + kind }, face));
+  back.addEventListener('click', closeCardZoom);
+  document.addEventListener('keydown', cardZoomKey);
+  document.body.append(back);
+}
+function closeCardZoom() {
+  const n = document.getElementById('card-zoom');
+  if (n) n.remove();
+  document.removeEventListener('keydown', cardZoomKey);
+}
+function cardZoomKey(e) { if (e.key === 'Escape') closeCardZoom(); }
 
 // スマホ幅かどうか（CSSの切り替えと同じ幅）
 const isMobile = () => !document.body.classList.contains('land') && window.matchMedia('(max-width: 720px)').matches;
