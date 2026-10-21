@@ -75,8 +75,13 @@ function autoActions(inst) {
   // ボタンは「効果を発動」だけにする（効果の説明はボタンに指を置いたときに出す。同じカードに複数あれば「1つ目」「2つ目」）
   function actLabel() { return '効果を発動'; }
   if (p.type === MSG.SELECT_IDLECMD) {
-    // 発動しても何も起きない永続・フィールド魔法／永続罠は出さない（セットはできる）
-    add(p.activates.map((c, i) => (Auto.useless && Auto.useless.has(i) ? { ...c, controller: -1 } : c)), actLabel, IDLE.ACTIVATE, 'y');
+    // 永続魔法・永続罠は、発動時の処理が無い（今は何も起きない）ものでも表側で置ける（発動できるかはエンジンが決める。
+    // 発動時に強制で行う処理ができないとき（例：ドロール＆ロックバードの適用中のサーチ）は、エンジンが発動できないものとして扱う）
+    p.activates.forEach((c, index) => {
+      if (!same(c)) return;
+      const place = Auto.useless && Auto.useless.has(index);
+      out.push({ label: place ? '発動する（表側で置く）' : actLabel(), title: place ? '今は発動しても効果は起きませんが、表側で置いておけます' : descText(c.description), kind: 'y', res: { type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index } });
+    });
     // 通常召喚とセットは「召喚する」1つにまとめ、押したあとに表示形式を聞く
     const res = (action, list) => { const i = list.findIndex(same); return i < 0 ? null : { type: RES.SELECT_IDLECMD, action, index: i }; };
     const ns = res(IDLE.SUMMON, p.summons), mset = res(IDLE.MSET, p.monster_sets);
@@ -365,7 +370,7 @@ async function autoStart(handIds) {
     try { await autoPrepare(opp, errata); } catch (e) { showError('相手のデッキを準備できませんでした', e); return; }
   }
   Auto.redoLog = null;
-  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), errata });
+  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: false, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), errata });
   Auto.deckId = deck.id;
   Auto.duel.cpuSlow = cpuDelay() > 0;
   noteLinkRemoved(Auto.duel.extra, Auto.duel.rule);
@@ -403,7 +408,7 @@ async function autoResume() {
   try { saved = JSON.parse(JSON.stringify(store.get('ygo.autoBoard', null)), bigReviver); } catch { saved = null; }
   if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
   try { await autoPrepare(saved, saved.errata); if (saved.opp) await autoPrepare(saved.opp, saved.errata); } catch { return; }
-  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: !!saved.autoTrigger && store.get('ygo.autoTrigger', false), firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', errata: saved.errata });
+  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: false, firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', errata: saved.errata });
   Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;
   try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
   if (autoActive()) autoAfter(true);
@@ -471,13 +476,8 @@ function setupAutoPlay() {
     if (Auto.duel) { Auto.duel.chainMode = e.target.value; autoSave(); }
     if (typeof renderLandRail === 'function') renderLandRail();
   };
-  // 任意の効果は聞くのが標準（前に自動にしていた設定は1回だけオフに戻す）
-  if (!store.get('ygo.autoTrigger2', false)) { store.set('ygo.autoTrigger2', true); store.set('ygo.autoTrigger', false); }
-  $('#ap-autotrig').checked = store.get('ygo.autoTrigger', false);
-  $('#ap-autotrig').onchange = e => {
-    store.set('ygo.autoTrigger', e.target.checked);
-    if (Auto.duel) { Auto.duel.autoTrigger = e.target.checked; autoSave(); }
-  };
+  // 任意の効果は必ず「発動しますか？」と聞く（前にあった「聞かずに発動する」の設定は無くした）
+  store.set('ygo.autoTrigger', false);
   Auto.anim = store.get('ygo.autoAnim', true);
   $('#ap-anim').checked = Auto.anim;
   $('#ap-anim').onchange = e => { Auto.anim = e.target.checked; store.set('ygo.autoAnim', Auto.anim); };

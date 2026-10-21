@@ -1090,14 +1090,7 @@ function updateLandscape() {
   if (side && layout && center && pbox) {
     let host = $('#pause-ctrl');
     if (land && side.parentNode === layout) {
-      if (!host) {
-        host = el('div', { class: 'pause-ctrl', id: 'pause-ctrl' });
-        // 盤面を奥へ傾けて大きく表示する（スマホ横画面だけ）
-        const cb = el('input', { type: 'checkbox' });
-        cb.checked = store.get('ygo.tilt', true);
-        cb.onchange = () => { store.set('ygo.tilt', cb.checked); updateLandscape(); if (typeof drawChainLinks === 'function') requestAnimationFrame(drawChainLinks); };
-        host.append(el('label', { class: 'pause-tilt check' }, cb, '盤面を奥へ傾けて大きく表示する'));
-      }
+      if (!host) host = el('div', { class: 'pause-ctrl', id: 'pause-ctrl' });
       pbox.insertBefore(host, pbox.children[1] || null);
       host.append(slots, side);
     }

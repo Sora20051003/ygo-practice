@@ -1275,7 +1275,7 @@ async function beginNetDuel() {
   } catch (e) { showLoading(null); showError('自動処理を準備できませんでした', e); return; }
   showLoading(null);
   const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5', errata: netErrata,
-    chainMode: $('#ap-chain').value, autoTrigger: $('#ap-autotrig').checked, firstDraw: !!r.firstDraw });
+    chainMode: $('#ap-chain').value, autoTrigger: false, firstDraw: !!r.firstDraw });
   noteLinkRemoved(decks[idx][1], r.rule || 'mr5');
   d.onSend = (res, i) => Duel.t.sendEvent({ type: 'eng', i, res: JSON.stringify(res, bigReplacer) });
   Auto.on = true; Auto.net = true; Auto.duel = d; Auto.redoLog = null; Auto.resumed = true;

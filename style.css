@@ -1524,3 +1524,19 @@ body.land .ap-sheet { left: var(--sheet-left, 6px) !important; }
 /* 大きい画面（パソコン）では、左の欄の文字を画面の高さに合わせて少し大きく */
 body.land #view-board #board-detail { font-size: clamp(12px, calc(var(--lh) / 62), 16px); }
 body.land #view-board #board-detail .card-text, body.land #view-board #board-detail > .ja-text .card-text { font-size: clamp(12.5px, calc(var(--lh) / 58), 17px); }
+/* 設定ページ */
+.settings h4 { margin: 12px 0 4px; font-size: 15px; }
+.settings h4:first-child { margin-top: 0; }
+.settings-sample { margin: 8px 0 0; padding: 8px; border-radius: 6px; background: var(--panel-2); font-size: 13px; line-height: 1.6; }
+/* 文字の大きさ（設定ページで変える）：カードの説明・選択の画面・ログ・窓の中身・ポーズ画面 */
+#board-detail > *, #deck-detail > *, .ap-sheet-head, .ap-sheet-body, .ap-sheet-foot, .modal-body, .modal-head, .modal-foot, .log, .pause-box, .menu-item { zoom: var(--fs, 1); }
+.pause-box .log, .pause-box .modal-body { zoom: 1; }
+/* 傾きを50度に（見た目の高さ約0.654倍・手前の幅約1.15倍）。そのぶん盤面を大きくし、左の欄（カードの説明）は狭くする */
+body.land.tilt #view-board .board-center { --cw: min(calc((var(--lh) - 25px) / 3.95), calc((var(--lw) - 268px) / 9.04)); }
+body.land.tilt #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 25px) / 6.05), calc((var(--lw) - 268px) / 9.04)); }
+body.land.tilt #view-board .field {
+  transform: perspective(calc(var(--fh) * 3)) rotateX(50deg);
+  margin: calc(var(--fh) * -0.215) calc(var(--cw) * 0.6) calc(var(--fh) * -0.131);
+}
+body.land #view-board #board-detail, body.land #view-board #board-detail.show { z-index: auto; }
+.settings .seg button { flex: 1; }

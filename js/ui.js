@@ -576,3 +576,37 @@ function showError(title, err) {
 }
 window.addEventListener('error', e => { if (e.message && !/ResizeObserver/.test(e.message)) showError('エラーが起きました', e.error || e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno); });
 window.addEventListener('unhandledrejection', e => showError('エラーが起きました', e.reason));
+
+// ---------- 設定ページ ----------
+// 文字の大きさ：カードの説明・選択の画面・ログ・窓などの文字を、まとめて拡大・縮小する（CSS の --fs）
+const FONT_SCALES = [[0.8, '小'], [0.9, 'やや小'], [1, '標準'], [1.15, '大'], [1.3, '特大']];
+function applyFontScale() {
+  const v = Number(store.get('ygo.fontScale', 1)) || 1;
+  document.documentElement.style.setProperty('--fs', String(v));
+}
+applyFontScale();
+function openSettings() {
+  const body = el('div', { class: 'settings' });
+  const draw = () => {
+    body.innerHTML = '';
+    const cur = Number(store.get('ygo.fontScale', 1)) || 1;
+    body.append(
+      el('h4', { text: '文字の大きさ' }),
+      el('p', { class: 'muted small-note', text: 'カードの説明・選択の画面・ログ・設定などの文字の大きさ' }),
+      el('div', { class: 'seg full' }, FONT_SCALES.map(([v, label]) => el('button', {
+        class: Math.abs(cur - v) < 0.01 ? 'on' : '', text: label,
+        onclick: () => { store.set('ygo.fontScale', v); applyFontScale(); draw(); if (typeof fitSheet === 'function') fitSheet(); },
+      }))),
+      el('p', { class: 'settings-sample', text: '①：相手メインフェイズに、このカードを手札から墓地へ送り、相手フィールドの効果モンスター１体を対象として発動できる。（見本）' }),
+      el('h4', { text: '盤面' }),
+      (() => {
+        const cb = el('input', { type: 'checkbox' });
+        cb.checked = store.get('ygo.tilt', true);
+        cb.onchange = () => { store.set('ygo.tilt', cb.checked); if (typeof updateLandscape === 'function') updateLandscape(); if (typeof drawChainLinks === 'function') requestAnimationFrame(drawChainLinks); };
+        return el('label', { class: 'check' }, cb, '盤面を奥へ傾けて大きく表示する（横長の画面の一人回し・対戦）');
+      })());
+  };
+  draw();
+  showModal({ title: '⚙ 設定', body, buttons: [{ label: '閉じる', primary: true, onClick: () => {} }] });
+}
+document.addEventListener('click', e => { if (e.target.closest('[data-settings]')) openSettings(); });
