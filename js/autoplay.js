@@ -108,22 +108,9 @@ function autoActions(inst) {
       const ng = [it]; groups.set(it.label, ng); merged.push(ng);
     } else merged.push([it]);
   }
-  const items = merged.map(g => {
-    if (g.length === 1) return g[0];
-    const name = cardOf(inst).name;
-    return {
-      label: g[0].label, kind: g[0].kind, name, question: 'どの方法で召喚しますか？', title2: `「${name}」を${g[0].label}する`,
-      // 特殊召喚の一覧には方法の説明が付いてこないので、並び順で決める（EDOPro は「通常の方法」→「カードに書かれた別の方法」の順に登録する）。
-      // 別の方法の名前は、そのカードの効果の説明のうち召喚の言葉（例：「エクシーズ召喚」）を含むものから取る
-      choose: g.map((x, i) => {
-        const sp = p.special_summons[x.res.index], code = sp && sp.code;
-        const own = sp && descText(sp.description);
-        const alt = (typeof EDO_STRS !== 'undefined' && EDO_STRS[code] || []).filter(s => s && s.includes(g[0].label.replace('する', '')));
-        const label = own || (i === 0 ? `通常の${g[0].label}` : alt[i - 1] || `別の方法で${g[0].label}`);
-        return { label, res: x.res };
-      }),
-    };
-  });
+  // エンジンは、方法が2つあるカードを、条件を満たしていない方法も含めて2つ並べてくる（どれを選んでも同じカードの特殊召喚になる）。
+  // ここでは聞かずに1つのボタンにし、使える方法が1つならエンジンがそのまま進め、2つとも使えるときだけエンジンが方法を聞いてくる
+  const items = merged.map(g => g[0]);
   // 召喚しかできないモンスターは、「攻撃表示で召喚」「セット」をそのままボタンにする
   if (items.length === 1 && items[0].choose && items[0].label === '召喚する') return items[0].choose.map(c => ({ label: c.label === '表側攻撃表示で召喚' ? '攻撃表示で召喚' : c.label, kind: 'b', res: c.res }));
   return uniqLabels(items);
@@ -1327,34 +1314,20 @@ function linkReach(link, cards, chosen, optional, fixed) {
   for (const i of optional) step(linkOpts(link, cards, i), true);
   return sums.has(link.need);
 }
+// 今選んでいるカードでのリンク素材の合計（リンク2以上は1体分・リンク数分のどちらでも数えられるので、ちょうど足りる数え方があればその値）
 function linkSum(link, cards, chosen) {
-  let s = (link.base || []).length;
-  for (const i of chosen) s += link.count.has(i) ? link.count.get(i) : 1;
-  return s;
+  let sums = new Set([0]);
+  const step = opts => { const next = new Set(); for (const s of sums) for (const o of opts) next.add(s + o); sums = next; };
+  for (const c of link.base || []) step(linkRatingOf(c) >= 2 ? [1, linkRatingOf(c)] : [1]);
+  for (const i of chosen) step(linkOpts(link, cards, i));
+  if (sums.has(link.need)) return link.need;
+  const below = [...sums].filter(s => s < link.need);
+  return below.length ? Math.max(...below) : Math.min(...sums);
 }
-// i 番目のカードを素材に加えるとき：リンク2以上なら、どちらで数えても出せる見込みがあるときだけ聞く
+// i 番目のカードを素材に加える。リンク2以上のリンクモンスターの数え方（1体分か、リンク数分か）は聞かない：
+// 選んだ素材の組み合わせで合計がちょうどになる数え方で、エンジンが処理する
 function linkChoose(link, cards, chosen, i, add) {
-  const r = linkRatingOf(cards[i]);
-  if (r < 2) { add(); return; }
-  const others = cards.map((c, k) => k).filter(k => k !== i && !chosen.has(k));
-  const as1 = linkReach(link, cards, chosen, others, { v: 1 });
-  const asR = linkReach(link, cards, chosen, others, { v: r });
-  if (!(as1 && asR)) { link.count.set(i, asR || !as1 ? r : 1); add(); return; }
-  const name = cardName(cards[i].code);
-  const close = showModal({
-    title: 'リンク素材の数え方',
-    body: el('div', { class: 'stack' },
-      el('p', { class: 'ap-question', text: `「${name}」（リンク${r}）を、リンク${r}として扱いますか？` }),
-      el('p', { class: 'muted', text: `「${link.name}」（リンク${link.need}）のリンク召喚です。リンク2以上のリンクモンスターは、1体分か、そのリンク数分として数えられます。` })),
-    buttons: [
-      { label: `リンク${r}として扱う（${r}体分）`, primary: true, onClick: () => { link.count.set(i, r); link.asked.set(i, r); add(); } },
-      { label: '1体分として扱う', onClick: () => { link.count.set(i, 1); link.asked.set(i, 1); add(); } },
-    ],
-  });
-  // 選択の帯より手前に出す
-  const backs = $$('#modal-root .modal-back');
-  if (backs.length) backs[backs.length - 1].style.zIndex = 70;
-  return close;
+  add();
 }
 
 // ---------- 攻撃・無効・ダメージの演出 ----------
