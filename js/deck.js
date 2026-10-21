@@ -41,16 +41,28 @@ const curFormat = () => deckFormat(Decks.current());
 // デッキの中の、ルール違反（使えないカード・枚数オーバー）を調べる
 // ctx を渡すと、その判定の材料で調べる（対戦の部屋で共有したオリジナルのレギュレーションなど）
 function deckProblems(deck, ctx = regContext(deck)) {
-  const counts = new Map();
+  // 「ルール上「○○」として扱う」カードは「○○」と合わせて数える
+  const counts = new Map(), groups = new Map();
   for (const sec of ['main', 'extra', 'side']) for (const id of deck[sec]) {
     const c = DB.byId.get(id);
-    if (c) counts.set(c.name, { c, n: (counts.get(c.name) || { n: 0 }).n + 1 });
+    if (!c) continue;
+    counts.set(c.name, { c, n: (counts.get(c.name) || { n: 0 }).n + 1 });
+    const k = ruleKey(c);
+    if (!groups.has(k)) groups.set(k, { names: new Set(), cards: [], n: 0 });
+    const g = groups.get(k);
+    g.n++; if (!g.names.has(c.name)) { g.names.add(c.name); g.cards.push(c); }
   }
   const notAllowed = [], over = [];
   for (const { c, n } of counts.values()) {
     const l = limitIn(c, ctx);
     if (!cardAllowed(c, ctx.fmt)) notAllowed.push(c.name);
     else if (n > l) { const lb = limitLabel(c, ctx); over.push(`${c.name}（${lb ? lb + (l ? `：${l}枚まで` : '') : `${l}枚まで`}）`); }
+  }
+  for (const g of groups.values()) {
+    if (g.names.size < 2) continue;   // 1種類だけなら上で調べた
+    const rc = g.cards.map(ruleCardOf).find(Boolean);
+    const l = Math.min(MAX_COPIES, ...g.cards.filter(c => cardAllowed(c, ctx.fmt)).map(c => limitIn(c, ctx)), ...(rc ? [limitIn(rc, ctx)] : []));
+    if (g.n > l) over.push(`${[...g.names].join('・')}（ルール上同じ名前として扱うので、合わせて${l}枚まで）`);
   }
   return { notAllowed, over };
 }
@@ -125,12 +137,21 @@ function renderRegSelect(deck) {
   sel.value = cur;
 }
 
+// 「このカード名はルール上「○○」として扱う」カード（白き竜の落胤 → アルバスの落胤、ハーピィ・レディ１ → ハーピィ・レディ など）は、
+// デッキに入れる枚数を「○○」と合わせて数える。ruleKey：枚数を数えるときの名前（正規化したもの）
+const RULE_NAME_RE = /このカード名はルール上「([^」]+)」として扱う/;
+const ruleNameOf = c => { const m = c && c.jaText && RULE_NAME_RE.exec(c.jaText); return m ? m[1] : null; };
+const ruleKey = c => normalizeText(ruleNameOf(c) || c.name);
+// ルール上の名前のカード（無ければ null）
+const ruleCardOf = c => { const n = ruleNameOf(c); if (!n) return null; const k = normalizeText(n); return DB.cards.find(x => x.nkey === k) || null; };
+
 function countCopies(deck, card) {
+  const key = ruleKey(card);
   let n = 0;
   for (const sec of ['main', 'extra', 'side']) {
     for (const id of deck[sec]) {
       const c = DB.byId.get(id);
-      if (c && c.name === card.name) n++;
+      if (c && ruleKey(c) === key) n++;
     }
   }
   return n;
@@ -150,8 +171,13 @@ function addToDeck(card, section) {
     toast(isUnreleased(card, ctx) ? `${card.name}は選んでいるリストの時点では未発売です（禁止扱い）` : `${card.name}は${FORMATS[fmt].label}の禁止カードです`);
     return;
   }
-  if (countCopies(deck, card) >= limit) {
-    toast(limit < MAX_COPIES ? `${card.name}は${LIMIT_LABEL[limit]}カードなので${limit}枚までです` : `同じカードは${MAX_COPIES}枚までです`);
+  // ルール上ほかの名前として扱うカード：その名前のカードの禁止・制限にも従い、合わせて数える
+  const rc = ruleCardOf(card), rcLimit = rc && cardAllowed(rc, fmt) ? Math.min(MAX_COPIES, limitIn(rc, ctx)) : MAX_COPIES;
+  const lim = Math.min(limit, rcLimit);
+  if (countCopies(deck, card) >= lim) {
+    const rn = ruleNameOf(card);
+    toast(rn ? `${card.name}はルール上「${rn}」として扱うので、「${rn}」と合わせて${lim}枚までです`
+      : lim < MAX_COPIES ? `${card.name}は${LIMIT_LABEL[lim]}カードなので${lim}枚までです` : `同じカードは${MAX_COPIES}枚までです`);
     return;
   }
   // 同じ名前のカードがすでにあれば、その隣（最後の1枚の後ろ）に入れる
