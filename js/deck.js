@@ -213,6 +213,27 @@ function errataChoice(deck, c, redraw) {
       el('button', { class: cur === 'post' ? 'on' : '', text: 'エラッタ後（今の効果）', onclick: () => set('post') }),
       el('button', { class: cur === 'pre' ? 'on' : '', text: 'エラッタ前の効果', onclick: () => set('pre') })));
 }
+// 絵違いのあるカード：このデッキでどの絵で表示するか（deck.arts = { カード: 画像番号 }。元の絵なら消す）
+function artChoice(deck, c) {
+  const alts = typeof altArtsOf === 'function' ? altArtsOf(c.id) : [];
+  if (!alts.length) return null;
+  const cur = (deck.arts && deck.arts[c.id]) || c.id;
+  const set = v => {
+    deck.arts = deck.arts || {};
+    if (v === c.id) delete deck.arts[c.id]; else deck.arts[c.id] = v;
+    Decks.save();
+    renderDeck();
+    if (isMobile()) closeAllModals();
+    showDeckCard(c);
+    toast(`このデッキの「${c.name}」を${v === c.id ? '元の絵' : '絵違い' + (alts.indexOf(v) + 1)}で表示します`);
+  };
+  const opts = [c.id, ...alts];
+  return el('div', { class: 'd-errata d-arts' },
+    el('div', { class: 'small-note muted', text: `絵違いがあるカードです。このデッキで表示する絵（${opts.length}種類）` }),
+    el('div', { class: 'art-pick' }, opts.map((v, i) => el('button', { class: 'art-opt' + (v === cur ? ' on' : ''), title: i ? `絵違い${i}` : '元の絵', onclick: () => set(v) },
+      el('img', { src: IMG_URL.art(v), loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' }),
+      el('small', { text: i ? `絵違い${i}` : '元の絵' })))));
+}
 function deckCardBar(c) {
   const bar = el('div', { class: 'd-addbar' });
   const draw = () => {
@@ -239,7 +260,7 @@ function deckCardBar(c) {
         el('button', { class: 'btn small', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })),
       el('div', { class: 'd-addbtns' },
         el('button', { class: 'btn small', text: '🔍 関連カードを検索', onclick: () => showRelated(c) })),
-      errataChoice(deck, c, draw));
+      errataChoice(deck, c, draw), artChoice(deck, c));
   };
   draw();
   return bar;

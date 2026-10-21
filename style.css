@@ -1513,3 +1513,9 @@ body.land #view-board .hand-wrap {
 }
 body.land #view-board .hand { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; gap: 4px; min-height: 0; height: calc(var(--hv) + 40px); justify-content: safe center; align-items: flex-start; scrollbar-width: none; }
 body.land #view-board .hand .bcard, body.land.tilt #view-board .hand .bcard { width: var(--cw); flex: none; }
+/* 絵違いの選択 */
+.art-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.art-opt { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 74px; padding: 3px; border-radius: 8px; border: 2px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; font: inherit; }
+.art-opt img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; background: #000; }
+.art-opt small { font-size: 10px; }
+.art-opt.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }

@@ -135,9 +135,30 @@ const IMG_SOURCES = {
   full: id => [IMG_URL.full(id)],
 };
 
-// 画像を読み込み、すべて失敗したら onFail を呼ぶ
+// ---------- 絵違い ----------
+// 絵違い（イラスト違い）のあるカードは、デッキごとにどの絵で表示するかを選べる（deck.arts = { カード: 画像番号 }）。
+// 盤面・対戦では使っているデッキ、それ以外（デッキ作成・検索）では今のデッキの選択で表示する
+const altArtsOf = id => (typeof ALT_ARTS !== 'undefined' && ALT_ARTS[id]) || [];
+function artDeck() {
+  if (typeof Decks === 'undefined') return null;
+  const board = document.getElementById('view-board');
+  if (board && !board.hidden) {
+    if (typeof Duel !== 'undefined' && Duel.active && Duel.deckId) return Decks.get(Duel.deckId);
+    const sel = document.getElementById('b-deck');
+    if (sel && sel.value) return Decks.get(sel.value);
+  }
+  return Decks.current();
+}
+function artOf(id) {
+  const d = artDeck();
+  const a = d && d.arts && d.arts[id];
+  return a && altArtsOf(id).includes(a) ? a : id;
+}
+
+// 画像を読み込み、すべて失敗したら onFail を呼ぶ（絵違いを選んでいれば、その絵。読めなければ元の絵）
 function cardImg(id, kind, onFail, cls) {
-  const sources = IMG_SOURCES[kind](id);
+  const art = artOf(id);
+  const sources = art !== id ? [...IMG_SOURCES[kind](art), ...IMG_SOURCES[kind](id)] : IMG_SOURCES[kind](id);
   let n = 0;
   const img = el('img', { class: cls || '', src: sources[0], loading: 'lazy', alt: '', draggable: 'false', referrerpolicy: 'no-referrer' });
   img.addEventListener('error', () => {
