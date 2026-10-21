@@ -533,10 +533,10 @@ function relatedGroups(c, text) {
   const usable = x => x.id !== c.id && !isToken(x) && cardAllowed(x, fmt) && !(hide && isUnreleased(x, ctx));
   const seen = new Set([c.id]);
   const groups = [];
-  const add = (title, list) => {
+  const add = (title, list, keep) => {   // keep：並び順をそのままにする
     const cards = list.filter(x => usable(x) && !seen.has(x.id));
     cards.forEach(x => seen.add(x.id));
-    if (cards.length) groups.push({ title, cards });
+    if (cards.length) groups.push({ title, cards, keep });
   };
   const byName = new Map(DB.cards.map(x => [x.name, x]));
   const quoted = [...new Set([...(text || '').matchAll(/「([^「」]+)」/g)].map(m => m[1].trim()).filter(s => s && s !== c.name))];
@@ -547,19 +547,26 @@ function relatedGroups(c, text) {
   if (themeWords.length) add('効果に書かれているテーマのカード', DB.cards.filter(x => themeWords.some(w => (x.nkey || normalizeText(x.name)).includes(w))));
   // 同じテーマ（カテゴリ）のカード
   const mine = cardThemes(c);
-  if (mine.length) add('同じテーマのカード', DB.cards.filter(x => cardThemes(x).some(t => mine.includes(t))));
+  if (mine.length) add('同じテーマのカード', DB.cards.filter(x => { const l = cardThemes(x); return mine.some(S => themeIn(S, l)); }));
   // 近いテーマ・よく一緒に使われるカード（サンプルデッキで、このカードと同じデッキによく入っているもの）
   const co = coUseOf(c);
   if (co) {
-    if (co.themes.length) add('近いテーマのカード（よく一緒に使われるテーマ）', DB.cards.filter(x => cardThemes(x).some(t => co.themes.includes(t))));
+    if (co.themes.length) add('近いテーマのカード（よく一緒に使われるテーマ）', DB.cards.filter(x => { const l = cardThemes(x); return co.themes.some(S => themeIn(S, l)); }));
     if (co.cards.length) add('よく一緒に使われるカード', co.cards);
+  }
+  // 手札誘発：テーマが無く、一緒に使われるカードも決まらないことが多いので、サンプルデッキでよく使われているほかの手札誘発を出す
+  if (handTrapLike(c) && Related.co) {
+    const n = id => Related.co.cardN.get(id) || 0;
+    const byName = new Map();
+    for (const x of DB.cards) if (x.name !== c.name && handTrapLike(x) && n(x.id) >= 2 && n(x.id) > n((byName.get(x.name) || {}).id)) byName.set(x.name, x);
+    add('よく使われる手札誘発・妨害カード（サンプルデッキで多い順）', [...byName.values()].sort((a, b) => n(b.id) - n(a.id)).slice(0, 30), true);
   }
   // 効果にこのカードの名前が書かれているカード
   const quote = `「${c.name}」`;
   add('このカードの名前が効果に書かれているカード', DB.cards.filter(x => x.jaText && x.jaText.includes(quote)));
   // 各グループの中は種類順（モンスター→魔法→罠、EXは後ろ）、同じ種類は新しい順
   const kindRank = x => (isExtraType(x) ? 3 : isMonster(x) ? 0 : has(x, T.SPELL) ? 1 : 2);
-  for (const g of groups) g.cards.sort((a, b) => kindRank(a) - kindRank(b) || b.cid - a.cid);
+  for (const g of groups) if (!g.keep) g.cards.sort((a, b) => kindRank(a) - kindRank(b) || b.cid - a.cid);
   return groups;
 }
 
@@ -781,8 +788,11 @@ const sortMode = () => store.get('ygo.deckSort', 'theme');
 function ownThemes(c) {
   const list = [];
   for (let s = c.setcode || 0; s > 0; s = Math.floor(s / 65536)) list.push(s % 65536);
-  return [...new Set(list.map(s => s & 0xfff).filter(Boolean))];
+  return [...new Set(list.filter(Boolean))];   // テーマの番号は、下3桁が元のテーマ、上の桁がその中の小さなテーマ（例：ブラック・マジシャン、CNo.）
 }
+// カードのテーマの一覧 list が、テーマ S に入るか（ゲームと同じ決まり）：小さなテーマ S なら、その小さなテーマを持つカードだけ。
+// 元のテーマ S なら、その中の小さなテーマのカードも入る。例：「ブラック・マジシャン」に「マジシャン・ガール」は入らない
+const themeIn = (S, list) => list.some(t => t === S || (t <= 0xffff && S <= 0xffff && (t & 0xfff) === (S & 0xfff) && (t & S & 0xf000) === (S & 0xf000)));
 let edoThemeMap = null;
 function edoThemeToOwn() {
   if (edoThemeMap) return edoThemeMap;
@@ -791,7 +801,7 @@ function edoThemeToOwn() {
   for (const c of DB.cards) {
     const e = EDO_CARDS.d[c.id], own = ownThemes(c);
     if (!e || !e[1] || !own.length) continue;
-    for (const t of new Set(e[1].map(s => s & 0xfff).filter(Boolean))) {
+    for (const t of new Set(e[1].filter(Boolean))) {
       if (!count.has(t)) count.set(t, new Map());
       const m = count.get(t);
       for (const o of own) m.set(o, (m.get(o) || 0) + 1);
@@ -807,7 +817,7 @@ function cardThemes(c) {
   if (!e || !e[1]) return [];
   const map = edoThemeToOwn();
   // 置き換え先が無い（カードデータにまだ無い新しいテーマ）は、こちらの番号とぶつからない番号にする
-  return [...new Set(e[1].map(s => s & 0xfff).filter(Boolean).map(t => map.get(t) ?? 0x10000 + t))];
+  return [...new Set(e[1].filter(Boolean).map(t => map.get(t) ?? 0x10000 + t))];
 }
 
 // テーマごと：デッキ全体で多いテーマから順に固め、テーマ内は種類順。2枚以上ないテーマや汎用カードは最後
