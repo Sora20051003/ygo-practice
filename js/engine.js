@@ -27,7 +27,7 @@ const MSG = {
   SORT_CHAIN: 21, SELECT_COUNTER: 22, SELECT_SUM: 23, SELECT_DISFIELD: 24, SORT_CARD: 25, SELECT_UNSELECT_CARD: 26,
   CONFIRM_DECKTOP: 30, CONFIRM_CARDS: 31, SHUFFLE_DECK: 32, NEW_TURN: 40, NEW_PHASE: 41, MOVE: 50, POS_CHANGE: 53, SET: 54,
   SUMMONING: 60, SPSUMMONING: 62, FLIPSUMMONING: 64, CHAINING: 70, CHAIN_SOLVING: 72, CHAIN_SOLVED: 73, CHAIN_END: 74, CHAIN_NEGATED: 75,
-  CHAIN_DISABLED: 76, DRAW: 90, DAMAGE: 91, RECOVER: 92, LPUPDATE: 94, PAY_LPCOST: 100, ATTACK: 110,
+  CHAIN_DISABLED: 76, DRAW: 90, DAMAGE: 91, RECOVER: 92, LPUPDATE: 94, PAY_LPCOST: 100, ATTACK: 110, BATTLE: 111, ATTACK_DISABLED: 112, DAMAGE_STEP_START: 113, DAMAGE_STEP_END: 114,
   TOSS_COIN: 130, TOSS_DICE: 131, ROCK_PAPER_SCISSORS: 132, ANNOUNCE_RACE: 140, ANNOUNCE_ATTRIB: 141,
   ANNOUNCE_CARD: 142, ANNOUNCE_NUMBER: 143, CARD_HINT: 160, PLAYER_HINT: 165,
 };
@@ -324,7 +324,7 @@ class AutoDuel {
     if (this.net) return this.netCreate();
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
-    this.log = []; this.pending = null; this.drawWait = false; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.log = []; this.pending = null; this.drawWait = false; this.attacking = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set();   // 召喚・特殊召喚したばかりのカードの位置（誘発効果を自動で発動するため）
     this.justMoved = new Set();      // 直前に動いたカードの行き先（墓地へ送られた場合などの誘発を聞くため）
@@ -405,7 +405,7 @@ class AutoDuel {
   netCreate() {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
-    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.drawWait = false; this.leaving = 0; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.drawWait = false; this.attacking = null; this.leaving = 0; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set(); this.justMoved = new Set(); this.used = new Map();
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
@@ -577,9 +577,21 @@ class AutoDuel {
         if (link) this.events.push({ t: 'negate', code: link.code, con: link.con, loc: link.loc, seq: link.seq, what: m.type === MSG.CHAIN_NEGATED ? '発動を無効' : '効果を無効' });
         this.addLog(link ? `${this.who(link.con)}${cardName(link.code)} の${m.type === MSG.CHAIN_NEGATED ? '発動' : '効果'}が無効になった` : 'チェーンの効果が無効になった'); break;
       }
+      // 攻撃の演出は、ダメージステップが終わってから出す（攻撃宣言の時点では覚えておくだけ）。
+      // 攻撃が無効になった・ダメージステップまで進まなかった（巻き戻しなど）ときは出さない
       case MSG.ATTACK: {
         const a = m.card, tg = m.target;
-        this.events.push({ t: 'attack', from: { con: a.controller, loc: a.location, seq: a.sequence }, to: tg ? { con: tg.controller, loc: tg.location, seq: tg.sequence } : null, con: a.controller });
+        this.attacking = { t: 'attack', from: { con: a.controller, loc: a.location, seq: a.sequence }, to: tg ? { con: tg.controller, loc: tg.location, seq: tg.sequence } : null, con: a.controller };
+        break;
+      }
+      case MSG.ATTACK_DISABLED: this.attacking = null; break;
+      case MSG.DAMAGE_STEP_END: {
+        const ev = this.attacking;
+        this.attacking = null;
+        if (!ev) break;
+        // この戦闘のダメージの演出（まだ出していないもの）は、攻撃の演出のあとに出す
+        const i = this.events.findIndex(e => e.t === 'damage' && e.battle);
+        if (i < 0) this.events.push(ev); else this.events.splice(i, 0, ev);
         break;
       }
       case MSG.MOVE: {
@@ -594,7 +606,7 @@ class AutoDuel {
         this.addLog(m.from.location ? `${secret ? 'カード' : cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}` : `${secret ? 'カード' : cardName(code)}を${placeText(m.to.controller, m.to.location, m.to.sequence)}に置いた（練習の操作）`);
         break;
       }
-      case MSG.DAMAGE: this.addLog(`${m.player === this.me ? '自分' : '相手'}に ${m.amount} ダメージ`); this.events.push({ t: 'damage', player: m.player, amount: m.amount }); break;
+      case MSG.DAMAGE: this.addLog(`${m.player === this.me ? '自分' : '相手'}に ${m.amount} ダメージ`); this.events.push({ t: 'damage', player: m.player, amount: m.amount, battle: !!this.attacking }); break;
       case MSG.RECOVER: this.addLog(`${m.player === this.me ? '自分' : '相手'}が ${m.amount} 回復`); break;
       case MSG.PAY_LPCOST: this.addLog(`${m.player === this.me ? '自分' : '相手'}が ${m.amount} LPを払った`); break;
       case MSG.LPUPDATE: this.lp[m.player] = Math.max(0, m.lp); break;
