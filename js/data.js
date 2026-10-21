@@ -549,8 +549,10 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
   // 名前が完全一致 → 前方一致 → その他 の順に並べる（ORのときは各語で一番良いもの）
   const matchRankOne = (c, t) => (c.nkey === t ? 0 : c.key.startsWith(t) ? 1 : 2);
   const matchRank = c => (!nq ? 0 : qMode === 'or' ? Math.min(...terms.map(t => matchRankOne(c, t))) : matchRankOne(c, nq));
+  // 新しい順：KONAMI のカード番号の大きい順。発売前のカード（番号がまだ無い）はいちばん新しいものとして先に出す（仮の番号の順）
+  const newness = c => (c.pre ? 1e12 + c.id : c.cid || 0);
   const sorters = {
-    new: (a, b) => b.cid - a.cid,
+    new: (a, b) => newness(b) - newness(a),
     name: (a, b) => (a.ruby || a.name).localeCompare(b.ruby || b.name, 'ja'),
     level: (a, b) => b.level - a.level || b.atk - a.atk,
     atk: (a, b) => b.atk - a.atk,

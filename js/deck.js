@@ -566,7 +566,7 @@ function relatedGroups(c, text) {
   add('このカードの名前が効果に書かれているカード', DB.cards.filter(x => x.jaText && x.jaText.includes(quote)));
   // 各グループの中は種類順（モンスター→魔法→罠、EXは後ろ）、同じ種類は新しい順
   const kindRank = x => (isExtraType(x) ? 3 : isMonster(x) ? 0 : has(x, T.SPELL) ? 1 : 2);
-  for (const g of groups) if (!g.keep) g.cards.sort((a, b) => kindRank(a) - kindRank(b) || b.cid - a.cid);
+  for (const g of groups) if (!g.keep) g.cards.sort((a, b) => kindRank(a) - kindRank(b) || (b.pre ? 1e12 + b.id : b.cid || 0) - (a.pre ? 1e12 + a.id : a.cid || 0));
   return groups;
 }
 
