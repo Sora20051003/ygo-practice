@@ -547,6 +547,7 @@ async function duelJoin(code) {
 
 function enterRoom(code) {
   Duel.code = code;
+  Duel.matchOverShown = false;
   Duel.feed = []; Duel.chat = []; Duel.chatUnread = 0; Duel.seen = new Set(); Duel.opp = null; Duel.oppLogSeen = 0; Duel.lastSent = ''; Duel.turnKey = '';
   Duel.deckId = Duel.deckId || Decks.currentId;
   store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
@@ -661,7 +662,9 @@ function startDuelAs(first) {
   const seed = Array.from(crypto.getRandomValues(new Uint32Array(4)), String);   // 効果を自動処理する対戦で、2人のエンジンを同じにするための乱数の種
   const name = uid => (uid === r.host ? r.hostName : r.guestName);
   Duel.t.sendEvent({ type: 'sys', text: `${name(r.coinWinner)} が${first === r.coinWinner ? '先攻' : '後攻'}を選びました。${name(first)} の先攻です` });
-  Duel.t.updateRoom({ status: 'playing', turn: 1, turnPlayer: first, first, phase: 'DP', seed });
+  // マッチ戦：1本目を始めた時刻から、マッチの制限時間を数える
+  const matchStart = r.match && !r.matchStart ? { matchStart: Date.now(), duelNo: r.duelNo || 1, wins: r.wins || {} } : {};
+  Duel.t.updateRoom({ status: 'playing', turn: 1, turnPlayer: first, first, phase: 'DP', seed, ...matchStart });
 }
 function askFirstOrSecond(r) {
   if (Duel.choosing) return;
@@ -669,7 +672,13 @@ function askFirstOrSecond(r) {
   const mine = r.coinWinner === me;
   const left = () => Math.max(0, Math.ceil(((r.chooseUntil || Date.now()) - Date.now()) / 1000));
   const sec = el('b', { text: String(left()) });
-  const body = mine
+  // マッチ戦の2本目から：前のデュエルで負けた人が選ぶ
+  const byLoser = r.chooseBy === 'loser';
+  const body = byLoser
+    ? el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: matchScoreText(r) }),
+      mine ? el('p', null, '前のデュエルで負けたので、あなたが先攻か後攻かを選びます（あと ', sec, ' 秒。選ばなければ先攻になります）')
+        : el('p', null, `前のデュエルで負けた ${oppName()} が先攻か後攻かを選んでいます…（あと `, sec, ' 秒）'))
+    : mine
     ? el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: '✊ じゃんけん：あなたの勝ち！' + (r.rpsTimeout === 'one' ? `（${oppName()} が時間内に出さなかったため）` : r.rpsTimeout === 'both' ? '（2人とも出さなかったので、ランダムで決めました）' : '') }), el('p', null, '先攻か後攻かを選んでください（あと ', sec, ' 秒。選ばなければ先攻になります）'))
     : el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: `✊ じゃんけん：${oppName()} の勝ち` + (r.rpsTimeout === 'one' ? '（あなたが時間内に出さなかったため）' : r.rpsTimeout === 'both' ? '（2人とも出さなかったので、ランダムで決めました）' : '') }), el('p', null, `${oppName()} が先攻か後攻かを選んでいます…（あと `, sec, ' 秒）'));
   const close = showModal({ title: '先攻・後攻', body, buttons: mine ? [
@@ -715,7 +724,8 @@ function onDuelRoom(r) {
   if (r.status === 'playing' && !Duel.active) {
     // 始まったら、先攻か後攻かを画面の真ん中に大きく出す（入り直したときは出さない）
     if (prev && prev.status !== 'playing' && r.first) showPhaseBanner(r.first === me ? 'あなたは先攻' : 'あなたは後攻', `${r.first === r.host ? r.hostName : r.guestName} の先攻で始めます`, r.first !== me, true);
-    Duel.timeoutSent = false; if (r.mode === 'auto') beginNetDuel(); else beginDuelBoard(); }
+    Duel.timeoutSent = false; Duel.endedShown = false; Duel.extraEndSent = false; Duel.matchTimeSent = r.timeUpTurn != null;
+    if (r.mode === 'auto') beginNetDuel(); else beginDuelBoard(); }
   if (Duel.active) {
     // ターンが変わったら、自分の盤面のターン数・通常召喚・使用済みを更新
     const key = r.turn + ':' + r.turnPlayer;
@@ -733,7 +743,22 @@ function onDuelRoom(r) {
     // フェイズが変わったら盤面を描き直す（光らせる・カードのボタンをフェイズに合わせるため）
     if (r.phase !== Duel.lastPhase && Board.S) { Duel.lastPhase = r.phase; renderBoard(); }
     if (typeof recDuelFrame === 'function' && !Auto.net) recDuelFrame();
-    if (r.status === 'ended' && !Duel.endedShown) {
+    // マッチ戦で、まだマッチが決まっていない：このデュエルの結果を出して部屋の画面に戻る（部屋は出ない。次のデュエルへ）
+    if (r.status === 'ended' && !Duel.endedShown && r.match && !r.matchOver) {
+      Duel.endedShown = true;
+      const why = r.endReason === 'timeout' ? (r.winner === me ? '相手の持ち時間がなくなりました。' : 'あなたの持ち時間がなくなりました。')
+        : r.endReason === 'matchtime' ? 'エキストラターンが終わり、ライフで決めました。' : '';
+      const res = r.winner === me ? 'このデュエルはあなたの勝ちです。' : r.winner ? `このデュエルは ${oppName()} の勝ちです。` : 'このデュエルは引き分けです。';
+      const w = { ...(r.wins || {}) };
+      if (r.winner) w[r.winner] = (w[r.winner] || 0) + 1;
+      const opp = oppUid();
+      closeAllModals();
+      if (typeof closePromptModal === 'function') closePromptModal();
+      endDuelBoard();
+      switchView('duel');
+      showModal({ title: `マッチ戦 ${r.duelNo || 1}本目 終了`, body: el('div', { class: 'stack' }, el('p', { text: why + res }), el('p', { class: 'coin-result', text: `あなた ${w[me] || 0} - ${w[opp] || 0} ${oppName()}` }), el('p', { class: 'muted', text: '勝ち負けが決まっていなければ、このあと次のデュエルを始めます。' })), buttons: [{ label: 'OK', primary: true, onClick: () => {} }] });
+      if (r.host === me) setTimeout(() => nextMatchStep(Duel.room), 3000);
+    } else if (r.status === 'ended' && !Duel.endedShown) {
       Duel.endedShown = true;
       const why = r.endReason === 'timeout' ? (r.winner === me ? '相手の持ち時間がなくなりました。' : 'あなたの持ち時間がなくなりました。') : '';
       const text = why + (r.winner === me ? 'あなたの勝ちです！' : r.winner ? `${oppName()} の勝ちです` : '対戦が終了しました');
@@ -750,6 +775,15 @@ function onDuelRoom(r) {
       const reason = r.endReason === 'timeout' ? '' : r.winner === me ? '（相手が降参しました）' : '';
       showModal({ title: '対戦終了', body: el('p', { text: text + (r.winner === me && !why && r.surrendered ? reason : '') }), buttons: [{ label: 'OK', primary: true, onClick: () => {} }] });
     }
+  }
+  // マッチ戦が決まった：マッチの結果を出して、少ししてから部屋を出る
+  if (r.match && r.matchOver && r.status === 'ended' && !Duel.matchOverShown) {
+    Duel.matchOverShown = true;
+    if (Duel.active) { closeAllModals(); if (typeof closePromptModal === 'function') closePromptModal(); endDuelBoard(); switchView('duel'); }
+    const w = r.wins || {}, opp = r.host === me ? r.guest : r.host;
+    const text = r.matchWinner === me ? 'マッチはあなたの勝ちです！' : r.matchWinner ? `マッチは ${oppName()} の勝ちです` : 'マッチは引き分けです';
+    showModal({ title: '🏆 マッチ戦 終了', body: el('div', { class: 'stack' }, el('p', { class: 'coin-result', text: `あなた ${w[me] || 0} - ${w[opp] || 0} ${oppName()}` }), el('p', { text })), buttons: [{ label: 'OK', primary: true, onClick: () => {} }] });
+    setTimeout(() => { if (Duel.room && Duel.room.matchOver) leaveRoom(); }, 1500);
   }
   renderDuelLobby();
   renderDuelPanel();
@@ -1048,9 +1082,13 @@ function renderDuelLobby() {
       shareUrl && !/^MATCH/.test(Duel.code) ? el('button', { class: 'btn small primary', text: '📨 招待リンクを送る', onclick: shareInvite }) : null),
     /^MATCH/.test(Duel.code) && r && !r.guest ? el('p', { class: 'duel-wait', text: '🎲 だれかが来るのを待っています…（この画面のままお待ちください）' }) : null,
     el('ul', { class: 'duel-players' }, r ? [player(r.host, r.hostName), player(r.guest, r.guestName)] : el('li', { text: '接続中…' })),
+    r && r.match && r.duelNo ? el('p', { class: 'coin-result', text: matchScoreText(r) }) : null,
     r && r.status === 'playing' ? el('button', { class: 'btn primary', text: '▶ 対戦の盤面を開く', onclick: () => { if (!Duel.active) beginDuelBoard(); else switchView('board'); } })
+      // マッチ戦の途中（1本目が終わったあと）は、設定は変えられない。次のデュエルを待つ
+      : r && r.match && !r.matchOver && ((r.duelNo || 1) > 1 || r.status === 'ended') ? el('p', { class: 'muted', text: '次のデュエルの準備をしています…（先攻・後攻が決まると始まります）' })
       : el('div', { class: 'stack' },
         duelModeSetting(r),
+        duelMatchSetting(r),
         duelRuleSetting(r),
         duelErrataSetting(r),
         duelTimeSetting(r),
@@ -1217,7 +1255,7 @@ function duelEndTurn() {
 
 // ---------- 対戦の持ち時間 ----------
 // 部屋を作った人が部屋の最初に決める（30秒〜900秒・無限）。1人ずつの持ち時間で、自分のターンの間だけ減る。0になったら負け
-const duelLimit = () => (Duel.room && Duel.room.timeLimit) || 0;
+const duelLimit = () => (Duel.room && !(Duel.room.match && Duel.room.matchTime) && Duel.room.timeLimit) || 0;   // OCGマッチ戦の制限時間のときは、1人ずつの持ち時間は使わない
 function myClockUsed() {
   const r = Duel.room;
   const base = (r && r.clock && r.clock[Duel.me.uid]) || 0;
@@ -1231,6 +1269,17 @@ function oppClockUsed() {
 function renderDuelClock() {
   const box = $('#b-timer');
   if (!box || !Duel.active) return;
+  // OCGマッチ戦：マッチの残り時間（時間切れのあとはエキストラターンの何ターン目か）
+  const mr = Duel.room;
+  if (mr && mr.match && mr.matchTime && mr.matchStart) {
+    box.hidden = false;
+    const left = matchLeft(mr);
+    const extra = mr.timeUpTurn != null ? duelTurnNow() - mr.timeUpTurn : null;
+    box.textContent = extra == null ? `⏱ マッチ残り ${fmtTime(Math.ceil(left))}` : extra <= 0 ? '⏱ 時間切れ：このターンの終わりまで' : `⏱ エキストラターン ${Math.min(extra, MATCH_EXTRA_TURNS)}／${MATCH_EXTRA_TURNS}`;
+    box.classList.toggle('warn', extra == null && left <= 300 && left > 60);
+    box.classList.toggle('danger', extra != null || left <= 60);
+    return;
+  }
   const lim = duelLimit();
   box.hidden = !lim || !Duel.room || !Duel.room.turn;
   if (box.hidden) return;
@@ -1244,6 +1293,7 @@ function tickDuelClock() {
   if (!Duel.active || !Duel.room) return;
   renderDuelClock();
   const r = Duel.room, lim = duelLimit();
+  tickMatchClock(r);
   // 自分の持ち時間がなくなったら負け（自分の画面で判定して、部屋に知らせる）
   if (lim && r.status === 'playing' && myTurn() && myClockUsed() >= lim && !Duel.timeoutSent) {
     Duel.timeoutSent = true;
@@ -1253,11 +1303,96 @@ function tickDuelClock() {
 }
 setInterval(tickDuelClock, 500);
 
+// ---------- マッチ戦（OCG の大会のルール：2本先取・最大3デュエル） ----------
+// r.match：マッチ戦にする。r.wins = { uid: 勝った数 }、r.duelNo：何本目か。2本目からは、前のデュエルで負けた人が先攻・後攻を選ぶ。
+// r.matchTime：制限時間を「OCGマッチ戦」にする（1マッチ40分。マッチ戦のときだけ選べる）。r.matchStart：マッチを始めた時刻。
+// 時間切れになったら、そのターンの終わりまで続け、さらに3ターンのエキストラターン（r.timeUpTurn：時間切れになったターン）。
+// それでも決まらなければ、ライフの多い人がそのデュエルの勝ち（同じなら引き分け）。マッチは勝った数の多い人の勝ち（同じなら引き分け）
+const MATCH_SEC = 40 * 60;
+const MATCH_EXTRA_TURNS = 3;
+const duelTurnNow = () => (Auto.net && Auto.duel ? Auto.duel.turn : (Duel.room && Duel.room.turn) || 0);
+const matchLeft = r => Math.max(0, MATCH_SEC - (r && r.matchStart ? (Date.now() - r.matchStart) / 1000 : 0));
+function matchScoreText(r) {
+  if (!r || !r.match) return '';
+  const me = Duel.me.uid, opp = r.host === me ? r.guest : r.host, w = r.wins || {};
+  return `マッチ戦 ${r.duelNo || 1}本目　あなた ${w[me] || 0} - ${w[opp] || 0} ${oppName()}`;
+}
+// 部屋の画面：試合の形式（1デュエル／マッチ戦）。部屋を作った人が決める
+function duelMatchSetting(r) {
+  const isHost = r && r.host === Duel.me.uid;
+  const match = !!(r && r.match);
+  if (!isHost) return el('p', { class: 'muted', text: `試合の形式：${match ? 'マッチ戦（2本先取・OCGの大会のルール）' : '1デュエル'}（部屋を作った人が決めます）` });
+  return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: '試合の形式' }),
+    el('div', { class: 'seg full' }, [[false, '1デュエル'], [true, 'マッチ戦（2本先取）']].map(([v, t]) => el('button', {
+      class: match === v ? 'on' : '', text: t,
+      // マッチ戦をやめたら、マッチ戦用の制限時間も外す。変えたら2人とも準備OKをやり直す
+      onclick: () => Duel.t.updateRoom(v ? { match: true, ready: {} } : { match: false, matchTime: false, ready: {} }),
+    }))),
+    el('p', { class: 'muted small-note', text: match ? 'OCGの大会と同じく、先に2回勝った人の勝ちです（最大3デュエル）。2本目からは、前のデュエルで負けた人が先攻・後攻を選びます。' : '1回のデュエルで勝ち負けを決めます。' }));
+}
+// 1本のデュエルが終わったあと（部屋を作った人の端末）：勝った数を足して、次のデュエルへ進むか、マッチを終える
+function nextMatchStep(r) {
+  if (!r || !r.match || r.matchOver || r.host !== Duel.me.uid) return;
+  const wins = { ...(r.wins || {}) };
+  if (r.winner) wins[r.winner] = (wins[r.winner] || 0) + 1;
+  const a = wins[r.host] || 0, b = wins[r.guest] || 0;
+  const timeUp = r.matchTime && (r.timeUpTurn != null || matchLeft(r) <= 0);
+  const name = uid => (uid === r.host ? r.hostName : r.guestName);
+  if (a >= 2 || b >= 2 || timeUp) {
+    const matchWinner = a > b ? r.host : b > a ? r.guest : null;
+    Duel.t.sendEvent({ type: 'sys', text: `マッチ終了（${a} - ${b}）：${matchWinner ? name(matchWinner) + ' の勝ち' : '引き分け'}${timeUp && a < 2 && b < 2 ? '（制限時間）' : ''}` });
+    Duel.t.updateRoom({ wins, matchOver: true, matchWinner, status: 'ended' });
+    return;
+  }
+  // 次のデュエル：前のデュエルで負けた人が先攻・後攻を選ぶ（引き分けなら、じゃんけんから）
+  const loser = r.winner ? (r.winner === r.host ? r.guest : r.host) : null;
+  const next = { wins, duelNo: (r.duelNo || 1) + 1, winner: null, endReason: null, surrendered: false, timeUpTurn: null, clock: {}, turn: 0, turnPlayer: null, phase: 'DP', rps: {}, rpsTimeout: null, rpsLast: null };
+  Duel.t.sendEvent({ type: 'sys', text: `${next.duelNo}本目を始めます（${a} - ${b}）。${loser ? name(loser) + ' が先攻・後攻を選びます' : 'じゃんけんで先攻・後攻を選ぶ人を決めます'}` });
+  Duel.t.updateRoom(loser ? { ...next, status: 'choosing', coinWinner: loser, chooseBy: 'loser', chooseUntil: Date.now() + CHOOSE_SEC * 1000 }
+    : { ...next, status: 'rps', rpsRound: 1, chooseBy: null, chooseUntil: Date.now() + RPS_SEC * 1000 });
+}
+// マッチの制限時間（部屋を作った人の端末で見張る）：時間切れの記録と、エキストラターンが終わったときの勝ち負け
+function tickMatchClock(r) {
+  if (!r || !r.match || !r.matchTime || r.host !== Duel.me.uid || r.status !== 'playing' || !r.matchStart) return;
+  const turn = duelTurnNow();
+  if (r.timeUpTurn == null) {
+    if (matchLeft(r) <= 0 && !Duel.matchTimeSent) {
+      Duel.matchTimeSent = true;
+      Duel.t.sendEvent({ type: 'sys', text: `マッチの制限時間（40分）になりました。このターンの終わりまで続け、そのあと${MATCH_EXTRA_TURNS}ターンのエキストラターンです` });
+      Duel.t.updateRoom({ timeUpTurn: turn });
+    }
+    return;
+  }
+  if (turn > r.timeUpTurn + MATCH_EXTRA_TURNS && !Duel.extraEndSent) {
+    Duel.extraEndSent = true;
+    const me = Duel.me.uid, opp = oppUid();
+    const myLp = Auto.net && Auto.duel ? Auto.duel.lp[Auto.duel.me] : (Board.S && Board.S.lp) ?? 8000;
+    const oppLp = Auto.net && Auto.duel ? Auto.duel.lp[1 - Auto.duel.me] : (Duel.opp && Duel.opp.lp) ?? 8000;
+    const winner = myLp > oppLp ? me : oppLp > myLp ? opp : null;
+    Duel.t.sendEvent({ type: 'sys', text: `エキストラターン終了：ライフ ${myLp} 対 ${oppLp}。${winner ? (winner === me ? Duel.me.name : oppName()) + ' の勝ち' : '引き分け'}` });
+    Duel.t.updateRoom({ status: 'ended', winner, endReason: 'matchtime' });
+  }
+}
+
 // 部屋の画面：持ち時間の設定（部屋を作った人だけが変えられる）
 function duelTimeSetting(r) {
   const lim = (r && r.timeLimit) || 0;
   const isHost = r && r.host === Duel.me.uid;
+  // マッチ戦のときだけ「OCGマッチ戦」（1マッチ40分）を選べる
+  if (r && r.match) {
+    const mt = !!r.matchTime;
+    const note = 'OCGマッチ戦：1マッチ（最大3デュエル）で40分。時間切れになったら、そのターンの終わりまで続け、さらに3ターンのエキストラターン。それでも決まらなければライフの多い人がそのデュエルの勝ち（同じなら引き分け）。マッチは勝った数の多い人の勝ち（同じなら引き分け）。';
+    const pick = isHost ? el('div', { class: 'seg full' }, [[false, '1人ずつの持ち時間'], [true, 'OCGマッチ戦（40分）']].map(([v, t]) => el('button', {
+      class: mt === v ? 'on' : '', text: t, onclick: () => Duel.t.updateRoom({ matchTime: v, ready: {} }),
+    }))) : el('p', { class: 'muted', text: `制限時間：${mt ? 'OCGマッチ戦（1マッチ40分）' : '1人ずつの持ち時間'}（部屋を作った人が決めます）` });
+    if (mt) return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: '制限時間のルール' }), pick, el('p', { class: 'muted small-note', text: note }));
+    if (!isHost) return el('div', { class: 'stack' }, pick, el('p', { class: 'muted', text: `持ち時間：${timeLabel(lim)}` }));
+    return el('div', { class: 'stack' }, el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: '制限時間のルール' }), pick), duelTimeSlider(r, lim));
+  }
   if (!isHost) return el('p', { class: 'muted', text: `持ち時間：${timeLabel(lim)}（部屋を作った人が決めます）` });
+  return duelTimeSlider(r, lim);
+}
+function duelTimeSlider(r, lim) {
   const label = el('b', { text: timeLabel(lim) });
   const range = el('input', { type: 'range', min: 30, max: 930, step: 30, value: lim || 930, class: 'full' });
   const val = () => (+range.value > 900 ? 0 : +range.value);
