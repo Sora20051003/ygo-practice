@@ -580,7 +580,7 @@ function openOppHandPicker() {
 
 // ---------- カードの上に出す操作ボタン（マスターデュエル風） ----------
 function autoActionPopup(uid) {
-  hideActionPopup();
+  hideActionPopup(true);
   const node = document.querySelector(`.bcard[data-uid="${uid}"]`);
   const loc = locate(uid);
   if (!node || !loc) return false;
@@ -590,7 +590,7 @@ function autoActionPopup(uid) {
     acts.map(a => el('button', { class: 'ap-act' + (a.kind ? ' k-' + a.kind : ''), text: a.label, title: a.title || null, onclick: e => { e.stopPropagation(); hideActionPopup(); runAction(a); } })),
     isMobile() ? el('button', { class: 'ap-act k-info', text: '🔍 詳細', onclick: e => { e.stopPropagation(); hideActionPopup(); showBoardDetail(loc); } }) : null);
   document.body.append(box);
-  const r = localRect(node.getBoundingClientRect()), b = { width: box.offsetWidth, height: box.offsetHeight };
+  const r = localRect((document.getElementById('hand-zoom') || node).getBoundingClientRect()), b = { width: box.offsetWidth, height: box.offsetHeight };
   let left = r.left + r.width / 2 - b.width / 2, top = r.top - b.height - 6;
   if (top < 4) top = r.bottom + 6;
   left = Math.max(4, Math.min(left, viewW() - b.width - 4));
@@ -599,9 +599,10 @@ function autoActionPopup(uid) {
   return true;
 }
 function onOutsideAction(e) { if (!e.target.closest('#ap-actions')) hideActionPopup(); }
-function hideActionPopup() {
+function hideActionPopup(keepZoom) {
   const b = $('#ap-actions');
   if (b) b.remove();
+  if (!keepZoom && typeof hideHandZoom === 'function') hideHandZoom();
   document.removeEventListener('pointerdown', onOutsideAction, true);
 }
 

@@ -1540,3 +1540,7 @@ body.land.tilt #view-board .field {
 }
 body.land #view-board #board-detail, body.land #view-board #board-detail.show { z-index: auto; }
 .settings .seg button { flex: 1; }
+/* 選んだ手札（少し大きくして手札の上に出す） */
+.hand-zoom { position: fixed; z-index: 59; pointer-events: none; margin: 0; transform: none; box-shadow: 0 8px 24px rgba(0,0,0,.6), 0 0 0 2px var(--accent); border-radius: 6px; }
+/* ポーズ中はカードの説明を消す */
+body.paused #land-left #board-detail { visibility: hidden; }

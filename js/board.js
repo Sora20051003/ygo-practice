@@ -318,6 +318,8 @@ function toggleUsed(name) {
 }
 
 function openCardMenu(uid, x, y) {
+  hideHandZoom();
+  if (isLand()) { const l0 = locate(uid); if (l0 && l0.zone === 'hand') showHandZoom(uid); }
   if (Board.S && Board.S.auto) {
     // 自動処理モード：選択中なら盤面から選ぶ。そうでなければカードの上に操作ボタンを出す（マスターデュエル風）
     if (Auto.selectable && Auto.selectable.has(uid)) { Auto.pickFromBoard(uid); return; }
@@ -994,8 +996,8 @@ async function confirmDeckRules(deck, go) {
 
 // ---------- ポーズ画面 ----------
 const pauseOpen = () => !$('#pause').hidden;
-function openPause() { $('#pause-ver').textContent = '版 ' + APP_VERSION; renderPauseSummary(); $('#pause').hidden = false; timerHold(true); renderTimer(); }
-function closePause() { $('#pause').hidden = true; timerHold(false); renderPauseSummary(); renderTimer(); }
+function openPause() { document.body.classList.add('paused'); hideHandZoom(); $('#pause-ver').textContent = '版 ' + APP_VERSION; renderPauseSummary(); $('#pause').hidden = false; timerHold(true); renderTimer(); }
+function closePause() { document.body.classList.remove('paused'); $('#pause').hidden = true; timerHold(false); renderPauseSummary(); renderTimer(); }
 // 盤面の左に出す「今の設定」の短い説明
 function renderPauseSummary() {
   const box = $('#b-summary');
@@ -1426,7 +1428,7 @@ function levelBadge(card, inst) {
 // カードを押したとき、カードの上に「召喚・特殊召喚・効果の発動」だけを出す（ほかは「その他の操作…」）。
 // 出すかどうかは、今の盤面をエンジンで判定した結果（glow.js の snapActions）に合わせる
 function quickActionPopup(uid, x, y) {
-  if (typeof hideActionPopup === 'function') hideActionPopup();
+  if (typeof hideActionPopup === 'function') hideActionPopup(true);
   const node = document.querySelector(`.bcard[data-uid="${uid}"]`);
   const loc = locate(uid);
   if (!node || !loc) return false;
@@ -1458,7 +1460,7 @@ function quickActionPopup(uid, x, y) {
     el('button', { class: 'ap-act k-info', text: acts.length ? 'その他の操作…' : '操作…', onclick: e => { e.stopPropagation(); hideActionPopup(); showMenu(x, y, items); } }),
     isMobile() ? el('button', { class: 'ap-act k-info', text: '🔍 詳細', onclick: e => { e.stopPropagation(); hideActionPopup(); showBoardDetail(locate(uid) || loc); } }) : null);
   document.body.append(box);
-  const rr = localRect(node.getBoundingClientRect()), b = { width: box.offsetWidth, height: box.offsetHeight };
+  const rr = localRect((document.getElementById('hand-zoom') || node).getBoundingClientRect()), b = { width: box.offsetWidth, height: box.offsetHeight };
   let left = rr.left + rr.width / 2 - b.width / 2, top = rr.top - b.height - 6;
   if (top < 4) top = rr.bottom + 6;
   left = Math.max(4, Math.min(left, viewW() - b.width - 4));
@@ -1513,3 +1515,23 @@ function phaseBannerOnce(key, main, sub, opp) {
   PhaseBanner.last = key;
   showPhaseBanner(main, sub, opp);
 }
+
+// ---------- 選んだ手札を大きく見せる（横画面。手札は上側しか見えないので、カード全体を少し大きくして手札の上に出す） ----------
+function showHandZoom(uid) {
+  hideHandZoom();
+  const node = document.querySelector(`#hand .bcard[data-uid="${uid}"]`);
+  if (!node) return;
+  const r = localRect(node.getBoundingClientRect());
+  const w = Math.round(node.offsetWidth * 1.3), h = Math.round(w * 1.46);
+  const z = node.cloneNode(true);
+  z.removeAttribute('data-uid');
+  z.querySelectorAll('[data-uid],[data-cid]').forEach(x => { x.removeAttribute('data-uid'); x.removeAttribute('data-cid'); });
+  z.id = 'hand-zoom';
+  z.classList.add('hand-zoom');
+  const left = Math.max(4, Math.min(r.left + r.width / 2 - w / 2, viewW() - w - 4));
+  Object.assign(z.style, { left: left + 'px', top: Math.max(4, viewH() - h - 4) + 'px', width: w + 'px' });
+  document.body.append(z);
+}
+function hideHandZoom() { const z = document.getElementById('hand-zoom'); if (z) z.remove(); }
+// ほかの場所を触ったら消す（操作のボタン・メニューを押したときは、その処理で消える）
+document.addEventListener('pointerdown', e => { if (!e.target.closest('#ap-actions, #menu, #hand')) hideHandZoom(); }, true);
