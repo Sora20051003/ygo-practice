@@ -146,7 +146,17 @@ const IMG_SOURCES = {
 // ---------- 絵違い ----------
 // 絵違い（イラスト違い）のあるカードは、デッキごとにどの絵で表示するかを選べる（deck.arts = { カード: 画像番号 }）。
 // 盤面・対戦では使っているデッキ、それ以外（デッキ作成・検索）では今のデッキの選択で表示する
-const altArtsOf = id => (typeof ALT_ARTS !== 'undefined' && (ALT_ARTS[id] || ALT_ARTS[imgIdOf(id)])) || [];
+// そのカードの番号と、画像のサイトでの番号（IMG_IDS）の両方の絵違いを合わせる（そのカード自身の番号は除く）
+const altArtsCache = new Map();
+function altArtsOf(id) {
+  if (typeof ALT_ARTS === 'undefined') return [];
+  if (altArtsCache.has(id)) return altArtsCache.get(id);
+  const real = imgIdOf(id);
+  // 発売前の仮の番号のカードは、正式な番号の絵がそのカードの絵なので、絵違いには入れない
+  const list = [...new Set([...(ALT_ARTS[id] || []), ...(real !== id ? [...(ALT_ARTS[real] || []), ...(id < 100000000 ? [real] : [])] : [])])].filter(x => x !== id && x !== real || (x === real && id < 100000000));
+  altArtsCache.set(id, list);
+  return list;
+}
 function artDeck() {
   if (typeof Decks === 'undefined') return null;
   const board = document.getElementById('view-board');
