@@ -60,7 +60,7 @@ def parse_list(page):
         forces = [strip(x) for x in re.findall(r'<td class="card-force"[^>]*>(.*?)</td>', row, re.S)]
         text = re.search(r'<td class="card-text"[^>]*>(.*?)</td>', row, re.S)
         out[num] = {
-            "name": strip(nm.group(2)), "ruby": strip(nm.group(1) or ""),
+            "name": re.sub(r"NEW$", "", strip(nm.group(2))).strip(), "ruby": strip(nm.group(1) or ""),   # 「NEW」は新規カードの印
             "attr": get("card-attr"), "star": get("card-star"), "race": get("card-type"),
             "atk": forces[0] if forces else "", "def": forces[1] if len(forces) > 1 else "",
             "text": strip(text.group(1)) if text else "",
@@ -99,10 +99,17 @@ def main():
     # アプリのカードデータ（ygocdb）：日本語の名前 → 番号
     z = zipfile.ZipFile(io.BytesIO(fetch("https://ygocdb.com/api/v0/cards.zip", 180)))
     ycdb = json.loads(z.read(z.namelist()[0]))
-    have = {}
+    # 同じカードを見分ける：日本語の名前・英語の名前・新しいカードのモンスターの値（種類・レベル・種族・属性・攻守）
+    have, have_en, stats = {}, {}, {}
     for e in ycdb.values():
         if e.get("jp_name"):
             have[re.sub(r"\s", "", e["jp_name"])] = e.get("id")
+        if e.get("en_name"):
+            have_en[e["en_name"].lower()] = e.get("id")
+        d = e.get("data") or {}
+        if (e.get("cid") or 0) >= 23000 and d.get("type", 0) & TYPE_MONSTER:
+            k = (d.get("type"), d.get("level"), d.get("race"), d.get("attribute"), d.get("atk"), d.get("def"))
+            stats.setdefault(k, []).append(e.get("id"))
 
     cards, pre_map, done = [], {}, set()
     for f in files:
@@ -134,9 +141,14 @@ def main():
                     ja = hits[0]
             name = ja["name"] if ja else en
             key = re.sub(r"\s", "", name)
-            if key in have:
-                if have[key] != cid:
-                    pre_map[have[key]] = cid   # アプリのデータでは別の仮の番号：効果の処理はこちらの番号のスクリプトを使う
+            # アプリのカードデータにもう入っているカード（名前・英語名・新しいカードで値が同じモンスター）は入れない
+            same = have.get(key) or have_en.get((en or "").lower())
+            if not same and not ja and typ & TYPE_MONSTER:   # 日本語の名前が分かったカードは、名前だけで見分ける
+                s = stats.get((typ, lv, race, attr, atk, df)) or []
+                same = s[0] if len(s) == 1 else None
+            if same:
+                if same != cid:
+                    pre_map[same] = cid   # アプリのデータでは別の仮の番号：効果の処理はこちらの番号のスクリプトを使う
                 continue
             cards.append([cid, typ, lv, race, attr, atk, df, name, ja["ruby"] if ja else "", en,
                           ja["text"] if ja else desc, code.upper(), 0 if ja else 1])
