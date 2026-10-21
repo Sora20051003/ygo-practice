@@ -1484,3 +1484,6 @@ body.land.tilt #view-board .field {
 body.land.tilt #view-board .field.duel { --fh: calc(var(--cw) * 7.86 + 10px); }
 body.land.tilt #view-board .hand .bcard { width: calc(var(--cw) * 0.95); }
 .pause-tilt { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 14px; }
+/* フェイズの選択：「ターン終了」はフェイズのボタンから離して、押し間違えないようにする */
+.ph-pop .ph-chips { padding-bottom: 16px; border-bottom: 1px dashed var(--line); }
+.ph-pop .ph-end { margin-top: 14px; }
