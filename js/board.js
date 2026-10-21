@@ -831,6 +831,14 @@ function setupBoardView() {
   for (const b of $$('#pause .pause-nav [data-go]')) b.onclick = () => { closePause(); switchView(b.dataset.go); };
   $('#b-quickstart').onclick = () => startGame();
   $('#pause').addEventListener('click', e => { if (e.target.id === 'pause') closePause(); });
+  // スマホ横画面：ポーズ画面へ移した操作（1手戻す・ドローなど）を押したら、ポーズを閉じて盤面に戻る。
+  // 設定の切り替え・ライフの増減・チャット・ログのコピーなどは閉じない
+  $('#pause').addEventListener('click', e => {
+    const b = e.target.closest('#pause-ctrl button');
+    if (!b || !isLand() || b.disabled) return;
+    if (b.closest('.seg, .chat-row, details > summary, .ap-trapbox') || ['dp-my-minus', 'dp-my-plus', 'dp-damage', 'b-used-clear', 'b-copylog', 'dp-send', 'b-pause', 'dp-pause'].includes(b.id) || b.classList.contains('x') || b.classList.contains('slot-rename') || b.classList.contains('slot-close')) return;
+    setTimeout(() => { if (!$('#pause').hidden) closePause(); }, 0);
+  });
   for (const id of ['#b-deck', '#b-handsize']) $(id).addEventListener('change', renderPauseSummary);
   $('#b-mode').addEventListener('click', () => setTimeout(renderPauseSummary));
   renderPauseSummary();
@@ -879,8 +887,8 @@ function previewCard(c) {
   if (!c) return;
   Board.detailCard = c;
   if (!isMobile()) {
-
     renderDetail($('#board-detail'), c);
+    showLandDetail();
     return;
   }
   const bar = $('#m-preview');
@@ -903,6 +911,7 @@ const previewFromEvent = e => {
   if ($('#view-board').hidden) return;
   if (e.target.closest('#board-detail, .detail-sheet, #m-preview')) return;
   const n = e.target.closest('[data-cid]');
+  if (!n && isLand() && e.target.closest('#view-board .board-center') && !e.target.closest('#land-rail, #ph-pop')) hideLandDetail();
   if (n) previewCard(DB.byId.get(+n.dataset.cid));
 };
 document.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') previewFromEvent(e); }, true);
@@ -1073,14 +1082,95 @@ function updateLandscape() {
   // 横画面として使える幅と高さ（回したときは入れ替わる）
   b.style.setProperty('--lw', (rotated ? innerHeight : innerWidth) + 'px');
   b.style.setProperty('--lh', (rotated ? innerWidth : innerHeight) + 'px');
-  // 横画面では、相手の帯とフェイズの帯を左の欄へ移して、盤面の高さを広く使う
-  const top = $('#land-top'), center = $('#view-board .board-center'), fieldEl = $('#field');
-  if (top && center && fieldEl) {
-    const opp = $('#opp-bar'), ph = $('#phase-bar');
-    if (land && opp.parentNode !== top) top.append(opp, ph);
-    if (!land && opp.parentNode === top) center.insertBefore(opp, fieldEl), center.insertBefore(ph, fieldEl);
+  // 横画面（スマホ）では盤面を大きくするため、左の操作の欄とページの切り替えをポーズ画面へ移す。
+  // 盤面の右端には、ポーズ・フェイズの進行・チェーン確認だけを置く（#land-rail）
+  const side = $('#view-board .side-left'), layout = $('#view-board .board-layout'), center = $('#view-board .board-center'), slots = $('#b-slots'), pbox = $('#pause .pause-box');
+  if (side && layout && center && pbox) {
+    let host = $('#pause-ctrl');
+    if (land && side.parentNode === layout) {
+      if (!host) host = el('div', { class: 'pause-ctrl', id: 'pause-ctrl' });
+      pbox.insertBefore(host, pbox.children[1] || null);
+      host.append(slots, side);
+    }
+    if (!land && side.parentNode !== layout) {
+      layout.prepend(side);
+      center.prepend(slots);
+      if (host) host.remove();
+    }
   }
+  if (!land) { closePhasePop(); hideLandDetail(); }
+  renderLandRail();
 }
+
+// ---------- スマホ横画面：盤面の右端の操作（ポーズ・フェイズ・チェーン確認） ----------
+const isLand = () => document.body.classList.contains('land');
+function renderLandRail() {
+  const center = $('#view-board .board-center');
+  if (!center) return;
+  let rail = $('#land-rail');
+  if (!rail) {
+    rail = el('div', { class: 'land-rail', id: 'land-rail' });
+    for (const t of ['pointerdown', 'mousedown', 'contextmenu']) rail.addEventListener(t, e => e.stopPropagation());
+    center.append(rail);
+  }
+  if (!isLand()) { rail.hidden = true; return; }
+  rail.hidden = false;
+  rail.innerHTML = '';
+  rail.append(el('button', { class: 'lr-pause', title: 'ポーズ（操作・設定・ログ）', onclick: () => { closePhasePop(); openPause(); } }, el('b', { text: '⏸' }), el('small', { text: 'ポーズ' })));
+  // フェイズ：今のフェイズを出し、押すと進められるフェイズとターン終了が出る
+  const st = phaseState();
+  const ph = el('button', { class: 'lr-phase' + (st && !st.mine ? ' opp' : '') + (st && st.cur === 'EP' ? ' ep' : ''), id: 'ph-btn', disabled: !st, onclick: togglePhasePop });
+  if (st) ph.append(el('small', { text: `T${st.turn} ${st.mine ? '自分' : '相手'}` }), el('b', { text: (PHASES.find(x => x[0] === st.cur) || [, '－'])[1] }), el('small', { class: 'lr-more', text: st.mine && (st.endOk || Object.values(st.can).some(Boolean)) ? '進める ▸' : '' }));
+  else ph.append(el('small', { text: 'フェイズ' }), el('b', { text: '－' }));
+  rail.append(ph);
+  // チェーン確認（効果を自動処理するときだけ）
+  const sel = $('#ap-chain');
+  if (sel && Board.S && Board.S.auto) {
+    const seg = el('div', { class: 'lr-chain' }, el('small', { text: 'チェーン' }));
+    for (const [v, label] of [['off', 'オフ'], ['always', 'オン'], ['auto', '自動']]) {
+      seg.append(el('button', { class: sel.value === v ? 'on' : '', text: label, onclick: () => { sel.value = v; sel.onchange({ target: sel }); renderLandRail(); toast(`チェーン確認：${label}`); } }));
+    }
+    rail.append(seg);
+  }
+  const pop = $('#ph-pop');
+  if (pop) fillPhasePop(pop);
+}
+// フェイズの選択（右端のフェイズを押したときに出る）
+function togglePhasePop() {
+  if ($('#ph-pop')) { closePhasePop(); return; }
+  const pop = el('div', { class: 'ph-pop', id: 'ph-pop' });
+  for (const t of ['pointerdown', 'mousedown', 'contextmenu']) pop.addEventListener(t, e => e.stopPropagation());
+  $('#view-board .board-center').append(pop);
+  fillPhasePop(pop);
+  setTimeout(() => document.addEventListener('click', phasePopOutside, true), 0);
+}
+function fillPhasePop(pop) {
+  if (!phaseState()) { closePhasePop(); return; }
+  fillPhase(pop, false);
+  pop.hidden = false;
+  // 選んだら閉じる
+  pop.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setTimeout(closePhasePop, 0)));
+}
+function phasePopOutside(e) { if (!e.target.closest('#ph-pop, #ph-btn')) closePhasePop(); }
+function closePhasePop() {
+  const p = $('#ph-pop');
+  if (p) p.remove();
+  document.removeEventListener('click', phasePopOutside, true);
+}
+// 横画面：カードの詳細は、押したときだけ左に重ねて出す（×で閉じる）
+function showLandDetail() {
+  const det = $('#board-detail');
+  if (!det || !isLand()) return;
+  if (!det._xWatch) {
+    // 詳細を書き直したとき（効果の処理で更新されたときなど）も×を付け直す
+    det._xWatch = new MutationObserver(() => { if (det.classList.contains('show') && !det.querySelector('.land-detail-x')) addX(); });
+    det._xWatch.observe(det, { childList: true });
+  }
+  const addX = () => det.prepend(el('button', { class: 'land-detail-x', text: '×', title: '閉じる', onclick: e => { e.stopPropagation(); hideLandDetail(); } }));
+  if (!det.querySelector('.land-detail-x')) addX();
+  det.classList.add('show');
+}
+function hideLandDetail() { const det = $('#board-detail'); if (det) det.classList.remove('show'); }
 function setupRotateHint() {
   addEventListener('resize', updateLandscape);
   addEventListener('orientationchange', () => setTimeout(updateLandscape, 200));
@@ -1137,16 +1227,16 @@ const phaseInCell = () => !document.body.classList.contains('land') && !isMobile
 function renderPhaseBar() {
   const strip = $('#phase-bar');
   if (!strip) return;
+  renderLandRail();
   if (phaseInCell()) { strip.hidden = true; const cell = $('#phase-cell'); if (cell) fillPhase(cell, true); return; }
   fillPhase(strip, false);
 }
-function fillPhase(bar, inCell) {
+// 今のターン・フェイズと、進められるフェイズ（can）・ターンを終えられるか（endOk）。始まっていなければ null
+// エンドフェイズは直接選べない（「ターン終了」で、まずエンドフェイズに止まる）
+function phaseState() {
   const S = Board.S;
   const dueling = typeof Duel !== 'undefined' && Duel.active;
-  // 盤面のマスは消すと並びがずれるので、中身だけ空にする
-  const hide = () => { if (inCell) { bar.innerHTML = ''; bar.classList.add('empty'); } else bar.hidden = true; };
-  bar.hidden = false; bar.innerHTML = ''; bar.classList.remove('empty');
-  if (!S || (dueling && !(Duel.room && Duel.room.turn))) { hide(); return; }
+  if (!S || (dueling && !(Duel.room && Duel.room.turn))) return null;
   let turn, mine = true, cur, can = {}, endOk, endLabel = 'ターン終了 ▶';
   if (dueling && !S.auto) {
     // 対戦：ターンとフェイズは部屋で共有する。自分のターンだけ進められる
@@ -1154,25 +1244,37 @@ function fillPhase(bar, inCell) {
     turn = r.turn; mine = myTurn(); cur = r.phase || 'DP';
     const i = PHASES.findIndex(x => x[0] === cur);
     const noBattle = r.turn === 1;
-    can = { SP: cur === 'DP', M1: i < 2, BP: i < 3 && !noBattle, M2: cur === 'BP', EP: cur !== 'EP' };
+    can = { SP: cur === 'DP', M1: i < 2, BP: i < 3 && !noBattle, M2: cur === 'BP' };
     endOk = mine && r.status === 'playing';
+    if (cur === 'EP') endLabel = 'ターンを終える ▶';
     if (r.status === 'ended') endLabel = '対戦終了';
   } else if (S.auto) {
     const d = Auto.duel, p = d && d.pending;
-    if (!d) { hide(); return; }
+    if (!d) return null;
     turn = d.turn; mine = d.turnPlayer === d.me; cur = enginePhase(d.phase);
     const idle = p && p.type === MSG.SELECT_IDLECMD, battle = p && p.type === MSG.SELECT_BATTLECMD;
-    can = { BP: idle && p.to_bp, M2: battle && p.to_m2, EP: (idle || battle) && p.to_ep };
-    endOk = can.EP;
+    can = { BP: idle && p.to_bp, M2: battle && p.to_m2 };
+    endOk = (idle || battle) && p.to_ep;
     if (d.ended) { endOk = false; endLabel = '対戦終了'; }
   } else {
     turn = S.turn; cur = S.phase || 'M1';
     const i = PHASES.findIndex(x => x[0] === cur);
     const noBattle = S.turn === 1;   // 先攻の最初のターンはバトルフェイズに入れない
     // 先のフェイズへ進める（戻ることはできない）。メイン2はバトルフェイズからだけ
-    can = { SP: cur === 'DP', M1: i < 2, BP: i < 3 && !noBattle, M2: cur === 'BP', EP: cur !== 'EP' };
+    can = { SP: cur === 'DP', M1: i < 2, BP: i < 3 && !noBattle, M2: cur === 'BP' };
     endOk = true;
+    if (cur === 'EP') endLabel = 'ターンを終える ▶';
   }
+  return { turn, mine, cur, can, endOk, endLabel, dueling };
+}
+function fillPhase(bar, inCell) {
+  const S = Board.S;
+  // 盤面のマスは消すと並びがずれるので、中身だけ空にする
+  const hide = () => { if (inCell) { bar.innerHTML = ''; bar.classList.add('empty'); } else bar.hidden = true; };
+  bar.hidden = false; bar.innerHTML = ''; bar.classList.remove('empty');
+  const st = phaseState();
+  if (!st) { hide(); return; }
+  const { turn, mine, cur, can, endOk, endLabel, dueling } = st;
   const curIdx = PHASES.findIndex(x => x[0] === cur);
   // 手動・対戦（手動）：フェイズが変わったら画面に大きく出す
   if (!S.auto && cur) {
@@ -1213,6 +1315,15 @@ function endTurn() {
   if (!S) return;
   if (typeof Duel !== 'undefined' && Duel.active) { duelEndTurn(); return; }
   if (S.auto) { autoPhase('ep'); return; }
+  // 手動：まずエンドフェイズで止まる（エンドフェイズの処理をしてから、もう一度押すとターンを終える）
+  if (S.phase !== 'EP') {
+    commit();
+    S.phase = 'EP';
+    log('エンドフェイズへ');
+    toast('エンドフェイズです。もう一度「ターンを終える」を押すと次のターンへ');
+    finishChange();
+    return;
+  }
   // 手動：相手のターンは飛ばして、自分の次のターンのドローフェイズへ（1枚ドロー）
   commit();
   S.turn += 2; S.ns = false; S.used = []; S.phase = 'DP';

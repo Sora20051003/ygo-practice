@@ -423,7 +423,7 @@ const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform 
 
 // カードの詳細を出す。パソコンは右の欄、スマホは画面下から出る窓
 function showCardDetail(c, panelSel, extra) {
-  if (!isMobile()) { renderDetail($(panelSel), c, extra); return; }
+  if (!isMobile()) { renderDetail($(panelSel), c, extra); if (panelSel === '#board-detail' && typeof showLandDetail === 'function') showLandDetail(); return; }
   const body = el('div', { class: 'detail-sheet' });
   renderDetail(body, c, extra);
   showModal({ title: c.name, body });

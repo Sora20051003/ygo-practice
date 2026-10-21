@@ -469,6 +469,7 @@ function setupAutoPlay() {
     store.set('ygo.chainMode', e.target.value);
     paintChain();
     if (Auto.duel) { Auto.duel.chainMode = e.target.value; autoSave(); }
+    if (typeof renderLandRail === 'function') renderLandRail();
   };
   // 任意の効果は聞くのが標準（前に自動にしていた設定は1回だけオフに戻す）
   if (!store.get('ygo.autoTrigger2', false)) { store.set('ygo.autoTrigger2', true); store.set('ygo.autoTrigger', false); }
@@ -770,6 +771,7 @@ function promptTitle(p) {
       if (Auto.duel && Auto.duel.chain.length) return 'チェーンして発動しますか？';
       // フェイズを進めようとしているとき（フェイズが終わる前に発動できる）
       if (Auto.duel && Auto.duel.leaving) return `${leavingText(Auto.duel)}。効果を発動しますか？`;
+      if (Auto.duel && Auto.duel.phase === 512 && Auto.duel.turnPlayer === Auto.duel.me) return 'エンドフェイズです。効果を発動しますか？';
       return '効果を発動しますか？';
     case MSG.SELECT_EFFECTYN: return `「${cardName(p.code)}」の効果を発動しますか？`;
     case MSG.SELECT_YESNO: return descText(p.description) || 'はい／いいえ';
@@ -1009,9 +1011,10 @@ function openPrompt() {
       const lead = ch.length
         ? `チェーン${ch.length + 1}として発動できます（チェーン${ch.length}：${ch[ch.length - 1].con === d.me ? '' : '相手の'}${cardName(ch[ch.length - 1].code)}）。発動する効果を選んで「発動する」を押してください`
         : d.leaving ? `${leavingText(d)}。フェイズが終わる前に発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないとフェイズが進みます）`
+        : d.phase === 512 && d.turnPlayer === d.me ? 'エンドフェイズです。ターンを終える前に発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないとターンが進みます）'
         : '発動できる効果があります。発動する効果を選んで「発動する」を押してください';
       promptModal(el('div', { class: 'stack' }, el('p', { class: 'muted', text: lead }), grid,
-        el('div', { class: 'row' }, go, p.forced ? null : el('button', { class: 'btn', text: '発動しない', onclick: () => answer({ type: RES.SELECT_CHAIN, index: null }) }))));
+        el('div', { class: 'row' }, go, p.forced ? null : el('button', { class: 'btn', text: d.phase === 512 && d.turnPlayer === d.me && !ch.length ? '発動しない（ターンを進める）' : '発動しない', onclick: () => answer({ type: RES.SELECT_CHAIN, index: null }) }))));
       break;
     }
     case MSG.SELECT_EFFECTYN:

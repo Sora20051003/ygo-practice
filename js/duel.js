@@ -1080,6 +1080,7 @@ function renderDuelPanel() {
   $('#dp-turn').classList.toggle('mine', myTurn());
   $('#dp-next').disabled = !myTurn();
   $('#dp-end').disabled = !myTurn();
+  $('#dp-end').textContent = r.phase === 'EP' ? 'ターンを終える' : 'ターン終了';
 }
 
 // チャット：ログとは別の欄に出す。相手から届いたときは、盤面を見ていても気づけるよう知らせる
@@ -1142,7 +1143,7 @@ function setupDuel() {
   $('#dp-damage').onclick = () => askNumber(`${oppName()}にダメージを与える`, n => Duel.t.sendEvent({ type: 'lp', to: oppUid(), delta: -n }));
   $('#dp-next').onclick = () => {
     const i = PHASES.findIndex(x => x[0] === Duel.room.phase);
-    if (i >= PHASES.length - 1) { toast('エンドフェイズです。「ターン終了」を押してください'); return; }
+    if (i >= PHASES.length - 1) { toast('エンドフェイズです。「ターンを終える」を押してください'); return; }
     let next = PHASES[i + 1][0];
     if (next === 'BP' && Duel.room.turn === 1) next = 'EP';   // 先攻の最初のターンはバトルフェイズに入れない
     if (next === 'M2' && Duel.room.phase !== 'BP') next = 'EP';
@@ -1193,6 +1194,8 @@ function duelGoPhase(k) {
 function duelEndTurn() {
   const r = Duel.room;
   if (!r || !myTurn() || r.status !== 'playing') return;
+  // まずエンドフェイズで止まる（エンドフェイズの処理をしてから、もう一度押すとターンを終える）
+  if (r.phase !== 'EP') { duelGoPhase('EP'); toast('エンドフェイズです。もう一度「ターンを終える」を押すと相手のターンへ'); return; }
   // 自分の持ち時間を使った分を記録してから、相手のターンにする
   Duel.t.updateRoom({ turn: r.turn + 1, turnPlayer: oppUid(), phase: 'DP', ['clock.' + Duel.me.uid]: Math.round(myClockUsed()) });
   Duel.t.sendEvent({ type: 'phase', text: `ターン終了 → T${r.turn + 1} ${oppName()}のターン` });

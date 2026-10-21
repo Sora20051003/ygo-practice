@@ -1387,3 +1387,80 @@ body.dueling .b-slots, body.replaying .b-slots { display: none; }
   .duel-chat-pop { bottom: calc(136px + env(safe-area-inset-bottom)); }
 }
 body.replaying .duel-chat-fab { display: none; }
+
+/* ---------- スマホ横画面（対戦・一人回し）：盤面を画面の高さいっぱいに ----------
+   左の操作の欄とページの切り替えはポーズ画面へ移す（JS の updateLandscape）。
+   並び：［相手の情報・手札］［盤面］［（カードの詳細を重ねる場所）］［ポーズ・フェイズ・チェーン］ */
+.land-rail { display: none; }
+.pause-ctrl { display: none; }
+body.land .pause-ctrl { display: block; margin-bottom: 10px; }
+body.land .pause-ctrl .side-left { display: flex; overflow: visible; padding: 8px; gap: 8px; }
+body.land .pause-ctrl .side-left .btn { padding: 9px 6px; font-size: 14px; min-height: 40px; }
+body.land .pause-ctrl .b-slots { margin-bottom: 6px; }
+body.land .pause-ctrl .log { max-height: 160px; min-height: 60px; }
+body.land #view-board .board-layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 4px calc(4px + env(safe-area-inset-right)) 4px calc(4px + env(safe-area-inset-left)); }
+body.land #view-board .board-center {
+  display: grid; gap: 4px 8px; overflow: hidden; height: 100%; min-height: 0;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, .5fr) 62px;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "opp field side rail" "hand field side rail";
+  /* カードの大きさ：盤面（相手ありは5段・なしは3段）が画面の高さいっぱい。幅は 手札の欄＋詳細の欄＋右端 を残す */
+  --cw: min(calc((var(--lh) - 26px) / 4.7), calc((var(--lw) - 380px) / 7.9));
+}
+body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 26px) / 7.9), calc((var(--lw) - 330px) / 7.9)); }
+body.land #view-board #phase-bar, body.land #view-board #m-preview { display: none !important; }
+body.land #view-board .field { grid-area: field; align-self: center; padding: 5px; }
+body.land #view-board #opp-bar { grid-area: opp; flex-direction: column; align-items: stretch; flex-wrap: wrap; padding: 4px 6px; gap: 3px; font-size: 11px; border-radius: 8px; }
+body.land #view-board #opp-bar .lp-box { margin-left: 0; }
+body.land #view-board .hand-wrap { grid-area: hand; min-height: 0; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; align-self: stretch; }
+body.land #view-board .hand-title { position: static; flex-wrap: wrap; gap: 3px 6px; margin: 0 0 3px; font-size: 11px; pointer-events: auto; }
+body.land #view-board .hand { flex-wrap: wrap; overflow: visible; gap: 4px; min-height: 0; align-content: flex-start; }
+body.land #view-board .hand .bcard { width: calc(var(--cw) * 1.15); flex: none; }
+body.land #view-board .pick-banner { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 70%; padding: 4px 10px; font-size: 13px; }
+body.land #view-board .pick-banner[hidden] { display: none; }
+/* カードの詳細：押したときだけ、盤面の右（右端の操作の左）に重ねて出す */
+body.land #view-board #board-detail {
+  display: none; position: fixed; z-index: 58; top: 4px; bottom: 4px; right: calc(70px + env(safe-area-inset-right)); width: min(250px, calc(var(--lw) * 0.32));
+  overflow-y: auto; padding: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.5);
+}
+body.land #view-board #board-detail.show { display: flex; flex-direction: column; gap: 4px; }
+.land-detail-x { position: sticky; top: -8px; align-self: flex-end; z-index: 2; margin: -4px -4px -26px 0; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; }
+/* 右端：ポーズ・フェイズ・チェーン確認 */
+body.land #view-board .land-rail { grid-area: rail; display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: 8px; padding: 2px 0; min-height: 0; }
+body.land #view-board .land-rail[hidden] { display: none; }
+.land-rail button { font: inherit; color: var(--text); cursor: pointer; }
+.lr-pause { display: flex; flex-direction: column; align-items: center; padding: 6px 0; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
+.lr-pause b { font-size: 18px; line-height: 1; }
+.lr-pause small, .lr-chain small { font-size: 10px; color: var(--muted); }
+/* フェイズ（マスターデュエルのターン表示の位置） */
+.lr-phase {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 8px 2px; min-height: 76px;
+  border-radius: 14px; border: 2px solid var(--accent); background: radial-gradient(circle at 50% 35%, #2a4f86, #142849); color: #fff !important;
+  box-shadow: 0 0 12px rgba(63, 182, 255, .35);
+}
+.lr-phase.opp { border-color: #ff5a5a; background: radial-gradient(circle at 50% 35%, #7a2430, #3a1018); box-shadow: 0 0 12px rgba(255, 90, 90, .35); }
+.lr-phase.ep { border-color: #ffb547; }
+.lr-phase b { font-size: 14px; white-space: nowrap; }
+.lr-phase small { font-size: 10px; opacity: .85; white-space: nowrap; }
+.lr-phase .lr-more { color: #ffd479; opacity: 1; }
+.lr-phase:disabled { opacity: .5; cursor: default; }
+.lr-chain { display: flex; flex-direction: column; gap: 3px; align-items: stretch; text-align: center; }
+.lr-chain button { padding: 6px 0; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); font-size: 12px; }
+.lr-chain button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
+/* フェイズの選択（フェイズを押すと左に出る） */
+.ph-pop {
+  position: absolute; z-index: 30; right: 70px; top: 50%; transform: translateY(-50%); width: 210px;
+  display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 8px 26px rgba(0,0,0,.5);
+}
+.ph-pop[hidden] { display: none; }
+.ph-pop .ph-turn { text-align: center; font-size: 13px; }
+.ph-pop .ph-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.ph-pop .ph-chip { min-height: 38px; padding: 4px 0; }
+.ph-pop .ph-chip b { font-size: 12px; letter-spacing: 0; }
+.ph-pop .ph-end { padding: 10px; font-size: 14px; min-height: 42px; }
+/* 選択の帯：右端の操作にかからないように */
+body.land .ap-sheet { right: calc(68px + env(safe-area-inset-right)) !important; }
+body.land #view-board .ap-chainbox { right: 70px; top: 4px; }
+body.land .pause-ctrl .side-left { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; }
+body.land .pause-ctrl #land-top, body.land #b-pause, body.land #dp-pause { display: none; }
+body.land #view-board .land-rail .lr-phase { margin: auto 0; }

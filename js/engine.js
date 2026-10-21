@@ -654,6 +654,11 @@ function skippable(m, duel) {
     // 召喚したばかり・動いたばかりの自分のカードの誘発効果（「〜した場合に発動できる」）は、チェーン確認の設定に関係なく聞く
     const freshTrigger = !!duel && !last && m.selects.some(c => duel.justSummoned.has(locKey(c.controller, c.location, c.sequence)) || duel.justMoved.has(locKey(c.controller, c.location, c.sequence)) || duel.justMoved.has(`${c.controller}-${c.location}-c${c.code}`));
     let ask = mode === 'always' || freshTrigger;
+    // エンドフェイズ（自分のターン）：チェーン確認がオン・自動なら、ここで止まって発動できるようにする。
+    // オフでも、前もって発動しておいたカードの効果（「エンドフェイズに〜できる」など、その時に発動する誘発効果）は聞く
+    const myEP = !!duel && !last && duel.phase === 512 && duel.turnPlayer === duel.me;
+    if (myEP && mode !== 'off') ask = true;
+    if (duel && !last && mode === 'off' && (duel.phase === 512 || duel.phase === 2) && m.spe_count > 0) ask = true;
     if (mode === 'auto' && last) {
       // 効果が発動したときだけ聞く（相手の発動、または自分の発動に自分で重ねられるとき）
       ask = last.con !== duel.me || !m.selects.every(c => c.location === LOC.HAND && isHandTrap(c.code));
