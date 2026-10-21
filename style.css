@@ -1548,3 +1548,6 @@ body.paused #land-left #board-detail { visibility: hidden; }
 .pause-box { zoom: 1; }
 .pause-box > * { zoom: var(--fs, 1); }
 .pause-box > * .log { zoom: 1; }
+/* 一人回し・対戦の盤面から別の画面（デッキ作成など）へ移ったら、盤面の上に出していたもの（選択の帯・演出・フェイズの表示など）は隠す。
+   盤面に戻ると、途中だった選択はまた出る */
+body:not([data-view="board"]) :is(.ap-sheet, .ap-peek-back, .ap-actions, .hand-zoom, .ph-pop, .chain-stack, .cs-rope, .ap-activate, .ap-act-card, .ap-ghost, .fx, .phase-banner, .chain-links, .replay-bar) { display: none !important; }

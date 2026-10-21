@@ -1,5 +1,14 @@
 // 起動処理と画面切り替え
 function switchView(name) {
+  // 盤面を離れるとき：その場かぎりの表示（カードの操作ボタン・メニュー・選んだ手札・フェイズの選択・盤面の窓）を閉じる
+  if (name !== 'board' && document.body.dataset.view === 'board') {
+    if (typeof hideActionPopup === 'function') hideActionPopup();
+    if (typeof hideHandZoom === 'function') hideHandZoom();
+    if (typeof closePhasePop === 'function') closePhasePop();
+    if (typeof hideMenu === 'function') hideMenu();
+    if (typeof closePause === 'function' && !$('#pause').hidden) closePause();
+    if (typeof closeAllModals === 'function') closeAllModals();
+  }
   for (const t of $$('.tab')) t.classList.toggle('active', t.dataset.view === name);
   $('#view-deck').hidden = name !== 'deck';
   $('#view-board').hidden = name !== 'board';
@@ -8,7 +17,12 @@ function switchView(name) {
   document.body.dataset.view = name;   // スマホ横向きのとき、一人回しだけ横画面の配置にする
   if (name !== 'board') unlockLandscape();
   if (typeof updateLandscape === 'function') { updateLandscape(); if (name === 'board') tryLandscapeLock(); }
-  if (name === 'board') { refreshBoardDeckSelect(); renderBoard(); }
+  if (name === 'board') {
+    refreshBoardDeckSelect(); renderBoard();
+    // 効果の処理の途中で離れていたら、選択の画面を出し直す（窓を閉じていた場合も）
+    const d = typeof Auto !== 'undefined' && Auto.on && Auto.duel;
+    if (d && typeof isPrompt === 'function' && isPrompt(d.pending) && !$('#ap-sheet') && !Board.pick && !$('#modal-root').children.length && typeof openPrompt === 'function') openPrompt();
+  }
   if (name === 'duel') renderDuelLobby();
 }
 
