@@ -488,7 +488,7 @@ function resultRow(c, ctx, text) {
   const row = el('div', { class: 'result-row', onclick: () => showDeckCard(c) },
     rowMark(c),
     el('div', { class: 'r-main' },
-      el('div', { class: 'r-name' }, limitBadge(c, ctx), c.name + (c.noJp ? '（TCG）' : '')),
+      el('div', { class: 'r-name' }, limitBadge(c, ctx), c.name + (c.pre ? (c.id >= 101000000 ? '（TCG・発売前）' : '（発売前）') : c.noJp ? '（TCG）' : '')),
       el('div', { class: 'r-info', text: info }),
       text ? snippetEl(c.jaText, text) : null),
     el('button', { class: 'btn small side-btn', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),

@@ -33,6 +33,8 @@ jobs:
         env:
           FULL: ${{ inputs.altfull }}
         run: python3 .github/scripts/build_alt_arts.py || echo "絵違いの表の更新に失敗"
+      - name: 発売前（情報が出ている）カードの表を作り直す（失敗しても、ほかの更新は続ける）
+        run: python3 .github/scripts/build_prerelease.py || echo "発売前のカードの表の更新に失敗"
       - name: 効果の説明（選択肢の文）の表を作り直す（失敗しても、ほかの更新は続ける）
         run: python3 .github/scripts/build_edo_strs.py || echo "効果の説明の更新に失敗"
       - name: マスターデュエルのサンプルデッキを作り直す（失敗しても、ほかの更新は続ける）

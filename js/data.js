@@ -104,7 +104,26 @@ function normalizeText(s) {
     .replace(/[\s・･\-‐－―ー〜~'"’”“!?,.。、:;&＆()（）「」『』【】\[\]<>《》☆★]/g, '');
 }
 
+// 発売前（情報が出ている）のカードを足す（data/prerelease-cards.js。カードデータにもう同じ名前のカードがあれば足さない）
+function withPreCards(cards) {
+  if (typeof PRE_CARDS === 'undefined' || !PRE_CARDS.length) return cards;
+  const ids = new Set(cards.map(c => c.id)), names = new Set(cards.map(c => normalizeText(c.name)));
+  const add = [];
+  for (const [id, type, lv, race, attr, atk, def, name, ruby, en, text, set, noJp] of PRE_CARDS) {
+    if (ids.has(id) || names.has(normalizeText(name))) continue;
+    const c = {
+      id, cid: 0, name, noJp: !!noJp, md: false, ruby: ruby || '', en: en || '', type, atk, def,
+      level: lv & 0xff, ls: (lv >>> 24) & 0xff, rs: (lv >>> 16) & 0xff, race, setcode: 0, attr,
+      desc: noJp ? text : '', pdesc: '', pre: set,   // pre：発売前（収録予定のパックの記号）
+    };
+    if (!noJp) { c.jaText = text; c.tkey = normalizeText(text); }
+    add.push(c);
+  }
+  return add.length ? [...cards, ...add] : cards;
+}
+
 function indexCards(cards) {
+  cards = withPreCards(cards);
   DB.cards = cards;
   DB.byId = new Map();
   DB.byCid = new Map();   // KONAMIのカード番号 → カード（デッキコードで使う）
@@ -158,10 +177,10 @@ async function updateCards(onStatus) {
 // 禁止・制限リストは DawnbrandBots/yaml-yugi-limit-regulation（KONAMIの発表を毎日自動で取り込んでいる公開データ）から取得。
 // 中身は { date, regulation: { KONAMIカード番号: 0=禁止 / 1=制限 / 2=準制限 } }
 const FORMATS = {
-  ocg: { label: 'OCG', short: 'OCG', list: 'ocg', allowed: c => !c.noJp },
+  ocg: { label: 'OCG', short: 'OCG', list: 'ocg', allowed: c => !c.noJp || (!!c.pre && c.id < 101000000) },
   md: { label: 'マスターデュエル', short: 'MD', list: 'master-duel', allowed: c => c.md },
   // 海外（TCG）：海外で発売済みのカード（発売日の表に TCG の日付があるもの。表をまだ読んでいなければ英語名があるもの）
-  tcg: { label: 'TCG（海外）', short: 'TCG', list: 'tcg', allowed: c => (typeof RELEASE_DATES !== 'undefined' && RELEASE_DATES.tcg ? !!(c.cid && RELEASE_DATES.tcg[c.cid]) : !!c.en) },
+  tcg: { label: 'TCG（海外）', short: 'TCG', list: 'tcg', allowed: c => (c.pre ? c.id >= 101000000 : typeof RELEASE_DATES !== 'undefined' && RELEASE_DATES.tcg ? !!(c.cid && RELEASE_DATES.tcg[c.cid]) : !!c.en) },   // 発売前のカードは、海外の発売前（101 で始まる番号）だけ
 };
 const BANLIST_URL = key => `https://dawnbrandbots.github.io/yaml-yugi-limit-regulation/${key}/current.vector.json`;
 DB.banlists = { ocg: null, md: null, tcg: null };

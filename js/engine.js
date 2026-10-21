@@ -157,6 +157,11 @@ async function loadCardScripts(codes, onStatus, errata = 'post') {
     if (!text) text = await fetchScript(name, `pre-release/${name}`);
     // OCG でエラッタ（効果の変更）があったカードの一部は、今の OCG 版が pre-errata フォルダにある（レッドアイズ・ダークネスメタルドラゴンなど）
     if (!text) text = await fetchScript(name, `pre-errata/${name}`);
+    // アプリのカードデータでは仮の番号のカード：EDOPro の発売前のデータの番号・正式な番号のスクリプトを使う
+    for (const alt of engineAltCodes(code)) {
+      if (text) break;
+      text = (await fetchScript(`c${alt}.lua`, `official/c${alt}.lua`)) || (await fetchScript(`c${alt}.lua`, `pre-release/c${alt}.lua`));
+    }
     Engine.scripts.set(name, text || '');
     onStatus && onStatus(`カードの効果を読み込み中…（${++done}／${want.length}）`);
     // 別のスクリプトの読み込み（Duel.LoadScript / Duel.LoadCardScript）
@@ -662,9 +667,12 @@ class AutoDuel {
 }
 
 // カードの情報（ocgcore 用）
+// アプリのカードデータの仮の番号に対応する、EDOPro の番号（発売前のデータの番号 PRE_MAP・正式な番号 IMG_IDS）
+const engineAltCodes = code => [typeof PRE_MAP !== 'undefined' && PRE_MAP[code], typeof IMG_IDS !== 'undefined' && IMG_IDS[code]].filter(x => x && x !== code);
 function engineCardData(code) {
   if (code === TOOL_CODE) return { code, alias: 0, setcodes: [], type: 0x2, level: 0, attribute: 0, race: 0n, attack: 0, defense: 0, lscale: 0, rscale: 0, link_marker: 0 };   // 練習ツール（魔法カードとして扱う）
-  const e = typeof EDO_CARDS !== 'undefined' && EDO_CARDS.d[code];
+  const has0 = typeof EDO_CARDS !== 'undefined';
+  const e = has0 && (EDO_CARDS.d[code] || engineAltCodes(code).map(a => EDO_CARDS.d[a]).find(Boolean));
   if (e) {
     const [alias, setcodes, type, lv, race, attribute, atk, def] = e;
     const link = (type & T.LINK) !== 0;

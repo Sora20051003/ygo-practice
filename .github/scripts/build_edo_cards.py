@@ -25,7 +25,8 @@ def fetch(url, timeout=180):
 
 def main():
     names = [x["name"] for x in json.loads(fetch(API))]
-    names = [n for n in names if n == "cards.cdb" or (n.startswith("release-") and n.endswith(".cdb"))]
+    # 発売済みのデータと、発売前（情報が出ている）カードのデータ（ラッシュデュエルは除く）
+    names = [n for n in names if n == "cards.cdb" or ((n.startswith("release-") or n.startswith("prerelease-")) and n.endswith(".cdb") and "rush" not in n)]
     d = {}
     for n in names:
         with tempfile.NamedTemporaryFile(suffix=".cdb", delete=False) as f:

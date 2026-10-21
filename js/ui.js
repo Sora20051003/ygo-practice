@@ -556,8 +556,9 @@ function renderDetail(box, c, extra) {
     ),
     el('div', { class: 'd-type', text: typeLine(c) }),
     stats.length ? el('div', { class: 'd-stats', text: stats.join('　') }) : null,
-    c.noJp ? el('div', { class: 'warn', text: '日本未発売（TCGのみ）のカードです' }) : null,
+    c.noJp && !c.pre ? el('div', { class: 'warn', text: '日本未発売（TCGのみ）のカードです' }) : null,
     formatInfo(c),
+    c.pre ? el('p', { class: 'muted small-note pre-note', text: `🆕 発売前のカードです（${c.pre} に収録予定・公開されている情報）。${c.noJp ? '日本語の情報がまだ無いので、英語の名前と効果文です。' : ''}` }) : null,
     typeof hasErrata === 'function' && hasErrata(c.id)
       ? el('div', { class: 'muted small-note', text: 'エラッタ（効果の変更）があったカードです。効果を自動処理するときにエラッタ前・エラッタ後のどちらの効果を使うかは、デッキ作成でカードごとに選べます（ふだんはエラッタ後。下の文章は今の効果です）。' })
       : null,
