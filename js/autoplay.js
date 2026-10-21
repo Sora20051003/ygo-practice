@@ -175,6 +175,25 @@ function autoAfter(noAnim) {
   if (!d.ended) d.endShown = false;
   if (Auto.net && typeof netAfter === 'function') netAfter();
   scheduleCpu();
+  renderDrawTap();
+}
+
+// ---------- ドローフェイズ：画面をタッチしてドロー ----------
+// エンジンは自分のドローフェイズの始めで止まる（d.drawWait）。画面のどこかを押すとドローして続きを進める（効果によるドローは止めない）
+function renderDrawTap() {
+  const d = Auto.duel;
+  let n = document.getElementById('draw-tap');
+  if (!(d && d.drawWait && autoActive())) { if (n) n.remove(); return; }
+  if (n) return;
+  n = el('div', { id: 'draw-tap', class: 'draw-tap', role: 'button' }, el('div', { class: 'draw-tap-label' }, el('b', { text: 'ドローフェイズ' }), el('span', { text: 'タップしてドロー' })));
+  n.addEventListener('click', () => {
+    const dd = Auto.duel;
+    n.remove();
+    if (!dd || !dd.drawWait) return;
+    try { dd.resumeDraw(); } catch (e) { console.error(e); showError('処理中にエラーが起きました', e); }
+    autoAfter();
+  });
+  document.body.append(n);
 }
 
 // ---------- 相手（CPU）の行動をゆっくり見せる ----------
@@ -262,6 +281,7 @@ function autoPanel() {
   if (d.ended) text = `対戦終了（${d.ended}）`;
   else if (!p && d.remoteAsk) text = `${oppName()}が操作しています…`;
   else if (!p && d.cpuWait) text = '相手（CPU）が操作しています…';
+  else if (!p && d.drawWait) text = `T${d.turn} ドローフェイズ：画面をタッチしてドロー`;
   else if (!p) text = '処理中…';
   else if (p.type === MSG.SELECT_IDLECMD) text = `T${d.turn} ${phase}：カードをクリックして操作`;
   else if (p.type === MSG.SELECT_BATTLECMD) text = `T${d.turn} バトルフェイズ：攻撃するモンスターや発動する効果をクリック`;
@@ -360,6 +380,7 @@ async function autoStart(handIds) {
   Auto.redoLog = null;
   Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: false, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), errata });
   Auto.deckId = deck.id;
+  Auto.duel.drawTap = true;   // 自分のドローフェイズは、画面をタッチするまでドローしない
   Auto.duel.cpuSlow = cpuDelay() > 0;
   noteLinkRemoved(Auto.duel.extra, Auto.duel.rule);
   try { Auto.duel.start(); } catch (e) { console.error(e); showError('開始できませんでした', e); Auto.duel = null; renderBoard(); return; }
@@ -397,6 +418,7 @@ async function autoResume() {
   if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
   try { await autoPrepare(saved, saved.errata); if (saved.opp) await autoPrepare(saved.opp, saved.errata); const placed = saved.items.filter(x => x.res && x.res.type === RES.ANNOUNCE_CARD).map(x => x.res.card); if (placed.length) await loadCardScripts(placed, null, saved.errata); } catch { return; }
   const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: false, firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', errata: saved.errata });
+  d.drawTap = true;
   Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;
   try { d.create(); d.run(saved.items.map(x => ({ ...x }))); } catch (e) { console.error(e); Auto.duel = null; return; }
   if (autoActive()) autoAfter(true);

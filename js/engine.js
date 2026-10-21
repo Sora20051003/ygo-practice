@@ -324,7 +324,7 @@ class AutoDuel {
     if (this.net) return this.netCreate();
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
-    this.log = []; this.pending = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.log = []; this.pending = null; this.drawWait = false; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set();   // 召喚・特殊召喚したばかりのカードの位置（誘発効果を自動で発動するため）
     this.justMoved = new Set();      // 直前に動いたカードの行き先（墓地へ送られた場合などの誘発を聞くため）
@@ -402,7 +402,7 @@ class AutoDuel {
   netCreate() {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
-    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.leaving = 0; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.drawWait = false; this.leaving = 0; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set(); this.justMoved = new Set(); this.used = new Map();
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
@@ -434,6 +434,14 @@ class AutoDuel {
     return true;
   }
 
+  // ドローフェイズで止めていたところから、ドローして続きを進める（画面をタッチしたとき）
+  resumeDraw() {
+    if (!this.drawWait) return false;
+    this.drawWait = false;
+    this.run();
+    return true;
+  }
+
   // 止めていた CPU の行動を行って、続きを進める
   resumeCpu() {
     const res = this.cpuWait;
@@ -458,8 +466,11 @@ class AutoDuel {
       for (const m of msgs) {
         if (m.type === MSG.RETRY) { this.retry = true; if (++this.retries > 20) throw new Error('処理が先に進めなくなりました'); continue; }
         if (isSelectMsg(m)) ask = m; else this.onInfo(m);
+        // 自分のドローフェイズになったら、画面をタッチするまでドローしない（drawTap：一人回し・対戦の画面の対戦だけ。記録の流し直し中は止めない）
+        if (this.drawTap && m.type === MSG.NEW_PHASE && m.phase === 1 && this.turnPlayer === this.me && (this.turn > 1 || this.firstDraw) && !(replay && replay.length)) this.drawWait = true;
       }
       if (status === 0 || this.ended) { this.pending = null; return; }   // 対戦終了（勝ち負けが決まったら、それ以上は進めない）
+      if (this.drawWait) { this.pending = null; return; }
       if (status === 2) continue;
       if (!ask) continue;
       // 自分が次の行動を選ぶ時点で、召喚したばかりのカードの記録は消す（誘発の機会は終わっている）
@@ -676,6 +687,8 @@ function skippable(m, duel) {
     if (m.type === MSG.SELECT_EFFECTYN && fresh(m)) return { type: RES.SELECT_EFFECTYN, yes: true };
     if (m.type === MSG.SELECT_CHAIN && !m.forced && m.spe_count > 0 && m.selects.length && m.selects.every(fresh)) return { type: RES.SELECT_CHAIN, index: 0 };
   }
+  // 強制効果（必ず発動する効果）は、聞かずにそのまま処理する（対象などの選択は、このあと自分で選ぶ）
+  if (m.type === MSG.SELECT_CHAIN && m.forced && m.selects.length) return { type: RES.SELECT_CHAIN, index: 0 };
   if (m.type === MSG.SELECT_CHAIN && !m.forced) {
     if (!m.selects.length) return { type: RES.SELECT_CHAIN, index: null };
     if (duel && duel.chain.length && duel.chain[duel.chain.length - 1].code === TOOL_CODE) return { type: RES.SELECT_CHAIN, index: null };   // 練習ツールには聞かない
