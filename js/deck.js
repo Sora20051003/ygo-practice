@@ -68,6 +68,19 @@ function deckProblems(deck, ctx = regContext(deck)) {
 }
 
 // 禁止・制限の小さな印（未発売は「未」）
+// マスターデュエルのレアリティ（data/md-rarity.js。KONAMI のカード番号ごと）。MD のレギュレーションでデッキを組むときだけ出す
+let mdRarityMap = null;
+function mdRarityOf(c) {
+  if (typeof MD_RARITY === 'undefined' || !c || !c.cid) return null;
+  if (!mdRarityMap) { mdRarityMap = new Map(); for (const [r, ids] of Object.entries(MD_RARITY)) for (const id of ids) mdRarityMap.set(id, r); }
+  return mdRarityMap.get(c.cid) || null;
+}
+const MD_RARITY_LABEL = { UR: 'ウルトラレア', SR: 'スーパーレア', R: 'レア', N: 'ノーマル' };
+function mdRarityBadge(c, ctx) {
+  if (!ctx || ctx.fmt !== 'md' || !c.md) return null;
+  const r = mdRarityOf(c);
+  return r ? el('span', { class: 'md-rar md-' + r, title: `マスターデュエルのレアリティ：${MD_RARITY_LABEL[r]}`, text: r }) : null;
+}
 function limitBadge(c, ctx) {
   if (!cardAllowed(c, ctx.fmt)) return el('span', { class: 'lim lim-x', title: `${FORMATS[ctx.fmt].label}では使えません`, text: '×' });
   if (isUnreleased(c, ctx)) return el('span', { class: 'lim lim-u', title: '未発売（禁止扱い）', text: '未' });
@@ -300,7 +313,9 @@ function deckCardBar(c) {
     };
     const label = main === 'extra' ? 'EXデッキ' : 'メインデッキ';
     bar.append(
-      el('div', { class: 'd-addcount', text: `今の枚数：${main === 'extra' ? 'EX' : 'メイン'} ${nMain}枚` + (deckFormat(deck) === 'md' ? '' : `・サイド ${nSide}枚`) }),
+      el('div', { class: 'd-addcount', text: `今の枚数：${main === 'extra' ? 'EX' : 'メイン'} ${nMain}枚` + (deckFormat(deck) === 'md' ? '' : `・サイド ${nSide}枚`) },
+        // マスターデュエルのデッキ：実装されているカードはレアリティも出す
+        (r => (r ? el('span', { class: 'd-mdrar' }, '　', r, ` ${MD_RARITY_LABEL[mdRarityOf(c)]}`) : null))(mdRarityBadge(c, { fmt: deckFormat(deck) }))),
       el('div', { class: 'd-addbtns' },
         el('button', { class: 'btn small primary', text: `＋ ${label}に追加`, onclick: () => { addToDeck(c, main); draw(); } }),
         el('button', { class: 'btn small side-btn', text: '＋ サイドに追加', onclick: () => { addToDeck(c, 'side'); draw(); } })),
@@ -491,7 +506,7 @@ function resultRow(c, ctx, text) {
   const row = el('div', { class: 'result-row', onclick: () => showDeckCard(c) },
     rowMark(c),
     el('div', { class: 'r-main' },
-      el('div', { class: 'r-name' }, limitBadge(c, ctx), c.name + (c.pre ? (c.id >= 101000000 ? '（TCG・発売前）' : '（発売前）') : c.noJp ? '（TCG）' : '')),
+      el('div', { class: 'r-name' }, limitBadge(c, ctx), mdRarityBadge(c, ctx), c.name + (c.pre ? (c.id >= 101000000 ? '（TCG・発売前）' : '（発売前）') : c.noJp ? '（TCG）' : '')),
       el('div', { class: 'r-info', text: info }),
       text ? snippetEl(c.jaText, text) : null),
     el('button', { class: 'btn small side-btn', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),
@@ -768,6 +783,7 @@ function renderDeck() {
       const tile = el('div', { class: 'deck-tile' + (bad.has(c.name) ? ' invalid' : ''), onclick: () => showDeckCard(c) },
         cardFace(c, { small: true }),
         badge ? el('div', { class: 'tile-lim' }, badge) : null,
+        (r => (r ? el('div', { class: 'tile-rar' }, r) : null))(mdRarityBadge(c, ctx)),
         deckErrata(deck, id) === 'pre' ? el('div', { class: 'tile-errata', title: 'エラッタ前の効果で処理', text: '旧' }) : null,
         el('button', { class: 'tile-remove', title: '1枚減らす', text: '−', onclick: e => { e.stopPropagation(); removeFromDeck(sec, i); } }));
       tile.addEventListener('contextmenu', e => { e.preventDefault(); removeFromDeck(sec, i); });

@@ -167,6 +167,31 @@ def exists(url):
 
 # カードデータ（ygocdb）の番号で YGOPRODeck に画像が無いカード（発売前の仮の番号のままのカードなど）：
 # KONAMI のカード番号（cid ＝ YGOPRODeck の konami_id）が同じ YGOPRODeck のカードの番号を、画像の番号として使う
+# マスターデュエルのレアリティ（YGOPRODeck の misc_info.md_rarity）を data/md-rarity.js に書く。KONAMI のカード番号ごと。
+# MD_RARITY = { UR: [番号…], SR: [...], R: [...], N: [...] }
+def write_md_rarity(cards):
+    names = {"Ultra Rare": "UR", "Super Rare": "SR", "Rare": "R", "Common": "N"}
+    out = {"UR": set(), "SR": set(), "R": set(), "N": set()}
+    for c in cards:
+        for m in c.get("misc_info") or []:
+            r, k = names.get(m.get("md_rarity")), m.get("konami_id")
+            if r and isinstance(k, int) and k:
+                out[r].add(k)
+    if sum(len(v) for v in out.values()) < 1000:
+        print("マスターデュエルのレアリティが少なすぎるため書き換えません")
+        return
+    path = ROOT / "data" / "md-rarity.js"
+    js = (
+        "// マスターデュエルのレアリティ（GitHub Actions が毎日作り直す .github/scripts/build_alt_arts.py。手で書き換えない）\n"
+        "// MD_RARITY：レアリティ → KONAMI のカード番号の配列（YGOPRODeck のデータから）\n"
+        f"const MD_RARITY = {json.dumps({k: sorted(v) for k, v in out.items()}, separators=(',', ':'))};\n"
+    )
+    old = path.read_text(encoding="utf-8") if path.exists() else ""
+    if old != js:
+        path.write_text(js, encoding="utf-8")
+        print(f"マスターデュエルのレアリティを更新しました（{sum(len(v) for v in out.values())}枚）")
+
+
 def image_ids(cards, known):
     by_konami = {}
     for c in cards:
@@ -197,6 +222,7 @@ def main():
         cards = json.load(r)["data"]
     known = {c["id"] for c in cards}
     img_ids = image_ids(cards, known)
+    write_md_rarity(cards)
     alts = {}
     for c in cards:
         for im in c.get("card_images") or []:
