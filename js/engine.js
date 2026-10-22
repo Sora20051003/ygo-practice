@@ -307,7 +307,9 @@ const placeText = (con, loc, seq) => {
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false, rule = 'mr5', errata = 'post' }) {
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false, rule = 'mr5', errata = 'post', sv = 2 }) {
+    // デッキの混ぜ方の版：2＝プレイヤーごとに別の乱数で混ぜる。1＝前の版（2人のデッキを1つの乱数で続けて混ぜる。前に保存した盤面・記録用）
+    this.sv = sv === 1 ? 1 : 2;
     this.errata = errataSpec(errata);   // エラッタのあったカードを、エラッタ前の効果で処理するか（全体の設定とカードごとの設定）
     this.rule = MASTER_RULES[rule] ? rule : 'mr5';   // マスタールール mr1〜mr5（mr3 はペンデュラムゾーンが別＝魔法・罠ゾーンの6・7番）
     this.tools = tools && !net;   // 練習ツール（ドローなどのボタン）を使う。前に保存した盤面（ツールなし）と並びが変わらないよう、新しく始めたときだけ
@@ -354,16 +356,15 @@ class AutoDuel {
     const rest = [...this.main];
     if (this.handIds) for (const id of this.handIds) { const i = rest.indexOf(id); if (i >= 0) { rest.splice(i, 1); add(me, id, LOC.HAND, POS.FD_ATK); } }
     // デッキはこちらで混ぜる（エンジンは混ぜない）。やり直しで同じ順になるよう seed から作る乱数を使う
-    const rand = seededRandom(Number(BigInt(this.seed[0]) & 0xffffffffn) || 1);
-    const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-    for (const id of shuffle(rest)) add(me, id, LOC.DECK);
+    const shared = seededRandom(Number(BigInt(this.seed[0]) & 0xffffffffn) || 1);
+    for (const id of this.deckShuffler(me, shared)(rest)) add(me, id, LOC.DECK);
     for (const id of ruleExtra(this.extra, this.rule)) add(me, id, LOC.EXTRA);
     if (this.tools) { Engine.scripts.set(`c${TOOL_CODE}.lua`, TOOL_LUA); add(me, TOOL_CODE, LOC.REMOVED, POS.FU_ATK); }
     if (this.opp) {
       const rest = [...this.opp.main];
       // 相手の初手を指定したとき（誘発練習）：そのカードを手札に置き、残りを引く
       for (const id of this.opp.handIds || []) { const i = rest.indexOf(id); if (i >= 0) rest.splice(i, 1); add(1 - me, id, LOC.HAND); }
-      for (const id of shuffle(rest)) add(1 - me, id, LOC.DECK);
+      for (const id of this.deckShuffler(1 - me, shared)(rest)) add(1 - me, id, LOC.DECK);
       for (const id of ruleExtra(this.opp.extra || [], this.rule)) add(1 - me, id, LOC.EXTRA);
     } else {
       for (let i = 0; i < 40; i++) add(1 - me, OPP_FILLER, LOC.DECK);
@@ -373,8 +374,14 @@ class AutoDuel {
 
   // 試しに発動してみて、何か起きるか（効果が使える・サーチなどの処理がある）を調べる。
   // 今の対戦をそのまま複製して試すので、本当の盤面は変わらない。index は今の SELECT_IDLECMD の activates の番号
+  // デッキを混ぜる関数。プレイヤー（0・1）ごとに別の乱数（seed の1つ目・4つ目から作る）。前の版（sv 1）は2人で1つの乱数を続けて使う
+  deckShuffler(p, shared) {
+    const rand = this.sv === 1 ? shared : seededRandom(Number(BigInt(this.seed[p === 0 ? 0 : 3]) & 0xffffffffn) || p + 1);
+    return a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  }
+
   probeActivate(index) {
-    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net, tools: this.tools, rule: this.rule, errata: this.errata });
+    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net, tools: this.tools, rule: this.rule, errata: this.errata, sv: this.sv });
     try {
       t.create();
       t.run(this.history());
@@ -426,10 +433,9 @@ class AutoDuel {
     L.loadScript(this.h, 'constant.lua', Engine.scripts.get('constant.lua'));
     L.loadScript(this.h, 'utility.lua', Engine.scripts.get('utility.lua'));
     Engine.me = this.me;
-    const rand = seededRandom(Number(BigInt(this.seed[0]) & 0xffffffffn) || 1);
-    const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    const shared = seededRandom(Number(BigInt(this.seed[0]) & 0xffffffffn) || 1);
     this.net.decks.forEach(([main, extra], p) => {
-      for (const code of shuffle([...main])) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.DECK, sequence: 2, position: POS.FD_ATK });
+      for (const code of this.deckShuffler(p, shared)([...main])) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.DECK, sequence: 2, position: POS.FD_ATK });
       for (const code of ruleExtra(extra, this.rule)) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.EXTRA, sequence: 2, position: POS.FD_ATK });
     });
     L.startDuel(this.h);
@@ -1012,7 +1018,7 @@ function cpuThink(m, duel, kind) {
   const hist = duel.history();
   // 手順 path を打ったあとの複製（CPU が次の手を選ぶ場面、または相手の番まで進めたもの）
   const play = path => {
-    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata });
+    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata, sv: duel.sv });
     t.noThink = true;
     t.create();
     t.stopAtCpu = true;   // 流し直したあと、今の判断の場面（CPU の番）で止める
@@ -1074,7 +1080,7 @@ function cpuChainThink(m, duel) {
     if (performance.now() - t0 > 3500) break;   // 考えすぎない
     let t = null;
     try {
-      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata });
+      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata, sv: duel.sv });
       t.noThink = true;
       t.create();
       t.stopAtCpu = true;
