@@ -130,7 +130,13 @@ function renderRegSelect(deck) {
     for (const d of ds) g.append(el('option', { value: d, text: `${fmtDate(d)}〜` }));
     sel.append(g);
   }
-  if (cur !== 'latest' && cur !== 'none' && !cur.startsWith('custom:') && !dates.includes(cur)) sel.append(el('option', { value: cur, text: `${fmtDate(cur)}〜` }));
+  // マスターデュエル：過去のイベントのルール（新しい順）
+  if (fmt === 'md' && typeof MD_EVENTS !== 'undefined') {
+    const g = el('optgroup', { label: 'マスターデュエルの過去のイベント（その時のリスト＋イベントのルール）' });
+    for (const ev of [...MD_EVENTS].sort((a, b) => b.start.localeCompare(a.start))) g.append(el('option', { value: 'event:' + ev.id, text: `${ev.name}（${ev.approx ? ev.start.slice(0, 7).replace('-', '/') + '頃' : fmtDate(ev.start)}）` }));
+    sel.append(g);
+  }
+  if (cur !== 'latest' && cur !== 'none' && !cur.startsWith('custom:') && !cur.startsWith('event:') && !dates.includes(cur)) sel.append(el('option', { value: cur, text: `${fmtDate(cur)}〜` }));
   // もう一方のルール（OCG ⇔ マスターデュエル）のリストも選べるようにする（選ぶとデッキのルールも切り替わる）
   for (const [of, f] of Object.entries(FORMATS)) {
     if (of === fmt) continue;
@@ -181,7 +187,8 @@ function addToDeck(card, section) {
   if (!cardAllowed(card, fmt)) { toast(`このカードは${FORMATS[fmt].label}では使えません`); return; }
   const limit = Math.min(MAX_COPIES, limitIn(card, ctx));
   if (limit === 0) {
-    toast(isUnreleased(card, ctx) ? `${card.name}は選んでいるリストの時点では未発売です（禁止扱い）` : `${card.name}は${FORMATS[fmt].label}の禁止カードです`);
+    const why = ctx.event && eventBlock(ctx.event, card);
+    toast(isUnreleased(card, ctx) ? `${card.name}は選んでいるリストの時点では未発売です（禁止扱い）` : why ? `${card.name}はイベント「${ctx.event.name}」では使えません（${why}）` : `${card.name}は${FORMATS[fmt].label}の禁止カードです`);
     return;
   }
   // ルール上ほかの名前として扱うカード：その名前のカードの禁止・制限にも従い、合わせて数える
@@ -1598,6 +1605,7 @@ function setupDeckView() {
     const deck = Decks.current();
     if (deckFormat(deck) === b.dataset.format) return;
     deck.format = b.dataset.format;
+    if ((deck.reg || '').startsWith('event:') && deck.format !== 'md') deck.reg = 'latest';   // イベントはマスターデュエルだけ
     // 過去のリストの日付はルールごとに違うので、切り替えたら「最新」に戻す（制限なしはそのまま）
     if (deck.reg && deck.reg !== 'none' && !deck.reg.startsWith('custom:')) deck.reg = 'latest';
     Decks.save();

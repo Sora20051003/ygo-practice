@@ -358,6 +358,13 @@ function regContext(deck) {
 function regContextBase(deck) {
   const fmt = deckFormat(deck);
   const reg = deck.reg || 'latest';
+  // マスターデュエルの過去のイベント：始まった日のマスターデュエルのリスト＋イベントのルール（カードの範囲の決まりがあれば、その日までに発売されたカード）
+  const ev = mdEventOf(reg);
+  if (ev) {
+    const ctx = { ...baseContext('md', mdListAt(ev.start), fmt), reg, event: ev };
+    if (ev.pool) Object.assign(ctx, { cutoff: ev.pool, endDate: ev.pool, date: +ev.pool.replace(/-/g, '') });
+    return ctx;
+  }
   if (reg.startsWith('custom:')) {
     const cr = customReg(reg.slice(7));
     if (!cr) return baseContext(fmt, 'latest', fmt);   // 消されたオリジナルは最新扱い
@@ -397,18 +404,79 @@ function saveCustomReg(r) {
 function deleteCustomReg(id) { store.set('ygo.customRegs', customRegs().filter(x => x.id !== id)); }
 const isUnreleased = (c, ctx) => !!ctx.date && typeof RELEASE_DATES !== 'undefined' && releaseDate(c, ctx.fmt) > ctx.date;
 
+// ---------- マスターデュエルの過去のイベント（デッキのルールが分かっているもの） ----------
+// 禁止・制限は、イベントが始まった日に使われていたマスターデュエルのリスト。そこにイベントのデッキのルールを足す
+// （イベントだけの禁止・制限は、元のデータが無いので入っていない）。
+// ex：EXデッキに入れられる種類（[] は EXデッキ0枚）／rar：使えるレアリティ／copies：同じカードの枚数／noSpell：魔法カード禁止／
+// attrs・races：モンスターの属性・種族の制限（魔法・罠は使える）／pool：この日までに発売されたカードだけ
+const MD_EVENTS = [
+  { id: 'xyz-fes-2022', name: 'エクシーズフェス', start: '2022-02-17', ex: ['xyz'] },
+  { id: 'nr-fes-2022', name: 'N/Rレアリティフェス', start: '2022-03-23', rar: ['N', 'R'] },
+  { id: 'synchro-fes-2022', name: 'シンクロフェス', start: '2022-04-12', ex: ['synchro'] },
+  { id: 'fusion-fes-2022', name: 'フュージョンフェス', start: '2022-05-12', ex: ['fusion'] },
+  { id: 'limitone-fes-2022', name: 'リミットワンフェス', start: '2022-06-16', copies: 1 },
+  { id: 'extrazero-fes-2022', name: 'エクストラゼロフェス', start: '2022-07-19', ex: [] },
+  { id: 'synchro-xyz-fes-2022', name: 'シンクロ×エクシーズフェス', start: '2022-09-20', ex: ['synchro', 'xyz'] },
+  { id: 'link-reg-2022', name: 'リンクReg.', start: '2022-10-14', ex: ['link'] },
+  { id: 'antispell-fes-2022', name: 'アンチスペルフェス', start: '2022-11-17', noSpell: true },
+  { id: 'xyz-fes-2023', name: 'エクシーズフェス 2023', start: '2023-02-21', ex: ['xyz'] },
+  { id: 'attribute4-2023', name: 'アトリビュート4', start: '2023-04-20', attrs: [4, 2, 8, 1] },
+  { id: 'warlords-fes-2023', name: '群雄割拠フェス：アイランド・チャンピオンズ', start: '2023-09-13', races: [0x8000, 0x4000, 0x200, 0x800, 0x80000] },
+  { id: 'fusion-xyz-fes-2023', name: 'フュージョン×エクシーズフェス', start: '2023-09-19', ex: ['fusion', 'xyz'] },
+  { id: 'synchro-link-fes-2024', name: 'シンクロ×リンクフェス', start: '2024-02-19', ex: ['synchro', 'link'] },
+  { id: 'triangle-2024-fusion', name: 'デュエルトライアングル（融合）', start: '2024-04-18', ex: ['fusion'] },
+  { id: 'triangle-2024-synchro', name: 'デュエルトライアングル（シンクロ）', start: '2024-04-18', ex: ['synchro'] },
+  { id: 'triangle-2024-xyz', name: 'デュエルトライアングル（エクシーズ）', start: '2024-04-18', ex: ['xyz'] },
+  { id: 'fusion-link-fes-2024', name: 'フュージョン×リンクフェス', start: '2024-05-20', ex: ['fusion', 'link'] },
+  { id: 'xyz-link-fes-2024', name: 'エクシーズ×リンクフェス', start: '2024-11-01', ex: ['xyz', 'link'], approx: true },
+  { id: 'extrazero-fes-2024', name: 'エクストラゼロフェス 2024', start: '2024-11-01', ex: [], approx: true },
+  { id: 'fusion-synchro-fes-2025', name: 'フュージョン×シンクロフェス', start: '2025-02-17', ex: ['fusion', 'synchro'] },
+  { id: 'timetravel-2004', name: 'デュエルトライアル：タイムトラベル2004', start: '2025-02-28', pool: '2004-11-25' },
+  { id: 'triangle-2025-le', name: 'デュエルトライアングル（光・地）', start: '2025-04-17', attrs: [16, 1] },
+  { id: 'triangle-2025-dw', name: 'デュエルトライアングル（闇・水）', start: '2025-04-17', attrs: [32, 2] },
+  { id: 'triangle-2025-fw', name: 'デュエルトライアングル（炎・風）', start: '2025-04-17', attrs: [4, 8] },
+  { id: 'fusion-link-fes-2025', name: 'フュージョン×リンクフェス 2025', start: '2025-07-10', ex: ['fusion', 'link'] },
+  { id: 'synchro-cup-2025', name: 'シンクロカップ', start: '2025-08-08', ex: ['synchro'] },
+  { id: 'triangle-2025-fusion', name: 'デュエルトライアングル 2025秋（融合）', start: '2025-11-13', ex: ['fusion'] },
+  { id: 'triangle-2025-xyz', name: 'デュエルトライアングル 2025秋（エクシーズ）', start: '2025-11-13', ex: ['xyz'] },
+  { id: 'triangle-2025-link', name: 'デュエルトライアングル 2025秋（リンク）', start: '2025-11-13', ex: ['link'] },
+  { id: 'fusion-synchro-fes-2026', name: 'フュージョン×シンクロフェス＋', start: '2026-01-19', ex: ['fusion', 'synchro'] },
+  { id: 'triangle-2026-fusion', name: 'デュエルトライアングル 2026春（融合）', start: '2026-04-16', ex: ['fusion'] },
+  { id: 'triangle-2026-synchro', name: 'デュエルトライアングル 2026春（シンクロ）', start: '2026-04-16', ex: ['synchro'] },
+  { id: 'triangle-2026-link', name: 'デュエルトライアングル 2026春（リンク）', start: '2026-04-16', ex: ['link'] },
+  { id: 'fusion-xyz-fes-2026', name: 'フュージョン×エクシーズ＋', start: '2026-07-13', ex: ['fusion', 'xyz'] },
+  { id: 'fusion-cup-2026', name: 'フュージョンカップ', start: '2026-08-07', ex: ['fusion'] },
+];
+const mdEventOf = reg => (reg && reg.startsWith('event:') ? MD_EVENTS.find(e => e.id === reg.slice(6)) || null : null);
+// イベントの始まった日に使われていたマスターデュエルのリストの日付（一覧がまだ無ければ最新）
+function mdListAt(date) { const ds = (DB.regDates.md || []).filter(d => d <= date).sort(); return ds.length ? ds[ds.length - 1] : 'latest'; }
+const EX_KIND = { fusion: ['融合', T.FUSION], synchro: ['シンクロ', T.SYNCHRO], xyz: ['エクシーズ', T.XYZ], link: ['リンク', T.LINK] };
+const ATTR_NAME = { 1: '地', 2: '水', 4: '炎', 8: '風', 16: '光', 32: '闇', 64: '神' };
+// イベントのルールでそのカードを使えるか。使えなければ理由
+function eventBlock(ev, c) {
+  if (!ev) return null;
+  if (ev.ex && isExtraType(c) && !ev.ex.some(k => has(c, EX_KIND[k][1]))) return ev.ex.length ? `EXデッキは${ev.ex.map(k => EX_KIND[k][0]).join('・')}モンスターだけ` : 'EXデッキは使えない';
+  if (ev.rar) { const r = typeof mdRarityOf === 'function' ? mdRarityOf(c) : null; if (r && !ev.rar.includes(r)) return `${ev.rar.join('・')}のカードだけ`; }
+  if (ev.noSpell && has(c, T.SPELL)) return '魔法カードは使えない';
+  if (ev.attrs && isMonster(c) && !ev.attrs.includes(c.attr)) return `モンスターは${ev.attrs.map(a => ATTR_NAME[a]).join('・')}属性だけ`;
+  if (ev.races && isMonster(c) && !ev.races.includes(c.race)) return 'モンスターは獣戦士・獣・鳥獣・昆虫・爬虫類族だけ';
+  return null;
+}
+
 // 入れられる枚数（禁止0・制限1・準制限2・無制限3）
 function limitIn(c, ctx) {
   // オリジナルで決めた枚数がいちばん優先
   if (ctx.custom && ctx.custom.overrides && ctx.custom.overrides[c.cid] !== undefined) return ctx.custom.overrides[c.cid];
   if (isUnreleased(c, ctx)) return 0;   // 未発売（過去のリスト・発売日の区切り）。「制限なし」でも区切りの日付は効く
+  if (ctx.event && eventBlock(ctx.event, c)) return 0;   // マスターデュエルのイベントのルールで使えない
   if (ctx.none) return 3;
   const v = ctx.vector && ctx.vector.regulation ? ctx.vector.regulation[c.cid] : undefined;
-  return v === undefined ? 3 : v;
+  const n = v === undefined ? 3 : v;
+  return ctx.event && ctx.event.copies ? Math.min(n, ctx.event.copies) : n;
 }
 const limitOf = (c, fmt) => limitIn(c, { fmt, vector: DB.banlists[fmt] });   // 最新のリストで
 const LIMIT_LABEL = { 0: '禁止', 1: '制限', 2: '準制限' };
-const limitLabel = (c, ctx) => (isUnreleased(c, ctx) ? '未発売（禁止扱い）' : LIMIT_LABEL[limitIn(c, ctx)]);
+const limitLabel = (c, ctx) => (isUnreleased(c, ctx) ? '未発売（禁止扱い）' : ctx.event && eventBlock(ctx.event, c) ? `イベントのルールで使えない：${eventBlock(ctx.event, c)}` : LIMIT_LABEL[limitIn(c, ctx)]);
 const cardAllowed = (c, fmt) => (FORMATS[fmt] || FORMATS.ocg).allowed(c);
 
 // ---------- 日本語の効果文（テキスト検索用） ----------

@@ -969,6 +969,8 @@ function redo() {
 function regText(deck) {
   const fmt = deckFormat(deck), reg = deck.reg || 'latest';
   if (reg.startsWith('custom:')) { const cr = customReg(reg.slice(7)); return `ルール：${FORMATS[fmt].label}・オリジナル「${cr ? cr.name : '（削除済み）'}」`; }
+  const ev = typeof mdEventOf === 'function' && mdEventOf(reg);
+  if (ev) { const d = mdListAt(ev.start); return `ルール：マスターデュエルのイベント「${ev.name}」（${d === 'latest' ? '最新' : d.replace(/-/g, '/') + '〜'}の禁止・制限＋イベントのルール）`; }
   const list = DB.banlists[fmt];
   const when = reg === 'none' ? '禁止・制限なし' : reg === 'latest' ? `最新の禁止・制限${list && list.date ? `（${list.date.replace(/-/g, '/')}〜）` : ''}` : `${reg.replace(/-/g, '/')} の禁止・制限`;
   return `ルール：${FORMATS[fmt].label}・${when}`;
