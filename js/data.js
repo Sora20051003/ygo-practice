@@ -579,6 +579,56 @@ const splitTerms = s => (s || '').split(/[\s　]+/).map(normalizeText).filter(Bo
 // and: すべての語を含む / or: どれかの語を含む
 const matchTerms = (hay, terms, mode) => (mode === 'or' ? terms.some(t => hay.includes(t)) : terms.every(t => hay.includes(t)));
 
+// ---------- 効果の概要から探す（例：「EXデッキからカードを墓地に送る」→ ゲール・ドグラ） ----------
+// 文を助詞（から・を・に・へ など）で区切って言葉にし、言い換え（EX＝エクストラデッキ、カード＝モンスター・魔法・罠、送る＝送り など）を広げる。
+// カードの効果文の1つの文の中に、すべての言葉（どれかの言い換え）が入っていれば当たり。スペースで区切ると、それぞれ別の文でもよい
+const SUMMARY_PHRASES = [
+  [/サーチ/g, ' デッキ 手札 加え '], [/リクルート/g, ' デッキ 特殊召喚 '], [/蘇生/g, ' 墓地 特殊召喚 '], [/帰還/g, ' 除外 特殊召喚 '],
+  [/バウンス/g, ' 手札 戻 '], [/墓地肥やし/g, ' 墓地 送 '], [/無効化/g, ' 無効 '], [/ドロー/g, ' 引く '], [/セルフバウンス/g, ' 手札 戻 '],
+];
+const SUMMARY_SYNONYMS = {
+  'ex': ['exデッキ', 'エクストラデッキ'], 'exデッキ': ['exデッキ', 'エクストラデッキ'], 'エクストラ': ['exデッキ', 'エクストラデッキ'], 'エクストラデッキ': ['exデッキ', 'エクストラデッキ'],
+  'カード': ['カード', 'モンスター', '魔法', '罠'], '引': ['ドロー', '引'], '除去': ['破壊', '除外', '手札に戻', 'デッキに戻'],
+  'gy': ['墓地'], 'フィールド': ['フィールド', '場'], '場': ['フィールド', '場'], '相手': ['相手'], '自分': ['自分'],
+};
+const SUMMARY_STOP = new Set(['する', 'できる', 'こと', 'もの', 'ある', 'いる', 'なる', 'その', 'この', '効果', '発動']);
+// 動詞の終わりをそろえる（送る→送、加える→加え、破壊する→破壊、戻す→戻、引く→引）
+const summaryStem = w => w.replace(/(することができる|できる|する|して|した)$/, '').replace(/[るすくうつぶむぐ]$/, '') || w;
+function summaryTokens(chunk) {
+  let s = chunk;
+  for (const [re, to] of SUMMARY_PHRASES) s = s.replace(re, to);
+  const words = s.split(/から|まで|より|を|に|へ|の|で|が|は|と|や|も|[\s　、。・「」]/).map(w => w.trim()).filter(Boolean);
+  const out = [];
+  for (const w0 of words) {
+    const w = normalizeText(w0);
+    if (!w || SUMMARY_STOP.has(w0) || SUMMARY_STOP.has(summaryStem(w0))) continue;
+    const st = normalizeText(summaryStem(w0));
+    // 言い換えは、正規化する前の言葉で引く（正規化すると「カード」の「ー」が消えるため）
+    const raw = w0.normalize('NFKC').toLowerCase(), rawStem = summaryStem(w0).normalize('NFKC').toLowerCase();
+    const alts = SUMMARY_SYNONYMS[raw] || SUMMARY_SYNONYMS[rawStem] || [st || w];
+    out.push(alts.map(a => normalizeText(a)).filter(Boolean));
+  }
+  return out.filter(a => a.length);
+}
+// カードの効果文を文ごとに分けて、正規化したもの（覚えておく）
+function cardSentences(c) {
+  if (!c.jaText) return [];
+  if (!c.tsents || c.tsentsSrc !== c.jaText) { c.tsentsSrc = c.jaText; c.tsents = c.jaText.split(/[。\n]/).map(s => ({ raw: s.trim(), key: normalizeText(s) })).filter(s => s.key); }
+  return c.tsents;
+}
+const summaryQuery = text => text.split(/[\s　]+/).filter(Boolean).map(summaryTokens).filter(t => t.length);
+// 当たった文（1つ目のまとまりのもの）。当たらなければ null
+function summaryHit(c, query) {
+  const sents = cardSentences(c);
+  let first = null;
+  for (const tokens of query) {
+    const hit = sents.find(s => tokens.every(alts => alts.some(a => s.key.includes(a))));
+    if (!hit) return null;
+    if (!first) first = hit.raw;
+  }
+  return first;
+}
+
 function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new', atkMin = null, atkMax = null, defMin = null, defMax = null }) {
   // 攻撃力・守備力の範囲（片方だけでもよい）。「？」（マイナスの値）と、守備力の無いリンクモンスターは、指定したら出さない
   const inRange = (v, lo, hi) => v >= 0 && (lo == null || v >= lo) && (hi == null || v <= hi);
@@ -588,6 +638,7 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
   const terms = splitTerms(q);
   const nq = terms.join('');
   const textTerms = splitTerms(text);
+  const sumQuery = textMode === 'summary' && text.trim() ? summaryQuery(text) : null;   // 効果の概要から探す
   // 属性・種族は複数指定（配列）に対応。どれか1つに当てはまればOK
   const toList = v => (Array.isArray(v) ? v.map(Number) : (v ? [+v] : []));
   const attrs = toList(attr), races = toList(race);
@@ -611,7 +662,8 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
     if (useAtk && !(isMonster(c) && inRange(c.atk, atkMin, atkMax))) continue;
     if (useDef && !(isMonster(c) && !has(c, T.LINK) && inRange(c.def, defMin, defMax))) continue;
     if (terms.length && !matchTerms(c.key, terms, qMode)) continue;
-    if (textTerms.length && !(c.tkey && matchTerms(c.tkey, textTerms, textMode))) continue;
+    if (sumQuery) { if (!summaryHit(c, sumQuery)) continue; }
+    else if (textTerms.length && !(c.tkey && matchTerms(c.tkey, textTerms, textMode))) continue;
     out.push(c);
   }
   // 名前が完全一致 → 前方一致 → その他 の順に並べる（ORのときは各語で一番良いもの）
