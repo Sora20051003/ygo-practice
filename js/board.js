@@ -844,6 +844,14 @@ function setupBoardView() {
     setTimeout(() => { if (!$('#pause').hidden) closePause(); }, 0);
   });
   for (const id of ['#b-deck', '#b-handsize']) $(id).addEventListener('change', renderPauseSummary);
+  // 先攻・後攻：「シャッフルして開始」のすぐ下で選べるようにする（下の設定の「先攻（5枚）／後攻」と同じもの）
+  const turnSeg = $('#b-turnseg');
+  if (turnSeg) {
+    const paintTurn = () => turnSeg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === $('#b-handsize').value));
+    turnSeg.querySelectorAll('button').forEach(b => { b.onclick = () => { $('#b-handsize').value = b.dataset.v; $('#b-handsize').dispatchEvent(new Event('change')); paintTurn(); toast(b.dataset.v === '6' ? '後攻にしました（次に開始したときから）' : '先攻にしました（次に開始したときから）'); }; });
+    $('#b-handsize').addEventListener('change', paintTurn);
+    paintTurn();
+  }
   $('#b-mode').addEventListener('click', () => setTimeout(renderPauseSummary));
   renderPauseSummary();
   $('#b-glow').checked = Glow.on;
