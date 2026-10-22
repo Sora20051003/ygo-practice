@@ -469,7 +469,12 @@ function duelMe() {
   return { uid: u ? u.uid.slice(0, 8) + '-' + uid : uid, name: name.slice(0, 20) };
 }
 const oppUid = () => Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guest : Duel.room.host);
-const oppName = () => (Board.S && Board.S.auto && !Auto.net ? 'CPU' : (Duel.room && (Duel.room.host === Duel.me.uid ? Duel.room.guestName : Duel.room.hostName) || '相手'));
+// 相手の名前：対戦の部屋にいて、対戦中か対戦の画面を開いているときは部屋の相手の名前。一人回しの CPU との対戦なら「CPU」
+const oppName = () => {
+  const inRoom = Duel.room && Duel.me && (Duel.active || document.body.dataset.view === 'duel');
+  if (!inRoom && Board.S && Board.S.auto && !Auto.net) return 'CPU';
+  return (Duel.room && Duel.me && (Duel.room.host === Duel.me.uid ? Duel.room.guestName : Duel.room.hostName)) || '相手';
+};
 // 表示する相手の盤面（自動処理モードでは CPU の盤面）
 const curOpp = () => (Board.S && Board.S.auto ? Board.S.opp : Duel.opp);
 const myTurn = () => (Auto.net && Auto.duel ? Auto.duel.turnPlayer === Auto.duel.me && !Auto.duel.ended : !!(Duel.room && Duel.room.turnPlayer === Duel.me.uid));
@@ -1074,7 +1079,8 @@ function renderDuelLobby() {
   const player = (uid, name) => el('li', null, el('b', { text: name || '（待っています…）' }),
     uid && uid !== me.uid && !isFriend(friendCodeOfUid(uid)) && friendCodeOfUid(uid).length === 8 ? el('button', { class: 'btn small', text: '👥 フレンドに追加', onclick: () => addFriend(friendCodeOfUid(uid), name) }) : null,
     uid && r.ready && r.ready[uid] ? el('span', { class: 'ready-tag', text: '準備OK' }) : uid ? el('span', { class: 'muted', text: '　デッキを選んでいます' }) : null,
-    uid && r.decks && r.decks[uid] ? el('span', { class: 'muted', text: `（${r.decks[uid]}）` }) : null);
+    // デッキ名は自分の分だけ出す（相手のデッキ名は伏せる）
+    uid === me.uid && r.decks && r.decks[uid] ? el('span', { class: 'muted', text: `（${r.decks[uid]}）` }) : null);
   box.append(el('div', { class: 'panel duel-card' },
     el('h2', null, '部屋コード ', el('span', { class: 'room-code', text: Duel.code })),
     el('div', { class: 'row' },
