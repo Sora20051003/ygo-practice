@@ -331,7 +331,7 @@ class AutoDuel {
     if (this.net) return this.netCreate();
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
-    this.log = []; this.pending = null; this.drawWait = false; this.attacking = null; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.log = []; this.pending = null; this.drawWait = false; this.attacking = null; this.knownSets = new Map(); this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set();   // 召喚・特殊召喚したばかりのカードの位置（誘発効果を自動で発動するため）
     this.justMoved = new Set();      // 直前に動いたカードの行き先（墓地へ送られた場合などの誘発を聞くため）
@@ -417,7 +417,7 @@ class AutoDuel {
   netCreate() {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
-    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.drawWait = false; this.attacking = null; this.leaving = 0; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.drawWait = false; this.attacking = null; this.knownSets = new Map(); this.leaving = 0; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set(); this.justMoved = new Set(); this.used = new Map();
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
@@ -503,7 +503,8 @@ class AutoDuel {
       // 対戦：相手が選ぶ番は、相手の画面から返答が届くのを待つ
       if (this.net && ask.player !== this.me) { this.pending = null; this.remoteAsk = ask; return; }
       // 相手の番の入力と、聞くまでもない確認は自動で返す
-      const auto = ask.player !== this.me ? (this.opp ? cpuAnswer(ask, this) : autoAnswer(ask)) : skippable(ask, this);
+      // CPU の先読み（noThink の複製）の中では、練習する人の答えも決める：分かっている伏せカードは使ってくるものとして考える
+      const auto = ask.player !== this.me ? (this.opp ? cpuAnswer(ask, this) : autoAnswer(ask)) : this.noThink ? humanSimAnswer(ask, this) : skippable(ask, this);
       // CPU が目に見える行動（召喚・発動・攻撃など）をするときは、一度止めて画面に見せてから進める（cpuSlow のときだけ）
       if (auto && this.cpuSlow && !this.probing && ask.player !== this.me && this.opp && cpuVisible(ask, auto)) { this.cpuWait = auto; this.pending = null; return; }
       if (auto) { this.respond(auto, true, true); continue; }
@@ -615,6 +616,12 @@ class AutoDuel {
       }
       case MSG.MOVE: {
         const code = m.card;
+        // 何のカードか分かっている伏せカード（墓地・除外・デッキ・フィールドから効果でセットされたもの。例：烙印竜アルビオン、オルフェゴール・ガラテア）。
+        // 手札からセットしたものは分からない。動いたら・表になったら忘れる（CPU の先読みで、相手がこれを使ってくるものとして考える）
+        if (this.knownSets) {
+          this.knownSets.delete(locKey(m.from.controller, m.from.location, m.from.sequence));
+          if (code && (m.to.location & (LOC.SZONE | LOC.MZONE)) && !(m.to.position & 5) && m.from.location && m.from.location !== LOC.HAND) this.knownSets.set(locKey(m.to.controller, m.to.location, m.to.sequence), code);
+        }
         if (!code || m.from.location === m.to.location && m.from.controller === m.to.controller) break;
         if (m.from.controller !== this.me && m.to.controller !== this.me && !(m.from.location & LOC.ONFIELD_ALL) && !(m.to.location & LOC.ONFIELD_ALL)) break;   // 相手の手札・デッキ・墓地の間の移動（手札調整など）は省く
         if (m.to.location === LOC.HAND && m.from.location === LOC.DECK && m.from.controller === this.me && this.drawing) break;
@@ -1159,6 +1166,27 @@ function cpuSingleAnswers(list, make) {
   list.forEach((c, i) => { const k = `${c.code}-${c.controller}-${c.location}`; if (!seen.has(k)) { seen.add(k); out.push(make(i)); } });
   return out;
 }
+// CPU の先読みの中での、練習する人の答え。分かっている伏せカード（knownSets）は、発動できるならすぐ発動するものとして考え、
+// その効果の対象などは CPU のフィールドのカードを選ぶ。メイン・バトルの行動は選ばない（null：そこで止まる）。それ以外は何もしない答え
+function humanSimAnswer(m, t) {
+  const cpu = 1 - t.me;
+  switch (m.type) {
+    case MSG.SELECT_IDLECMD: case MSG.SELECT_BATTLECMD: return null;
+    case MSG.SELECT_CHAIN: {
+      const i = (m.selects || []).findIndex(c => t.knownSets && t.knownSets.has(locKey(c.controller, c.location, c.sequence)));
+      if (i >= 0) return { type: RES.SELECT_CHAIN, index: i };
+      return skippable(m, t) || { type: RES.SELECT_CHAIN, index: m.forced ? 0 : null };
+    }
+    case MSG.SELECT_CARD: {
+      const score = c => (c.controller === cpu ? 10 : 0) + (c.location & LOC.ONFIELD_ALL ? 5 : 0) + ((DB.byId.get(c.code) || {}).atk || 0) / 10000;
+      const idx = m.selects.map((c, i) => i).sort((a, b) => score(m.selects[b]) - score(m.selects[a]));
+      return { type: RES.SELECT_CARD, indicies: idx.slice(0, m.min).sort((a, b) => a - b) };
+    }
+    case MSG.SELECT_EFFECTYN: case MSG.SELECT_YESNO: return { type: m.type === MSG.SELECT_EFFECTYN ? RES.SELECT_EFFECTYN : RES.SELECT_YESNO, yes: true };
+    default: return autoAnswer(m);
+  }
+}
+
 // 攻撃の対象：倒せる相手モンスターのうち、いちばん価値の高いもの（倒せるものが無ければ、いちばん弱いもの）
 function cpuAttackTarget(m, duel) {
   const atk = duel.attacker != null ? duel.attacker : 0;
