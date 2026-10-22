@@ -1108,6 +1108,10 @@ function updateLandscape() {
   // 横画面として使える幅と高さ（回したときは入れ替わる）
   b.style.setProperty('--lw', (rotated ? innerHeight : innerWidth) + 'px');
   b.style.setProperty('--lh', (rotated ? innerWidth : innerHeight) + 'px');
+  // 上の帯（タブ・カード表示・データ更新・設定など）を出しているときは、盤面に使える高さからその分を引く（盤面の中だけ）
+  const tb = document.querySelector('.topbar'), vb = $('#view-board');
+  const topH = land && !rotated && tb ? tb.offsetHeight : 0;
+  if (vb) { if (topH) vb.style.setProperty('--lh', (innerHeight - topH) + 'px'); else vb.style.removeProperty('--lh'); }
   // 横画面（スマホ）では盤面を大きくするため、左の操作の欄とページの切り替えをポーズ画面へ移す。
   // 盤面の右端には、ポーズ・フェイズの進行・チェーン確認だけを置く（#land-rail）
   const side = $('#view-board .side-left'), layout = $('#view-board .board-layout'), center = $('#view-board .board-center'), slots = $('#b-slots'), pbox = $('#pause .pause-box');

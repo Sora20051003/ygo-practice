@@ -858,7 +858,9 @@ body.land { height: var(--lh); overflow: hidden; }
 body.land .topbar { padding: 3px 10px; gap: 8px; flex-wrap: nowrap; }
 body.land .topbar h1 { font-size: 13px; white-space: nowrap; }
 body.land .tab { padding: 3px 9px; font-size: 13px; }
-body.land .data-status { display: none; }
+body.land.rotated .data-status { display: none; }   /* 一人回し（横の画面）でも上の帯をそのまま出す。スマホを横にして回しているときだけ隠す */
+body.land .data-status { gap: 6px; font-size: 12px; }
+body.land .data-status .btn { padding: 3px 8px; font-size: 12px; }
 body.land main { min-height: 0; }
 body.land #view-board { height: 100%; }
 body.land #view-board .board-layout {
@@ -963,8 +965,10 @@ body.land #view-board .board-center { --cw: min(calc((var(--lh) - 150px) / 4 / 1
 body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 182px) / 6 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
 /* 横画面ではタブの帯を隠して盤面を広く（タブの切り替えはポーズ画面から） */
 .pause-nav { display: none; gap: 6px; margin-left: auto; margin-right: 8px; }
-body.land .pause-nav { display: inline-flex; }
-body.land .topbar { display: none; }
+body.land.rotated .pause-nav { display: inline-flex; }
+/* 上の帯が出ているときは、ポーズ画面の「設定」は出さない（上の帯にある） */
+body.land:not(.rotated) .pause-head [data-settings] { display: none; }
+body.land.rotated .topbar { display: none; }
 body.land #view-board .board-center { --cw: min(calc((var(--lh) - 118px) / 4 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
 body.land #view-board .board-center:has(.field.duel) { --cw: min(calc((var(--lh) - 150px) / 6 / 1.5), calc((var(--lw) - 400px) / 7.8)); }
 /* スマホ横画面：右の詳細はパソコンと同じ並び（カードの絵が一番上） */
@@ -1606,3 +1610,13 @@ body:has(.ap-sheet) .draw-tap, body:has(.ap-actions) .draw-tap, body:has(#modal-
 .md-rar.md-UR { background: linear-gradient(135deg, #e2577b, #f2a65a, #f7e36b, #5fd39a, #4aa3f0, #9b6cf0); color: #1a1030; text-shadow: 0 0 2px rgba(255, 255, 255, 0.7); }
 .deck-tile .tile-rar { position: absolute; left: 2px; bottom: 2px; z-index: 2; pointer-events: none; }
 .deck-tile .tile-rar .md-rar { margin: 0; font-size: 9px; line-height: 14px; min-width: 18px; }
+/* 盤面から開く「関連カード」の窓 */
+.related-modal .rel-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px; }
+.related-modal .rel-item { display: flex; align-items: center; gap: 8px; text-align: left; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text); cursor: pointer; font: inherit; min-width: 0; }
+.related-modal .rel-item:hover { border-color: var(--accent); }
+.related-modal .rel-item .r-thumb, .related-modal .rel-item .r-color { flex: none; }
+.related-modal .rel-name { flex: 1; min-width: 0; font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.related-modal .rel-item small { flex: none; font-size: 11px; }
+.d-related { margin: 0 0 8px; }
+/* 横の画面で上の帯を出すとき、狭い画面ではカードの枚数の表示を省く */
+@media (max-width: 960px) { body.land #data-info { display: none; } }

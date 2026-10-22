@@ -524,6 +524,23 @@ function resultRow(c, ctx, text) {
 //  ・効果にこのカードの名前が書かれているカード
 const Related = { card: null, text: '' };
 
+// 一人回し・対戦の盤面から：関連カードを窓で出す（盤面はそのまま）。カードを押すと、そのカードの説明を出す
+async function openRelatedModal(c) {
+  const body = el('div', { class: 'stack related-modal' }, el('p', { class: 'muted', text: '関連カードを調べています…' }));
+  const close = showModal({ title: `🔍「${c.name}」の関連カード`, wide: true, body });
+  try { await loadCoUse(); } catch { /* 読めなくても、ほかのまとまりは出せる */ }
+  const groups = relatedGroups(c, c.jaText || '');
+  body.innerHTML = '';
+  if (!groups.length) { body.append(el('p', { class: 'muted', text: '関連カードが見つかりませんでした。' })); return; }
+  for (const g of groups) {
+    body.append(el('div', { class: 'rel-group', text: `${g.title}（${g.cards.length}）` }));
+    body.append(el('div', { class: 'rel-list' }, g.cards.slice(0, 60).map(x => el('button', {
+      class: 'rel-item', title: 'このカードの説明を出す',
+      onclick: () => { close(); if (isMobile()) showCardDetail(x, '#board-detail'); else { Board.detailCard = x; showCardDetail(x, '#board-detail'); } },
+    }, rowMark(x), el('span', { class: 'rel-name', text: x.name }), el('small', { class: 'muted', text: typeLine(x) })))));
+  }
+}
+
 async function showRelated(c) {
   Related.card = c;
   Related.text = c.jaText || '';

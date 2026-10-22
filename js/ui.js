@@ -549,6 +549,8 @@ function renderDetail(box, c, extra) {
   box.append(...[
     extra,
     img,
+    // 一人回し・対戦の盤面では、関連カードを窓で見られるようにする（デッキ作成の画面には「関連カードを検索」がある）
+    document.body.dataset.view === 'board' && c.id && typeof openRelatedModal === 'function' ? el('button', { class: 'btn small full d-related', text: '🔍 関連カードを見る', onclick: () => openRelatedModal(c) }) : null,
     el('div', { class: 'detail-head ' + frameClass(c) },
       el('div', { class: 'd-name', text: c.name }),
       c.ruby && c.ruby !== c.name ? el('div', { class: 'd-ruby', text: c.ruby }) : null,
