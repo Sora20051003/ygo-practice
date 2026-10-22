@@ -558,6 +558,8 @@ function openPickHand() {
 function drawCard() {
   const S = Board.S;
   if (S.auto) return;
+  // 先攻の最初のターンのドローフェイズは、ドローしない（デッキが0枚でも負けにしない。負けになるのは、ターンが返ってきてドローできないとき）
+  if (!S.deck.length && S.turn === 1 && S.phase === 'DP' && !firstTurnDraw() && !(typeof Duel !== 'undefined' && Duel.active)) { toast('先攻の最初のターンはドローしません（デッキが0枚でも負けになりません）'); return; }
   if (!S.deck.length) { commit(); deckOutLose(); return; }   // デッキ切れで負け
   moveCard(S.deck[0].uid, { zone: 'hand', noShuffle: true }, '（ドロー）');
 }
