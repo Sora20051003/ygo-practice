@@ -515,7 +515,7 @@ function resultRow(c, ctx, text) {
     el('div', { class: 'r-main' },
       el('div', { class: 'r-name' }, limitBadge(c, ctx), mdRarityBadge(c, ctx), c.name + (c.pre ? (c.id >= 101000000 ? '（TCG・発売前）' : '（発売前）') : c.noJp ? '（TCG）' : '')),
       el('div', { class: 'r-info', text: info }),
-      text ? (segMode('#qt-mode') === 'summary' ? summarySnippet(c, text) : snippetEl(c.jaText, text)) : null),
+      text ? snippetEl(c.jaText, text) : null),
     el('button', { class: 'btn small side-btn', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),
     el('button', { class: 'btn small primary', title: 'デッキに追加', text: '＋', onclick: e => { e.stopPropagation(); addToDeck(c); } }),
   );
@@ -1923,23 +1923,4 @@ async function openSamples() {
     fill();
   };
   draw();
-}
-
-// 概要で探したとき：当たった文をそのまま出す（概要の言葉に当たる部分を強調）
-function summarySnippet(c, text) {
-  const q = summaryQuery(text);
-  const hit = summaryHit(c, q);
-  if (!hit) return null;
-  const node = el('div', { class: 'r-snippet' });
-  const half = s => s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
-  const src = half(hit);
-  const words = [...new Set(q.flat())].filter(w => w.length >= 1).sort((a, b) => b.length - a.length);
-  const lower = src.toLowerCase();
-  const marks = [];
-  for (const w of words) { let i = lower.indexOf(w); while (i >= 0) { marks.push([i, i + w.length]); i = lower.indexOf(w, i + w.length); } }
-  marks.sort((a, b) => a[0] - b[0]);
-  let pos = 0;
-  for (const [a, b] of marks) { if (a < pos) continue; node.append(src.slice(pos, a), el('mark', { text: src.slice(a, b) })); pos = b; }
-  node.append(src.slice(pos));
-  return node;
 }
