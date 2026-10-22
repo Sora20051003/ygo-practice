@@ -417,7 +417,7 @@ class AutoDuel {
   netCreate() {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
-    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.drawWait = false; this.attacking = null; this.knownSets = new Map(); this.leaving = 0; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
+    this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.drawWait = false; this.attacking = null; this.knownSets = new Map(); this.leaving = 0; this.phaseWin = false; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
     this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
     this.justSummoned = new Set(); this.justMoved = new Set(); this.used = new Map();
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
@@ -518,6 +518,9 @@ class AutoDuel {
   respond(res, auto, inner) {
     // フェイズを進める返答：次のフェイズになるまで「今のフェイズを終わろうとしている」と覚えておく（チェーンの確認で使う）
     if ((res.type === RES.SELECT_IDLECMD && (res.action === IDLE.TO_BP || res.action === IDLE.TO_EP)) || (res.type === RES.SELECT_BATTLECMD && (res.action === BATTLE.TO_M2 || res.action === BATTLE.TO_EP))) this.leaving = this.phase;
+    // フェイズの変わり目（フェイズを終えるとき・新しいフェイズに入ったとき）かどうか。召喚・発動など別の行動をしたら外す
+    if (this.leaving) this.phaseWin = true;
+    else if (res.type === RES.SELECT_IDLECMD || res.type === RES.SELECT_BATTLECMD || (res.type === RES.SELECT_CHAIN && res.index != null)) this.phaseWin = false;
     // 手札などから自分の方法で特殊召喚するとき（「①の方法による特殊召喚は1ターンに1度」の記録用）
     const src = this.pending || this.lastAsk;
     // 攻撃するモンスターの攻撃力を覚えておく（CPU が攻撃の対象を選ぶときに使う）
@@ -573,7 +576,7 @@ class AutoDuel {
     switch (m.type) {
       case MSG.HINT: if (m.hint_type === 3) { if (m.player === this.me) this.hint = m.hint; else this.cpuHint = m.hint; } break;   // 選ぶときの説明（相手（CPU）の分は cpuHint）
       case MSG.NEW_TURN: this.used = new Map(); this.turn++; this.turnPlayer = m.player; this.addLog(`---- ${m.player === this.me ? '自分' : '相手'}のターン ----`); this.events.push({ t: 'turn', player: m.player, turn: this.turn }); break;
-      case MSG.NEW_PHASE: this.phase = m.phase; if (this.turnPlayer === this.me) this.addLog(PHASE_NAME[m.phase] || 'フェイズ'); this.leaving = 0; this.events.push({ t: 'phase', phase: m.phase, player: this.turnPlayer, turn: this.turn }); break;
+      case MSG.NEW_PHASE: this.phase = m.phase; this.phaseWin = true; if (this.turnPlayer === this.me) this.addLog(PHASE_NAME[m.phase] || 'フェイズ'); this.leaving = 0; this.events.push({ t: 'phase', phase: m.phase, player: this.turnPlayer, turn: this.turn }); break;
       case MSG.DRAW:
         if (m.player === this.me) this.addLog(`ドロー：${m.drawn.map(d => cardName(d.code & 0x7fffffff)).join('、')}`);
         this.events.push({ t: 'draw', player: m.player, n: m.drawn.length });   // ドローの演出用
@@ -752,6 +755,8 @@ function skippable(m, duel) {
       // 効果が発動したときだけ聞く（相手の発動、または自分の発動に自分で重ねられるとき）
       ask = last.con !== duel.me || !m.selects.every(c => c.location === LOC.HAND && isHandTrap(c.code));
     }
+    // フェイズの変わり目（自分・相手のどちらのターンでも）：発動できる効果があれば、フェイズごとに聞く
+    if (duel && mode !== 'off' && !last && duel.phaseWin) ask = true;
     if (!ask) return { type: RES.SELECT_CHAIN, index: null };
   }
   if (m.type === MSG.SORT_CHAIN) return { type: RES.SORT_CARD, order: null };

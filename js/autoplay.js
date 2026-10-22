@@ -816,6 +816,8 @@ function closePromptModal() { if (Auto.closePrompt) { Auto.closePrompt(); Auto.c
 function leavingText(d) {
   return `${d.turnPlayer === d.me ? '' : '相手の'}${PHASE_NAME[d.leaving] || 'フェイズ'}を終わろうとしています`;
 }
+// 「（相手の）スタンバイフェイズ」
+const phaseNowText = d => `${d.turnPlayer === d.me ? '' : '相手の'}${PHASE_NAME[d.phase] || 'フェイズ'}`;
 function promptTitle(p) {
   const hint = Auto.duel && Auto.duel.hint ? descText(Auto.duel.hint) : '';
   switch (p.type) {
@@ -825,6 +827,7 @@ function promptTitle(p) {
       // フェイズを進めようとしているとき（フェイズが終わる前に発動できる）
       if (Auto.duel && Auto.duel.leaving) return `${leavingText(Auto.duel)}。効果を発動しますか？`;
       if (Auto.duel && Auto.duel.phase === 512 && Auto.duel.turnPlayer === Auto.duel.me) return 'エンドフェイズです。効果を発動しますか？';
+      if (Auto.duel && Auto.duel.phaseWin) return `${phaseNowText(Auto.duel)}です。効果を発動しますか？`;
       return '効果を発動しますか？';
     case MSG.SELECT_EFFECTYN: return `「${cardName(p.code)}」の効果を発動しますか？`;
     case MSG.SELECT_YESNO: return descText(p.description) || 'はい／いいえ';
@@ -868,10 +871,13 @@ function promptModal(body, buttons = [], title) {
     back = el('button', { class: 'btn primary ap-peek-back', text: '↩ 選択に戻る', onclick: () => { sheet.hidden = false; back.remove(); back = null; fitSheet(sheet); } });
     document.body.append(back);
   }
+  // 前の確認を閉じてすぐ次の確認を出すときは、一度消えたのが分かるように少し間をあけて下から出す
+  if (performance.now() - (Auto.sheetClosedAt || 0) < 400) sheet.classList.add('again');
   document.body.append(sheet);
   fitSheet(sheet);
   const close = () => {
     sheet.remove();
+    Auto.sheetClosedAt = performance.now();
     if (back) { back.remove(); back = null; }
     if (Auto.selectable) { Auto.selectable = null; Auto.pickFromBoard = null; renderBoard(); }
     autoPanel();
@@ -1065,6 +1071,7 @@ function openPrompt() {
         ? `チェーン${ch.length + 1}として発動できます（チェーン${ch.length}：${ch[ch.length - 1].con === d.me ? '' : '相手の'}${cardName(ch[ch.length - 1].code)}）。発動する効果を選んで「発動する」を押してください`
         : d.leaving ? `${leavingText(d)}。フェイズが終わる前に発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないとフェイズが進みます）`
         : d.phase === 512 && d.turnPlayer === d.me ? 'エンドフェイズです。ターンを終える前に発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないとターンが進みます）'
+        : d.phaseWin ? `${phaseNowText(d)}です。発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないと先に進みます）`
         : '発動できる効果があります。発動する効果を選んで「発動する」を押してください';
       promptModal(el('div', { class: 'stack' }, el('p', { class: 'muted', text: lead }), grid,
         el('div', { class: 'row' }, go, p.forced ? null : el('button', { class: 'btn', text: d.phase === 512 && d.turnPlayer === d.me && !ch.length ? '発動しない（ターンを進める）' : '発動しない', onclick: () => answer({ type: RES.SELECT_CHAIN, index: null }) }))));
