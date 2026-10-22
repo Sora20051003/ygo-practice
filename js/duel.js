@@ -1107,7 +1107,7 @@ function renderDuelLobby() {
             // レギュレーションに合っていないデッキで準備OKにするときは確かめる
             const p = !amReady && deck ? deckCheckForRoom(deck, r) : null;
             if (p && !p.loading && (p.notAllowed.length || p.over.length) && !confirm('このデッキは選んだレギュレーションに合っていません。このまま準備OKにしますか？')) return;
-            const send = () => Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: deck.main, extra: deck.extra, errata: deck.errata || {} } : null });
+            const send = () => Duel.t.updateRoom({ ['ready.' + me.uid]: !amReady, ['decks.' + me.uid]: deck ? deck.name : '', ['deckList.' + me.uid]: deck ? { main: [...deck.main], extra: [...deck.extra], errata: { ...(deck.errata || {}) } } : null });
             // 準備OKにするとき、エラッタのあるカードの状態を確認する（部屋のエラッタ設定に、デッキのカードごとの設定を重ねたもの）
             if (!amReady && deck) confirmErrataGo(deck, send, r && r.errata); else send();
           },
@@ -1419,7 +1419,9 @@ async function beginNetDuel() {
   const dl = uid => (r.deckList && r.deckList[uid]) || { main: [], extra: [] };
   // エラッタ：部屋の設定に、2人のデッキのカードごとの設定を重ねる（同じカードで分かれたらエラッタ前）
   const netErrata = errataOfDecks(r.errata, dl(r.host), dl(r.guest));
-  const decks = [firstUid, secondUid].map(u => [dl(u).main || [], dl(u).extra || []]);
+  // 2人の画面でデッキの並びをそろえる（番号順）。並びがちがうと、同じ乱数で混ぜても配られるカードがずれて、2人のエンジンが食いちがう
+  const ordered = a => [...(a || [])].map(Number).sort((x, y) => x - y);
+  const decks = [firstUid, secondUid].map(u => [ordered(dl(u).main), ordered(dl(u).extra)]);
   Duel.solo = { S: Board.S, initial: Board.initial, history: Board.history, autoOn: Auto.on, autoDuel: Auto.duel };
   Duel.active = true; Duel.endedShown = false; Duel.netQueue = [];
   document.body.classList.add('dueling', 'netauto');
