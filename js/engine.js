@@ -519,6 +519,11 @@ class AutoDuel {
     if ((res.type === RES.SELECT_IDLECMD && (res.action === IDLE.TO_BP || res.action === IDLE.TO_EP)) || (res.type === RES.SELECT_BATTLECMD && (res.action === BATTLE.TO_M2 || res.action === BATTLE.TO_EP))) this.leaving = this.phase;
     // 手札などから自分の方法で特殊召喚するとき（「①の方法による特殊召喚は1ターンに1度」の記録用）
     const src = this.pending || this.lastAsk;
+    // 攻撃するモンスターの攻撃力を覚えておく（CPU が攻撃の対象を選ぶときに使う）
+    if (res.type === RES.SELECT_BATTLECMD && res.action === BATTLE.ATTACK && src && src.attacks && src.attacks[res.index]) {
+      const a = src.attacks[res.index];
+      try { const c = this.query()[a.controller].m[a.sequence]; this.attacker = c ? c.attack : null; } catch { this.attacker = null; }
+    }
     if (!auto && res.type === RES.SELECT_IDLECMD && res.action === IDLE.SPSUMMON && src && src.special_summons) { const c = src.special_summons[res.index]; this.procCode = c && c.location !== LOC.EXTRA ? c.code : 0; }
     if (!auto && (res.type === RES.SELECT_IDLECMD || res.type === RES.SELECT_BATTLECMD)) this.labels[this.responses.length] = describeAction(res, src, this);
     if (!auto) this.userMarks.push(this.responses.length);
@@ -565,7 +570,7 @@ class AutoDuel {
 
   onInfo(m) {
     switch (m.type) {
-      case MSG.HINT: if (m.hint_type === 3 && m.player === this.me) this.hint = m.hint; break;
+      case MSG.HINT: if (m.hint_type === 3) { if (m.player === this.me) this.hint = m.hint; else this.cpuHint = m.hint; } break;   // 選ぶときの説明（相手（CPU）の分は cpuHint）
       case MSG.NEW_TURN: this.used = new Map(); this.turn++; this.turnPlayer = m.player; this.addLog(`---- ${m.player === this.me ? '自分' : '相手'}のターン ----`); this.events.push({ t: 'turn', player: m.player, turn: this.turn }); break;
       case MSG.NEW_PHASE: this.phase = m.phase; if (this.turnPlayer === this.me) this.addLog(PHASE_NAME[m.phase] || 'フェイズ'); this.leaving = 0; this.events.push({ t: 'phase', phase: m.phase, player: this.turnPlayer, turn: this.turn }); break;
       case MSG.DRAW:
@@ -838,16 +843,25 @@ function cpuAnswer(m, duel) {
       if (duel.chain.length && duel.chain[duel.chain.length - 1].con === me) return { type: RES.SELECT_CHAIN, index: Math.floor(rnd() * m.selects.length) };
       return { type: RES.SELECT_CHAIN, index: null };
     case MSG.SELECT_BATTLECMD: if (duel.opp && duel.opp.plays) return cpuPlayBattle(m, duel); return autoAnswer(m);
-    case MSG.SELECT_EFFECTYN: return { type: RES.SELECT_EFFECTYN, yes: true };
-    case MSG.SELECT_YESNO: return { type: RES.SELECT_YESNO, yes: true };
-    case MSG.SELECT_CARD: return { type: RES.SELECT_CARD, indicies: prefer(m.selects).slice(0, m.min).sort((a, b) => a - b) };
+    // 「〜する？」・選択肢・1枚だけ選ぶ選択は、それぞれ試して良いほうを選ぶ（先読みの中では簡単に決める）
+    case MSG.SELECT_EFFECTYN: return cpuChoiceThink(m, duel, [{ type: RES.SELECT_EFFECTYN, yes: true }, { type: RES.SELECT_EFFECTYN, yes: false }]) || { type: RES.SELECT_EFFECTYN, yes: true };
+    case MSG.SELECT_YESNO: return cpuChoiceThink(m, duel, [{ type: RES.SELECT_YESNO, yes: true }, { type: RES.SELECT_YESNO, yes: false }]) || { type: RES.SELECT_YESNO, yes: true };
+    case MSG.SELECT_CARD: {
+      const attackTarget = Number(BigInt(duel.cpuHint || 0) & 0xfffffn) === 549;   // 攻撃の対象を選ぶ
+      if (m.min === 1 && m.max === 1) {
+        const best = cpuChoiceThink(m, duel, cpuSingleAnswers(m.selects, i => ({ type: RES.SELECT_CARD, indicies: [i] })));
+        if (best) return best;
+        if (attackTarget) return { type: RES.SELECT_CARD, indicies: [cpuAttackTarget(m, duel)] };
+      }
+      return { type: RES.SELECT_CARD, indicies: prefer(m.selects).slice(0, m.min).sort((a, b) => a - b) };
+    }
     case MSG.SELECT_TRIBUTE: return { type: RES.SELECT_TRIBUTE, indicies: [...Array(m.min).keys()] };
     case MSG.SELECT_UNSELECT_CARD: {
       if (m.can_finish || !m.select_cards.length) return { type: RES.SELECT_UNSELECT_CARD, index: null };
       return { type: RES.SELECT_UNSELECT_CARD, index: prefer(m.select_cards)[0] };
     }
     case MSG.SELECT_POSITION: return { type: RES.SELECT_POSITION, position: cpuPosition(m, duel) };
-    case MSG.SELECT_OPTION: return { type: RES.SELECT_OPTION, index: Math.floor(rnd() * m.options.length) };
+    case MSG.SELECT_OPTION: return cpuChoiceThink(m, duel, m.options.map((_, i) => ({ type: RES.SELECT_OPTION, index: i }))) || { type: RES.SELECT_OPTION, index: Math.floor(rnd() * m.options.length) };
     case MSG.ANNOUNCE_CARD: { const hit = [...duel.main, ...DB.cards.map(c => c.id)].find(id => Engine.ocg.cardMatchesOpcode(engineCardData(id), m.opcodes)); return { type: RES.ANNOUNCE_CARD, card: hit || duel.main[0] }; }
     default: return autoAnswer(m);
   }
@@ -1109,6 +1123,51 @@ function cpuChainThink(m, duel) {
   // 発動しても大して得にならないなら、温存する
   if (best >= 0 && passS != null && bestS < passS + 0.8) best = -1;
   return { type: RES.SELECT_CHAIN, index: best < 0 ? null : best };
+}
+
+// ---------- 効果の処理の途中の選択（サーチするカード・選択肢・「〜する？」・攻撃の対象など） ----------
+// それぞれの答えを複製の中で試し、CPU が次に行動を選ぶところ（メイン・バトル）まで進めて点数を比べる。いちばん良い答えを返す（試せなければ null）
+const CPU_CHOICE_TIME = 2500, CPU_CHOICE_MAX = 10;
+function cpuChoiceThink(m, duel, answers) {
+  if (duel.noThink || duel.probing || answers.length < 2) return null;
+  const cpu = 1 - duel.me, hist = duel.history(), t0 = performance.now();
+  let best = null, bestS = -Infinity;
+  for (const res of answers.slice(0, CPU_CHOICE_MAX)) {
+    if (performance.now() - t0 > CPU_CHOICE_TIME) break;   // 考えすぎない
+    let t = null;
+    try {
+      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata, sv: duel.sv });
+      t.noThink = true;
+      t.create();
+      t.stopAtCpu = true;
+      t.run(hist.slice());
+      const p = t.pending;
+      if (!p || p.player !== cpu || p.type !== m.type) continue;
+      t.retry = false;
+      cpuStep(t, res, cpu);
+      if (t.retry) continue;   // その答えはできない
+      const s = cpuScore(t, cpu);
+      if (s > bestS) { bestS = s; best = res; }
+    } catch (e) { /* 試せない答えは使わない */ }
+    finally { if (t && t.h) Engine.lib.destroyDuel(t.h); }
+  }
+  return best;
+}
+// 1枚だけ選ぶ選択の答えの候補（同じカード（同じ番号・同じ場所）は1つにまとめる）
+function cpuSingleAnswers(list, make) {
+  const seen = new Set(), out = [];
+  list.forEach((c, i) => { const k = `${c.code}-${c.controller}-${c.location}`; if (!seen.has(k)) { seen.add(k); out.push(make(i)); } });
+  return out;
+}
+// 攻撃の対象：倒せる相手モンスターのうち、いちばん価値の高いもの（倒せるものが無ければ、いちばん弱いもの）
+function cpuAttackTarget(m, duel) {
+  const atk = duel.attacker != null ? duel.attacker : 0;
+  const val = c => { const d = DB.byId.get(c.code) || {}; return (d.atk || 0) + (isExtraType(d) ? 1500 : 0); };
+  const defOf = c => (c.position & 0xc ? (c.position & 0x8 ? 1500 : (DB.byId.get(c.code) || {}).def || 0) : (DB.byId.get(c.code) || {}).atk || 0);
+  const idx = m.selects.map((c, i) => i);
+  const beatable = idx.filter(i => defOf(m.selects[i]) < atk);
+  if (beatable.length) return beatable.sort((a, b) => val(m.selects[b]) - val(m.selects[a]))[0];
+  return idx.sort((a, b) => defOf(m.selects[a]) - defOf(m.selects[b]))[0];
 }
 
 // 表示形式：相手の場にいちばん強いモンスターより攻撃力が低く、守備力のほうが高いなら守備表示
