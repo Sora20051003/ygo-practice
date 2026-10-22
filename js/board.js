@@ -1396,13 +1396,26 @@ const ruleHasEmz = rule => !rule || !MASTER_RULES[rule] || MASTER_RULES[rule].em
 
 // ---------- 勝ち負け（一人回し） ----------
 // 手動：デッキが0枚のときにドローしようとしたら負け。自動処理：エンジンの判定（デッキ切れ・ライフ0など）
+// 勝ち負けの知らせの文（理由が分からなければ「勝ちです。」「負けです。」だけ）
+function gameOverText(lose, reason) {
+  const fixed = {
+    'ライフが0': ['相手のライフが0になったので勝ちです。', 'ライフが0になったので負けです。'],
+    'デッキ切れ（ドローできない）': ['相手がデッキ切れでドローできなかったので勝ちです。', 'デッキが0枚でドローできなかったので負けです。'],
+    '降参': ['相手が降参したので勝ちです。', '降参したので負けです。'],
+    'カードの効果による特殊勝利': ['カードの効果による特殊勝利です。', '相手のカードの効果による特殊勝利で負けです。'],
+    '通信切れ': ['相手の通信が切れたので勝ちです。', '通信が切れたので負けです。'],
+  }[reason];
+  if (fixed) return fixed[lose ? 1 : 0];
+  if (!reason) return lose ? '負けです。' : '勝ちです。';
+  return `${reason}で${lose ? '負け' : '勝ち'}です。`;
+}
 function gameOver(result, reason) {
   if (typeof Auto !== 'undefined' && Auto.net) { netGameOver(result, reason); return; }
   Timer.running = false; renderTimer();
   const lose = result !== 'win';
   showModal({
     title: lose ? '💀 負け' : '🏆 勝ち',
-    body: el('p', { text: `${reason}で${lose ? '負け' : '勝ち'}です。` }),
+    body: el('p', { text: gameOverText(lose, reason) }),
     buttons: [
       { label: '同じ初手でやり直す', primary: true, onClick: () => restartSame() },
       { label: 'シャッフルして開始', onClick: () => startGame() },

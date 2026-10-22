@@ -655,7 +655,8 @@ class AutoDuel {
       case MSG.TOSS_COIN: this.addLog(`コイン：${m.results.map(r => (r ? '表' : '裏')).join('・')}`); break;
       case MSG.TOSS_DICE: this.addLog(`サイコロ：${m.results.join('・')}`); break;
       case MSG.WIN: {
-        const why = { 1: 'ライフが0', 2: 'デッキ切れ（ドローできない）', 3: '時間切れ' }[m.reason] || '';
+        // 勝ち負けの理由（エンジンの番号）。0x10 からはカードの効果による特殊勝利（封印されしエクゾディアなど）
+        const why = { 0: '降参', 1: 'ライフが0', 2: 'デッキ切れ（ドローできない）', 3: '時間切れ', 4: '通信切れ' }[m.reason] ?? (m.reason >= 0x10 ? 'カードの効果による特殊勝利' : '');
         this.endReason = why;
         this.ended = (m.player === this.me ? '自分の勝ち' : '相手の勝ち') + (why ? '・' + why : '');
         this.addLog(`対戦終了（${this.ended}）`); break;

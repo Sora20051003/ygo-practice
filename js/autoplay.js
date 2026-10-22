@@ -172,7 +172,7 @@ function autoAfter(noAnim) {
   if (!noAnim) showConfirms(events);
   if (isPrompt(d.pending)) openPrompt();
   // 勝ち負けが決まったら知らせる（デッキ切れ・ライフ0など）
-  if (d.ended && !d.endShown) { d.endShown = true; gameOver(d.ended.startsWith('自分の勝ち') ? 'win' : 'lose', d.endReason || d.ended); }
+  if (d.ended && !d.endShown) { d.endShown = true; gameOver(d.ended.startsWith('自分の勝ち') ? 'win' : 'lose', d.endReason || ''); }
   if (!d.ended) d.endShown = false;
   if (Auto.net && typeof netAfter === 'function') netAfter();
   scheduleCpu();
