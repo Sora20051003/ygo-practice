@@ -755,8 +755,7 @@ function skippable(m, duel) {
       // 効果が発動したときだけ聞く（相手の発動、または自分の発動に自分で重ねられるとき）
       ask = last.con !== duel.me || !m.selects.every(c => c.location === LOC.HAND && isHandTrap(c.code));
     }
-    // フェイズの変わり目（自分・相手のどちらのターンでも）：発動できる効果があれば、フェイズごとに聞く
-    if (duel && mode !== 'off' && !last && duel.phaseWin) ask = true;
+    // フェイズの変わり目で聞くのは、チェーン確認が「オン」のときだけ（オンはもともと、発動できるものがあれば毎回聞く）
     if (!ask) return { type: RES.SELECT_CHAIN, index: null };
   }
   if (m.type === MSG.SORT_CHAIN) return { type: RES.SORT_CARD, order: null };
