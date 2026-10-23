@@ -1625,7 +1625,7 @@ body:has(.ap-sheet) .draw-tap, body:has(.ap-actions) .draw-tap, body:has(#modal-
 .ap-sheet { animation: apsheetin .18s ease-out both; }
 .ap-sheet.again { animation: apsheetin .2s ease-out .16s both; }
 @media (prefers-reduced-motion: reduce) { .ap-sheet, .ap-sheet.again { animation: none; } }
-/* 相手のモンスターは相手から見た向き（上下逆さま）。守備表示は反対向きに横にする。素材・カウンターの数字は読めるように戻す */
-:is(.z-m, .z-emz) .bcard.opp { transform: rotate(180deg); }
-:is(.z-m, .z-emz) .bcard.opp.def { transform: rotate(90deg) scale(0.92); }
-:is(.z-m, .z-emz) .bcard.opp:not(.def) > .badge { transform: rotate(180deg); }
+/* 相手の場のカード（モンスター・魔法・罠）は相手から見た向き（上下逆さま）。守備表示は反対向きに横にする。素材・カウンターの数字は読めるように戻す */
+.opp-zone .bcard.opp { transform: rotate(180deg); }
+.opp-zone .bcard.opp.def { transform: rotate(90deg) scale(0.92); }
+.opp-zone .bcard.opp:not(.def) > .badge { transform: rotate(180deg); }
