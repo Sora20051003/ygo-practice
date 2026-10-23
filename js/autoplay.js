@@ -817,13 +817,20 @@ function leavingText(d) {
   return `${d.turnPlayer === d.me ? '' : '相手の'}${PHASE_NAME[d.leaving] || 'フェイズ'}を終わろうとしています`;
 }
 // 「（相手の）スタンバイフェイズ」
-const phaseNowText = d => `${d.turnPlayer === d.me ? '' : '相手の'}${PHASE_NAME[d.phase] || 'フェイズ'}`;
+// 相手のフェイズが変わるとき：「相手のメインフェイズ1が終了します」（ドロー・スタンバイ・エンドフェイズは、その確認のあとフェイズが終わる）
+function oppPhaseEndText(d) {
+  if (!d || d.turnPlayer === d.me || (d.chain && d.chain.length)) return '';
+  const ph = d.leaving || (d.phaseWin && [1, 2, 512].includes(d.phase) ? d.phase : 0);
+  return ph ? `相手の${PHASE_NAME[ph] || 'フェイズ'}が終了します` : '';
+}
+const phaseNowText = d =>`${d.turnPlayer === d.me ? '' : '相手の'}${PHASE_NAME[d.phase] || 'フェイズ'}`;
 function promptTitle(p) {
   const hint = Auto.duel && Auto.duel.hint ? descText(Auto.duel.hint) : '';
   switch (p.type) {
     // 積まれているチェーンがあるときだけ「チェーン」。解決し終えたあと（新しいチェーンの1つ目）は「効果の発動」
     case MSG.SELECT_CHAIN:
       if (Auto.duel && Auto.duel.chain.length) return 'チェーンして発動しますか？';
+      if (oppPhaseEndText(Auto.duel)) return `${oppPhaseEndText(Auto.duel)}。効果を発動しますか？`;
       // フェイズを進めようとしているとき（フェイズが終わる前に発動できる）
       if (Auto.duel && Auto.duel.leaving) return `${leavingText(Auto.duel)}。効果を発動しますか？`;
       if (Auto.duel && Auto.duel.phase === 512 && Auto.duel.turnPlayer === Auto.duel.me) return 'エンドフェイズです。効果を発動しますか？';
@@ -1069,6 +1076,7 @@ function openPrompt() {
       const ch = d.chain || [];
       const lead = ch.length
         ? `チェーン${ch.length + 1}として発動できます（チェーン${ch.length}：${ch[ch.length - 1].con === d.me ? '' : '相手の'}${cardName(ch[ch.length - 1].code)}）。発動する効果を選んで「発動する」を押してください`
+        : oppPhaseEndText(d) ? `${oppPhaseEndText(d)}。フェイズが終わる前に発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないとフェイズが進みます）`
         : d.leaving ? `${leavingText(d)}。フェイズが終わる前に発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないとフェイズが進みます）`
         : d.phase === 512 && d.turnPlayer === d.me ? 'エンドフェイズです。ターンを終える前に発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないとターンが進みます）'
         : d.phaseWin ? `${phaseNowText(d)}です。発動できる効果があります。発動する効果を選んで「発動する」を押してください（発動しないと先に進みます）`
