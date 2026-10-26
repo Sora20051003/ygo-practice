@@ -1269,8 +1269,7 @@ function duelGoPhase(k) {
 function duelEndTurn() {
   const r = Duel.room;
   if (!r || !myTurn() || r.status !== 'playing') return;
-  // まずエンドフェイズで止まる（エンドフェイズの処理をしてから、もう一度押すとターンを終える）
-  if (r.phase !== 'EP') { duelGoPhase('EP'); toast('エンドフェイズです。もう一度「ターンを終える」を押すと相手のターンへ'); return; }
+  // 1回押すだけでターンを終える（エンドフェイズを通って相手のターンへ）
   // 自分の持ち時間を使った分を記録してから、相手のターンにする
   Duel.t.updateRoom({ turn: r.turn + 1, turnPlayer: oppUid(), phase: 'DP', ['clock.' + Duel.me.uid]: Math.round(myClockUsed()) });
   Duel.t.sendEvent({ type: 'phase', text: `ターン終了 → T${r.turn + 1} ${oppName()}のターン` });

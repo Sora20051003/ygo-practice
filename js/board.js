@@ -1373,17 +1373,9 @@ function endTurn() {
   if (!S) return;
   if (typeof Duel !== 'undefined' && Duel.active) { duelEndTurn(); return; }
   if (S.auto) { autoPhase('ep'); return; }
-  // 手動：まずエンドフェイズで止まる（エンドフェイズの処理をしてから、もう一度押すとターンを終える）
-  if (S.phase !== 'EP') {
-    commit();
-    S.phase = 'EP';
-    log('エンドフェイズへ');
-    toast('エンドフェイズです。もう一度「ターンを終える」を押すと次のターンへ');
-    finishChange();
-    return;
-  }
-  // 手動：相手のターンは飛ばして、自分の次のターンのドローフェイズへ（1枚ドロー）
+  // 手動：1回押すだけでターンを終える。相手のターンは飛ばして、自分の次のターンのドローフェイズへ（1枚ドロー）
   commit();
+  if (S.phase !== 'EP') log('エンドフェイズへ');
   S.turn += 2; S.ns = false; S.used = []; S.phase = 'DP';
   log('---- 自分のターン（相手のターンは飛ばします） ----');
   if (S.deck.length) {
