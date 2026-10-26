@@ -426,6 +426,8 @@ async function autoResume() {
   try { saved = JSON.parse(JSON.stringify(store.get('ygo.autoBoard', null)), bigReviver); } catch { saved = null; }
   if (!saved || !saved.main || !saved.items) return;   // 古い形式の保存は使わない
   try { await autoPrepare(saved, saved.errata); if (saved.opp) await autoPrepare(saved.opp, saved.errata); const placed = saved.items.filter(x => x.res && x.res.type === RES.ANNOUNCE_CARD).map(x => x.res.card); if (placed.length) await loadCardScripts(placed, null, saved.errata); } catch { return; }
+  // 読み込んでいる間に対戦が始まった・別の一人回しを始めたときは、前の一人回しで上書きしない
+  if (Auto.net || (typeof Duel !== 'undefined' && Duel.active) || Auto.duel) return;
   const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: false, firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', errata: saved.errata, sv: saved.sv === 2 ? 2 : 1 });   // sv が無い＝前の版の混ぜ方で保存した盤面
   d.drawTap = true;
   d.vsCpu = oppMode() === 'cpu';
@@ -436,6 +438,7 @@ async function autoResume() {
 
 // ---------- モード切り替え ----------
 function setBoardMode(auto) {
+  auto = true;   // 手動モードはなくした（いつも効果を自動処理。前に保存した手動の盤面も自動処理で開く）
   Auto.on = auto;
   store.set('ygo.boardMode', auto ? 'auto' : 'manual');
   closeAllModals();
@@ -506,7 +509,8 @@ function setupAutoPlay() {
     store.set('ygo.autoDefault1', true);
     if (store.get('ygo.boardMode', 'auto') !== 'auto') { store.set('ygo.boardMode', 'auto'); setTimeout(() => toast('一人回しを「効果を自動処理」モードにしました（左上で「手動」に戻せます）'), 1500); }
   }
-  Auto.on = store.get('ygo.boardMode', 'auto') === 'auto';
+  store.set('ygo.boardMode', 'auto');   // 手動モードはなくした
+  Auto.on = true;
   if (Auto.on) { Auto.resumed = true; autoResume(); }
 }
 

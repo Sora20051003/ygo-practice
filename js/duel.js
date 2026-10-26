@@ -730,7 +730,7 @@ function onDuelRoom(r) {
     // 始まったら、先攻か後攻かを画面の真ん中に大きく出す（入り直したときは出さない）
     if (prev && prev.status !== 'playing' && r.first) showPhaseBanner(r.first === me ? 'あなたは先攻' : 'あなたは後攻', `${r.first === r.host ? r.hostName : r.guestName} の先攻で始めます`, r.first !== me, true);
     Duel.timeoutSent = false; Duel.endedShown = false; Duel.extraEndSent = false; Duel.matchTimeSent = r.timeUpTurn != null;
-    if (r.mode === 'auto') beginNetDuel(); else beginDuelBoard(); }
+    beginNetDuel(); }   // 対戦はいつも効果を自動処理（手動はなくした）
   if (Duel.active) {
     // ターンが変わったら、自分の盤面のターン数・通常召喚・使用済みを更新
     const key = r.turn + ':' + r.turnPlayer;
@@ -1526,7 +1526,6 @@ function netGameOver(result, reason) {
 function duelRuleSetting(r) {
   const rule = MASTER_RULES[r && r.rule] ? r.rule : 'mr5';
   const isHost = r && r.host === Duel.me.uid;
-  if ((r && r.mode) !== 'auto') return null;   // 手動の対戦では、ゾーンを自分で使い分けるので選ばない
   if (!isHost) return el('p', { class: 'muted', text: `ルール：${MASTER_RULES[rule].label}（部屋を作った人が決めます）` });
   const sel = el('select', { class: 'full' }, Object.entries(MASTER_RULES).map(([k, x]) => el('option', { value: k, text: x.label, selected: k === rule })));
   // 変えたら2人とも準備OKをやり直す
@@ -1537,24 +1536,16 @@ function duelRuleSetting(r) {
 // エラッタ（効果の変更）があったカードの効果：部屋を作った人が決める（2人で同じにしないと処理がずれる）
 function duelErrataSetting(r) {
   const mode = r && r.errata === 'pre' ? 'pre' : 'post';
-  if ((r && r.mode) !== 'auto') return null;
   if (!(r && r.host === Duel.me.uid)) return el('p', { class: 'muted', text: `エラッタのあったカード：${ERRATA_MODES[mode]}（部屋を作った人が決めます）` });
   const sel = el('select', { class: 'full' }, Object.entries(ERRATA_MODES).map(([k, t]) => el('option', { value: k, text: t, selected: k === mode })));
   sel.addEventListener('change', () => Duel.t.updateRoom({ errata: sel.value, ready: {} }));
   return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: 'エラッタ（効果の変更）があったカード' }), sel);
 }
 
+// 対戦のしかた：手動はなくしたので、選ぶところは出さない（いつも効果を自動処理）
 function duelModeSetting(r) {
-  const mode = (r && r.mode) || 'manual';
-  const isHost = r && r.host === Duel.me.uid;
-  const label = { auto: '効果を自動処理（ルールどおりに自動で処理）', manual: '手動（自分でカードを動かす）' };
-  if (!isHost) return el('p', { class: 'muted', text: `対戦のしかた：${label[mode]}（部屋を作った人が決めます）` });
-  return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: '対戦のしかた' }),
-    el('div', { class: 'seg full' }, ['auto', 'manual'].map(m => el('button', {
-      class: mode === m ? 'on' : '', text: m === 'auto' ? '効果を自動処理' : '手動',
-      onclick: () => Duel.t.updateRoom({ mode: m }),
-    }))),
-    el('p', { class: 'muted small-note', text: mode === 'auto' ? '召喚・効果の発動・チェーン・ダメージなどをルールどおり自動で処理します（対象などは自分で選びます）。' : '一人回しの手動モードと同じく、カードを自分で動かします。' }));
+  if (r && r.host === Duel.me.uid && r.mode !== 'auto' && r.status === 'waiting') Duel.t.updateRoom({ mode: 'auto' });
+  return null;
 }
 
 // ---------- 対戦の直前に選ぶ：デッキとレギュレーション ----------
