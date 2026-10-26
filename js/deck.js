@@ -853,7 +853,12 @@ function edoThemeToOwn() {
   edoThemeMap = new Map([...count].map(([t, m]) => [t, [...m].sort((a, b) => b[1] - a[1])[0][0]]));
   return edoThemeMap;
 }
+// 「光と闇の儀式」のカード名が記されたカード：カードデータでは「カオス」に入っているものもあるが、別のテーマとして扱う
+const LD_RITUAL = 0x2f001;   // こちらで決めたテーマの番号（カードデータの番号とぶつからない）
+const LD_RITUAL_IDS = new Set([33599853, 98684220, 70405001, 97818130, 50073633, 2372506, 75983808, 97462632, 44001993, 24749710, 24088928, 77456448]);
+const isLdRitual = c => LD_RITUAL_IDS.has(c.id) || (!!c.jaText && c.jaText.includes('「光と闇の儀式」'));
 function cardThemes(c) {
+  if (isLdRitual(c)) return [...ownThemes(c).filter(t => (t & 0xfff) !== 0xcf), LD_RITUAL];
   const own = ownThemes(c);
   if (own.length) return own;
   const e = typeof EDO_CARDS !== 'undefined' && EDO_CARDS.d[c.id];
