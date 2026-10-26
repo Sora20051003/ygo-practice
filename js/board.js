@@ -558,6 +558,8 @@ function openPickHand() {
 function drawCard() {
   const S = Board.S;
   if (S.auto) return;
+  // 対戦（手動）：ドロー待ちを終える（画面のドローの表示を消す）
+  if (typeof Duel !== 'undefined' && Duel.drawPending) { Duel.drawPending = false; renderManualDrawTap(); }
   // 先攻の最初のターンのドローフェイズは、ドローしない（デッキが0枚でも負けにしない。負けになるのは、ターンが返ってきてドローできないとき）
   if (!S.deck.length && S.turn === 1 && S.phase === 'DP' && !firstTurnDraw() && !(typeof Duel !== 'undefined' && Duel.active)) { toast('先攻の最初のターンはドローしません（デッキが0枚でも負けになりません）'); return; }
   if (!S.deck.length) { commit(); deckOutLose(); return; }   // デッキ切れで負け

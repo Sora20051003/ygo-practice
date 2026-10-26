@@ -184,7 +184,7 @@ function autoAfter(noAnim) {
 function renderDrawTap() {
   const d = Auto.duel;
   let n = document.getElementById('draw-tap');
-  if (!(d && d.drawWait && autoActive())) { if (n) n.remove(); return; }
+  if (!(d && d.drawWait && autoActive())) { if (n && !n.dataset.manual) n.remove(); return; }
   if (n) return;
   // 相手のターン中に開いたカードの操作ボタンが残っていると、ドローの表示が隠れてしまうので閉じる
   hideActionPopup();

@@ -741,8 +741,10 @@ function onDuelRoom(r) {
       Board.S.turn = r.turn;
       if (r.turnPlayer === me) {
         Board.S.ns = false; Board.S.used = [];
-        toast(r.turn === 1 ? 'あなたの先攻です（最初のターンはドローしません）' : 'あなたのターンです。ドローしてください');
-      }
+        toast(r.turn === 1 && !r.firstDraw ? 'あなたの先攻です（最初のターンはドローしません）' : 'あなたのターンです。画面をタッチしてドローしてください');
+        Duel.drawPending = r.turn > 1 || !!r.firstDraw;   // ドローフェイズ：画面をタッチしたらドロー
+      } else Duel.drawPending = false;
+      renderManualDrawTap();
       persist(); renderBoard();
     }
     // フェイズが変わったら盤面を描き直す（光らせる・カードのボタンをフェイズに合わせるため）
@@ -1240,6 +1242,21 @@ function oppStatBadge(p) {
   if (!p || !p.faceUp) return null;
   const card = p.token ? { type: T.MONSTER | T.TOKEN, atk: p.token.atk, def: p.token.def } : (p.id ? DB.byId.get(p.id) : null);
   return card ? statBadge(card, p) : null;
+}
+
+// ---------- 対戦（手動）のドロー：自分のターンになったら、画面をタッチして1枚ドロー ----------
+function renderManualDrawTap() {
+  let n = document.getElementById('draw-tap');
+  const on = Duel.drawPending && Duel.active && !Auto.net && Board.S && !Board.S.auto && myTurn() && Duel.room && Duel.room.status === 'playing';
+  if (!on) { if (n && n.dataset.manual) n.remove(); return; }
+  if (n) return;
+  if (typeof hideActionPopup === 'function') hideActionPopup();
+  n = el('div', { id: 'draw-tap', class: 'draw-tap', role: 'button', dataset: { manual: '1' } }, el('div', { class: 'draw-tap-label' }, el('b', { text: 'ドローフェイズ' }), el('span', { text: 'タップしてドロー' })));
+  n.addEventListener('click', () => {
+    if (document.querySelector('.ap-sheet:not([hidden]), #modal-root .modal-back') || (typeof pauseOpen === 'function' && pauseOpen())) return;
+    drawCard();   // drawCard の中で、ドロー待ちを終える
+  });
+  document.body.append(n);
 }
 
 // ---------- 対戦のフェイズ・ターン（一人回しと同じフェイズの帯から操作する） ----------
