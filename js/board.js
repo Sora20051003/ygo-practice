@@ -1174,7 +1174,7 @@ function renderLandRail() {
   // フェイズ：今のフェイズを出し、押すと進められるフェイズとターン終了が出る
   const st = phaseState();
   const ph = el('button', { class: 'lr-phase' + (st && !st.mine ? ' opp' : '') + (st && st.cur === 'EP' ? ' ep' : ''), id: 'ph-btn', disabled: !st, onclick: togglePhasePop });
-  if (st) ph.append(el('small', { text: `T${st.turn} ${st.mine ? '自分' : '相手'}` }), el('b', { text: (PHASES.find(x => x[0] === st.cur) || [, '－'])[1] }), el('small', { class: 'lr-more', text: st.mine && (st.endOk || Object.values(st.can).some(Boolean)) ? '進める ▸' : '' }));
+  if (st) ph.append(el('small', { text: `T${st.turn} ${st.mine ? '自分' : '相手'}` }), el('b', { text: (PHASES.find(x => x[0] === st.cur) || [, '－'])[1] }), el('small', { class: 'lr-more', text: st.draw ? 'ドロー ▸' : st.mine && (st.endOk || Object.values(st.can).some(Boolean)) ? '進める ▸' : '' }));
   else ph.append(el('small', { text: 'フェイズ' }), el('b', { text: '－' }));
   rail.append(ph);
   // チェーン確認（効果を自動処理するときだけ）
@@ -1191,6 +1191,7 @@ function renderLandRail() {
 }
 // フェイズの選択（右端のフェイズを押したときに出る）
 function togglePhasePop() {
+  if (typeof tapDraw === 'function' && tapDraw()) return;   // ドローフェイズで止まっているときは、フェイズのボタンでもドローできる
   if ($('#ph-pop')) { closePhasePop(); return; }
   const pop = el('div', { class: 'ph-pop', id: 'ph-pop' });
   for (const t of ['pointerdown', 'mousedown', 'contextmenu']) pop.addEventListener(t, e => e.stopPropagation());
@@ -1290,7 +1291,7 @@ function renderPhaseBar() {
 function phaseState() {
   const S = Board.S;
   const dueling = typeof Duel !== 'undefined' && Duel.active;
-  if (!S || (dueling && !(Duel.room && Duel.room.turn))) return null;
+  if (!S || (dueling && !S.auto && !(Duel.room && Duel.room.turn))) return null;
   let turn, mine = true, cur, can = {}, endOk, endLabel = 'ターン終了 ▶';
   if (dueling && !S.auto) {
     // 対戦：ターンとフェイズは部屋で共有する。自分のターンだけ進められる
@@ -1319,7 +1320,8 @@ function phaseState() {
     endOk = true;
     if (cur === 'EP') endLabel = 'ターンを終える ▶';
   }
-  return { turn, mine, cur, can, endOk, endLabel, dueling };
+  const draw = !!(S.auto && Auto.duel && Auto.duel.drawWait && mine);   // ドローフェイズで止まっている（押すとドロー）
+  return { turn, mine, cur, can, endOk, endLabel, dueling, draw };
 }
 function fillPhase(bar, inCell) {
   const S = Board.S;

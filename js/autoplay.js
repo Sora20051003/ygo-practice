@@ -186,17 +186,22 @@ function renderDrawTap() {
   let n = document.getElementById('draw-tap');
   if (!(d && d.drawWait && autoActive())) { if (n) n.remove(); return; }
   if (n) return;
+  // 相手のターン中に開いたカードの操作ボタンが残っていると、ドローの表示が隠れてしまうので閉じる
+  hideActionPopup();
   n = el('div', { id: 'draw-tap', class: 'draw-tap', role: 'button' }, el('div', { class: 'draw-tap-label' }, el('b', { text: 'ドローフェイズ' }), el('span', { text: 'タップしてドロー' })));
-  n.addEventListener('click', () => {
-    const dd = Auto.duel;
-    // 発動・キャンセルなどの選択、カードの上のボタン、窓、ポーズが出ているあいだはドローしない
-    if (document.querySelector('.ap-sheet, .ap-actions, #modal-root .modal-back') || pauseOpen()) return;
-    n.remove();
-    if (!dd || !dd.drawWait) return;
-    try { dd.resumeDraw(); } catch (e) { console.error(e); showError('処理中にエラーが起きました', e); }
-    autoAfter();
-  });
+  n.addEventListener('click', () => tapDraw());
   document.body.append(n);
+}
+// ドローする（ドローの表示を押したとき・フェイズのボタンを押したとき）。選択の帯・窓・ポーズが出ているあいだはしない
+function tapDraw() {
+  const dd = Auto.duel;
+  if (!dd || !dd.drawWait || !autoActive()) return false;
+  if (document.querySelector('.ap-sheet:not([hidden]), #modal-root .modal-back') || pauseOpen()) return false;
+  hideActionPopup();
+  const n = document.getElementById('draw-tap'); if (n) n.remove();
+  try { dd.resumeDraw(); } catch (e) { console.error(e); showError('処理中にエラーが起きました', e); }
+  autoAfter();
+  return true;
 }
 
 // ---------- 相手（CPU）の行動をゆっくり見せる ----------

@@ -1599,7 +1599,7 @@ body[data-view="deck"] .d-image { cursor: zoom-in; }
 .draw-ghost-side > * { width: 100%; height: 100%; }
 .draw-ghost-side.front { transform: rotateY(180deg); }
 /* 発動・キャンセルなどの選択や、カードの上のボタン、窓が出ているあいだは、どこを触ってもドローしない */
-body:has(.ap-sheet) .draw-tap, body:has(.ap-actions) .draw-tap, body:has(#modal-root .modal-back) .draw-tap { display: none !important; }
+body:has(.ap-sheet:not([hidden])) .draw-tap, body:has(#modal-root .modal-back) .draw-tap { display: none !important; }
 .b-turnseg { margin-top: 6px; display: flex; width: 100%; }
 .b-turnseg button { flex: 1; padding: 8px 0; font-size: 14px; font-weight: 700; }
 /* マスターデュエルのレアリティ（MD のデッキを組むとき） */
