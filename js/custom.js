@@ -18,6 +18,17 @@ function customSetcode(theme) {
   for (const ch of t) h = (h * 31 + ch.codePointAt(0)) >>> 0;
   return 0xf00 + (h % 0xff) + 1;
 }
+// テーマ名は「、」などで区切って3つまで（カテゴリ番号は 16bit ずつ詰めるので、JS の数で正しく持てる3つまで）
+const customThemes = d => [...new Set(String((d && d.theme) || '').split(/[、,，\/／]+/).map(s => s.trim()).filter(Boolean))].slice(0, 3);
+const customSetcodes = d => [...new Set(customThemes(d).map(customSetcode).filter(Boolean))];
+// 効果の「テーマのカードだけ」が指すテーマ名（前の形 true は1つ目のテーマ）
+const filtTheme = (f, d) => {
+  const ts = customThemes(d);
+  if (!f || !f.theme || !ts.length) return '';
+  return typeof f.theme === 'string' && ts.includes(f.theme) ? f.theme : ts[0];
+};
+// 手札に加える・墓地へ送る・特殊召喚する枚数
+const effCount = x => Math.max(1, Math.min(5, +(x && x.cnt) || 1));
 
 // ---------- 選べるもの ----------
 const CUSTOM_MTYPES = { normal: '通常モンスター', effect: '効果モンスター', fusion: '融合モンスター', synchro: 'シンクロモンスター', xyz: 'エクシーズモンスター', link: 'リンクモンスター' };
@@ -78,25 +89,26 @@ function customType(d) {
 }
 const CIRCLED = ['①', '②', '③', '④'];
 const zen = s => String(s).replace(/[0-9]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0xFEE0));
-function filtText(f, d, mon) {
+function filtText(f, d, mon, cnt) {
   f = f || {};
   const parts = [];
-  if (f.theme && d.theme) parts.push(`「${d.theme}」`);
+  const th = filtTheme(f, d);
+  if (th) parts.push(`「${th}」`);
   if (f.lv) parts.push(`レベル${zen(f.lv)}以下の`);
   if (f.attr) parts.push(`${ATTR[f.attr]}属性`);
   if (f.race) parts.push(RACE[f.race]);
   const kind = mon || f.kind === 'monster' ? 'モンスター' : f.kind === 'spell' ? '魔法カード' : f.kind === 'trap' ? '罠カード' : 'カード';
-  return parts.join('') + kind + '１' + (kind === 'モンスター' ? '体' : '枚');
+  return parts.join('') + kind + zen(cnt || 1) + (kind === 'モンスター' ? '体' : '枚');
 }
 // 効果1つの文。tgt：対象にするもの（あれば「〜を対象として発動できる」）／rest：処理
 function customWhatText(x, d) {
   const n = zen(x.n || 1);
   switch (x.what) {
     case 'draw': return { rest: `自分はデッキから${n}枚ドローする` };
-    case 'search': return { rest: `デッキから${filtText(x.filt, d)}を手札に加える` };
-    case 'send': return { rest: `デッキから${filtText(x.filt, d)}を墓地へ送る` };
-    case 'deckss': return { rest: `デッキから${filtText(x.filt, d, true)}を特殊召喚する` };
-    case 'gyss': return { rest: `自分の墓地から${filtText(x.filt, d, true)}を選んで特殊召喚する` };
+    case 'search': return { rest: `デッキから${filtText(x.filt, d, false, effCount(x))}を手札に加える` };
+    case 'send': return { rest: `デッキから${filtText(x.filt, d, false, effCount(x))}を墓地へ送る` };
+    case 'deckss': return { rest: `デッキから${filtText(x.filt, d, true, effCount(x))}を特殊召喚する` };
+    case 'gyss': return { rest: `自分の墓地から${filtText(x.filt, d, true, effCount(x))}を選んで特殊召喚する` };
     case 'self': return { rest: 'このカードを特殊召喚する' };
     case 'destroy': return { tgt: '相手フィールドのカード１枚', rest: 'そのカードを破壊する' };
     case 'banish': return { tgt: '相手フィールドのカード１枚', rest: 'そのカードを除外する' };
@@ -143,7 +155,7 @@ function customToCard(d) {
     def: d.kind === 'monster' ? (link ? +d.markers || 0 : +d.def || 0) : 0,
     level: d.kind === 'monster' ? Math.max(1, Math.min(13, +d.level || 1)) : 0, ls: 0, rs: 0,
     race: d.kind === 'monster' ? +d.race || 1 : 0, attr: d.kind === 'monster' ? +d.attr || 1 : 0,
-    setcode: customSetcode(d.theme), desc: '', pdesc: '', md: false, noJp: false,
+    setcode: customSetcodes(d).reduce((a, s, i) => a + s * 65536 ** i, 0), desc: '', pdesc: '', md: false, noJp: false,
     custom: true, def0: d,
   };
   c.jaText = customText(d);
@@ -197,7 +209,8 @@ const LUA_FILTER = (x, d, mon, id) => {
   if (f.race) cond.push(`c:IsRace(${+f.race})`);
   if (f.attr) cond.push(`c:IsAttribute(${+f.attr})`);
   if (f.lv) cond.push(`c:IsLevelBelow(${+f.lv})`);
-  if (f.theme && customSetcode(d.theme)) cond.push(`c:IsSetCard(${customSetcode(d.theme)})`);
+  const th = customSetcode(filtTheme(f, d));
+  if (th) cond.push(`c:IsSetCard(${th})`);
   return cond.join(' and ');
 };
 // 効果1つの「対象・処理」と、カテゴリ・対象を取るか
@@ -206,16 +219,18 @@ function luaAction(x, d, i) {
   const F = `s.f${i}`, TG = `s.tg${i}`, OP = `s.op${i}`;
   const head = `function ${TG}(e,tp,eg,ep,ev,re,r,rp,chk,chkc)`;
   const opHead = `function ${OP}(e,tp,eg,ep,ev,re,r,rp)`;
+  const k = effCount(x);
   const fromDeck = (loc, cat, able, hint, act, mon) => ({
     cat, tgt: false,
     code: `function ${F}(c,e,tp) return ${LUA_FILTER(x, d, mon)} and ${able} end
 ${head}
-	if chk==0 then return ${mon ? 'Duel.GetLocationCount(tp,LOCATION_MZONE)>0 and ' : ''}Duel.IsExistingMatchingCard(${F},tp,${loc},0,1,nil,e,tp) end
-	Duel.SetOperationInfo(0,${cat.split('+')[0]},nil,1,tp,${loc})
+	if chk==0 then return ${mon ? `Duel.GetLocationCount(tp,LOCATION_MZONE)>=${k} and ` : ''}Duel.IsExistingMatchingCard(${F},tp,${loc},0,${k},nil,e,tp) end
+	Duel.SetOperationInfo(0,${cat.split('+')[0]},nil,${k},tp,${loc})
 end
 ${opHead}
-	${mon ? 'if Duel.GetLocationCount(tp,LOCATION_MZONE)<=0 then return end\n\t' : ''}Duel.Hint(HINT_SELECTMSG,tp,${hint})
-	local g=Duel.SelectMatchingCard(tp,${F},tp,${loc},0,1,1,nil,e,tp)
+	${mon ? `if Duel.GetLocationCount(tp,LOCATION_MZONE)<${k} then return end\n\t` : ''}if not Duel.IsExistingMatchingCard(${F},tp,${loc},0,${k},nil,e,tp) then return end
+	Duel.Hint(HINT_SELECTMSG,tp,${hint})
+	local g=Duel.SelectMatchingCard(tp,${F},tp,${loc},0,${k},${k},nil,e,tp)
 	if #g>0 then ${act} end
 end`,
   });
@@ -492,9 +507,11 @@ function openCustomEditor(src, onSaved) {
     } else {
       form.append(field('罠の種類', sel(CUSTOM_TTYPES, d.ttype, v => { d.ttype = v; fixEffects(); render(); })));
     }
-    const theme = el('input', { type: 'text', value: d.theme || '', class: 'full', placeholder: '例：ドラゴン騎士（空欄＝テーマなし）', maxlength: 20 });
+    const theme = el('input', { type: 'text', value: d.theme || '', class: 'full', placeholder: '例：ドラゴン騎士、蒼炎（空欄＝テーマなし）', maxlength: 60 });
     theme.addEventListener('input', () => { d.theme = theme.value; redrawPreview(); });
-    form.append(field('テーマ名（同じテーマ名のオリジナルカードどうしで「テーマのカード」として扱う）', theme));
+    // 打ち終わったら、効果の「テーマのカードだけ」の選び肢を作り直す
+    theme.addEventListener('change', () => render());
+    form.append(field('テーマ名（「、」で区切ると3つまで入れられる。同じテーマ名のオリジナルカードどうしで「テーマのカード」として扱う）', theme));
 
     // 絵
     const file = el('input', { type: 'file', accept: 'image/*' });
@@ -565,10 +582,17 @@ function openCustomEditor(src, onSaved) {
           field('種族', sel({ '': 'どれでも', ...RACE }, f.race || '', v => { f.race = v ? +v : 0; redrawPreview(); })),
           field('レベル以下', num(f.lv || '', 1, 12, 1, v => { f.lv = v || 0; redrawPreview(); })));
       }
-      const th = el('input', { type: 'checkbox', checked: !!f.theme, disabled: !(d.theme || '').trim() });
-      th.addEventListener('change', () => { f.theme = th.checked; redrawPreview(); });
-      fr.append(el('label', { class: 'check', title: 'このカードのテーマ名と同じテーマのオリジナルカードだけ' }, th, ' 同じテーマのカードだけ'));
+      const ts = customThemes(d);
+      if (ts.length) {
+        const cur = filtTheme(f, d);
+        if (f.theme) f.theme = cur;
+        fr.append(field('テーマ', sel({ '': 'どれでも', ...Object.fromEntries(ts.map(t => [t, `「${t}」のカードだけ`])) }, cur, v => { f.theme = v || ''; redrawPreview(); })));
+      } else {
+        fr.append(el('span', { class: 'muted small-note', text: 'テーマ名を入れると「テーマのカードだけ」にできます' }));
+      }
       row.append(fr);
+      x.cnt = effCount(x);
+      row.append(field(w.mon ? '体数' : '枚数', num(x.cnt, 1, 5, 1, v => { x.cnt = v === '' ? 1 : Math.max(1, Math.min(5, v)); redrawPreview(); })));
     }
     const opt = el('input', { type: 'checkbox', checked: !!x.opt });
     opt.addEventListener('change', () => { x.opt = opt.checked; redrawPreview(); });
