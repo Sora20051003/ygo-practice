@@ -407,6 +407,28 @@ function shrinkImage(file) {
   });
 }
 
+// 用意された絵（img/art/ の 8属性 × 15枚）から選ぶ
+const ART_SETS = [['fire', '火'], ['water', '水'], ['earth', '地'], ['wind', '風'], ['dark', '闇'], ['light', '光'], ['thunder', '雷'], ['ice', '氷']];
+let artTab = 'fire';
+function openArtPicker(onPick) {
+  const tabs = el('div', { class: 'art-tabs' });
+  const grid = el('div', { class: 'art-grid' });
+  const body = el('div', { class: 'stack' }, tabs, grid);
+  let close = null;
+  const draw = () => {
+    tabs.innerHTML = ''; grid.innerHTML = '';
+    for (const [key, label] of ART_SETS) {
+      tabs.append(el('button', { type: 'button', class: 'btn small' + (key === artTab ? ' on' : ''), text: label, onclick: () => { artTab = key; draw(); } }));
+    }
+    for (let i = 1; i <= 15; i++) {
+      const url = `img/art/${artTab}_${String(i).padStart(2, '0')}.jpg`;
+      grid.append(el('button', { type: 'button', class: 'art-pick', onclick: () => { close && close(); onPick(url); } }, el('img', { src: url, alt: '', loading: 'lazy' })));
+    }
+  };
+  draw();
+  close = showModal({ title: '絵を選ぶ', body, wide: true });
+}
+
 function openCustomEditor(src, onSaved) {
   const d = JSON.parse(JSON.stringify(src || newCustomDef()));
   if (!Array.isArray(d.effects)) d.effects = [];
@@ -481,7 +503,10 @@ function openCustomEditor(src, onSaved) {
       if (!f) return;
       try { d.img = await shrinkImage(f); redrawPreview(); } catch (e) { toast(e.message); }
     });
-    form.append(field('イラスト（画像を選ぶ）', file, d.img ? el('button', { type: 'button', class: 'btn small', text: '絵を外す', onclick: () => { d.img = ''; render(); } }) : null));
+    const pick = el('button', { type: 'button', class: 'btn small accent', text: '🖼 用意された絵から選ぶ', onclick: () => openArtPicker(async url => {
+      try { const blob = await (await fetch(url)).blob(); d.img = await shrinkImage(blob); render(); redrawPreview(); } catch (e) { toast('絵を読み込めませんでした'); }
+    }) });
+    form.append(field('イラスト（画像を選ぶ）', pick, file, d.img ? el('button', { type: 'button', class: 'btn small', text: '絵を外す', onclick: () => { d.img = ''; render(); redrawPreview(); } }) : null));
 
     // 効果
     if (d.kind === 'monster' && d.mtype === 'normal') {

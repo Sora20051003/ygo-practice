@@ -1648,3 +1648,11 @@ body:has(.ap-sheet:not([hidden])) .draw-tap, body:has(#modal-root .modal-back) .
 .custom-btns { display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 640px) { .custom-cols { grid-template-columns: 1fr; } .custom-preview { position: static; align-items: center; } .custom-preview .cardface { width: 160px; } }
 .custom-effect > .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; } .custom-effect > .row > .btn { flex: none; width: auto; }
+
+/* オリジナルカード：用意された絵から選ぶ */
+.art-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.art-tabs .btn.on { background: var(--accent, #4a7bd0); color: #fff; }
+.art-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; max-height: 60vh; overflow-y: auto; }
+.art-pick { padding: 0; border: 2px solid transparent; border-radius: 6px; background: none; cursor: pointer; aspect-ratio: 62 / 76; overflow: hidden; }
+.art-pick:hover, .art-pick:focus-visible { border-color: var(--accent, #4a7bd0); }
+.art-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
