@@ -1656,3 +1656,7 @@ body:has(.ap-sheet:not([hidden])) .draw-tap, body:has(#modal-root .modal-back) .
 .art-pick { padding: 0; border: 2px solid transparent; border-radius: 6px; background: none; cursor: pointer; aspect-ratio: 62 / 76; overflow: hidden; }
 .art-pick:hover, .art-pick:focus-visible { border-color: var(--accent, #4a7bd0); }
 .art-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.custom-parse-note { font-size: 13px; display: grid; gap: 2px; }
+.custom-parse-note:empty { display: none; }
+.custom-parse-note > div { color: #7fd3a0; }
+.custom-parse-note > div.warn { color: #f0b35a; }

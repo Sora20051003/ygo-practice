@@ -130,6 +130,7 @@ function customText(d) {
     if (mat) lines.push(mat);
   }
   if (d.kind === 'monster' && d.mtype === 'normal') return [...lines, d.flavor || ''].filter(Boolean).join('\n');
+  if (d.useSrc && (d.src || '').trim()) return [...lines, d.src.trim()].join('\n');   // 自分の書いた文をそのまま出す
   const single = effs.length === 1 && CUSTOM_WHEN[effs[0].when].card;   // 魔法・罠の発動の効果だけ：①を付けない
   const opt = effs.map((x, i) => (x.opt ? CIRCLED[i] : null)).filter(Boolean);
   if (single && opt.length) lines.push('このカード名のカードは１ターンに１枚しか発動できない。');
@@ -393,6 +394,107 @@ ${funcs.join('\n')}
 `;
 }
 
+// ---------- 自由に書いた効果文を読み取る ----------
+// 書いた文から「いつ」「何をする」「条件」「数」を探して、エンジンで動く効果に直す。
+// 返り値：{ effects, themes（文に出てきた「テーマ名」）, notes（読み取れなかった部分など） }
+const KANSUJI = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+function normEffText(s) {
+  return String(s || '')
+    .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/[一二三四五六七八九](?=[枚体つ度])/g, ch => KANSUJI[ch])
+    .replace(/[\s　]+/g, '');
+}
+function parseEffectText(text, d) {
+  const notes = [], themes = [];
+  const all = normEffText(text);
+  if (!all) return { effects: [], themes, notes: ['文が空です'] };
+  // ①②…で分ける。無ければ「。」で文ごとにまとめて1つの効果として読む
+  // 「①：」「②:」のように番号のあとに「：」があるところで分ける（「①②の効果は」の番号では分けない）
+  const numbered = /[①②③④⑤][:：]/.test(all);
+  let segs = all.split(/(?=[①②③④⑤][:：])/).filter(Boolean);
+  let header = '';
+  if (numbered && !/^[①②③④⑤][:：]/.test(segs[0])) header = segs.shift();
+  if (!numbered) {
+    // 番号が無いとき：処理（ドローなど）まで書いてある所で1つの効果として区切る
+    const ACT = /(ドロー|手札に加え|墓地へ送|特殊召喚|破壊|除外|手札に戻|ダメージ|回復|アップ|無効)/;
+    const sentences = all.split(/(?<=。)/).filter(Boolean);
+    segs = []; let cur = '';
+    for (const s of sentences) {
+      if (/1ターンに1(度|回|枚)しか/.test(s)) { header += s; continue; }
+      cur += s;
+      const k = cur.search(/発動(でき|する)/);
+      if (ACT.test(k >= 0 ? cur.slice(k) : cur)) { segs.push(cur); cur = ''; }
+    }
+    if (cur) { if (segs.length) segs[segs.length - 1] += cur; else segs.push(cur); }
+  }
+  const allOpt = /カード名のカードは1ターンに1(枚|度)/.test(header) || /1ターンに1(枚|度)しか発動/.test(header);
+  const optNums = new Set();
+  const hm = header.match(/([①②③④⑤]+)の効果/);
+  if (hm) for (const ch of hm[1]) optNums.add('①②③④⑤'.indexOf(ch));
+  else if (/1ターンに1度/.test(header)) segs.forEach((_, i) => optNums.add(i));
+
+  const num = (s, re, def) => { const m = s.match(re); return m ? +m[1] : def; };
+  const effects = [];
+  segs.forEach((seg, i) => {
+    const body = seg.replace(/^[①②③④⑤][:：]?/, '');
+    const cut = body.search(/発動(でき|する)/);
+    const pre = cut >= 0 ? body.slice(0, cut) : '';
+    const act = cut >= 0 ? body.slice(cut) : body;
+    const x = { when: '', what: '', n: 1, cnt: 1, opt: allOpt || optNums.has(i) || /1ターンに1度/.test(body), filt: {} };
+    // いつ
+    const oppAct = /相手が.*発動した(時|とき)|相手の.*発動した(時|とき)/.test(pre || body);
+    if (/手札から(捨て|墓地へ送っ)/.test(pre)) x.when = oppAct ? 'handchain' : 'handquick';
+    else if (/墓地の(この)?カードを除外|墓地から(この)?カードを除外|墓地から除外して/.test(pre)) x.when = 'gyban';
+    else if (/手札に(存在|ある)/.test(pre)) x.when = 'handss';
+    else if (/墓地へ送られた/.test(pre)) x.when = 'tograve';
+    else if (/召喚(に成功)?した(場合|時|とき)/.test(pre)) x.when = 'summon';
+    else if (oppAct) x.when = d.kind === 'monster' ? 'chain' : 'achain';
+    else if (/相手ターンでも|フリーチェーン/.test(body)) x.when = d.kind === 'monster' || isZoneST(d) ? 'quick' : 'activate';
+    else x.when = d.kind === 'monster' || isZoneST(d) ? 'ignition' : 'activate';
+    // 何をする（コストの部分は除いて、処理の部分から探す）
+    const a = act;
+    if (/無効/.test(a)) x.what = 'negate';
+    else if (/ドロー/.test(a)) { x.what = 'draw'; x.n = Math.min(3, num(a, /(\d+)枚ドロー/, 1)); }
+    else if (/このカードを(守備表示で)?特殊召喚/.test(a)) x.what = 'self';
+    else if (/墓地.*特殊召喚/.test(a)) x.what = 'gyss';
+    else if (/デッキ.*特殊召喚/.test(a)) x.what = 'deckss';
+    else if (/デッキ.*墓地へ送/.test(a)) x.what = 'send';
+    else if (/手札に加え/.test(a)) x.what = 'search';
+    else if (/手札に戻/.test(a)) x.what = 'bounce';
+    else if (/除外/.test(a)) x.what = 'banish';
+    else if (/破壊/.test(a)) x.what = 'destroy';
+    else if (/ダメージ/.test(a)) { x.what = 'damage'; x.n = num(a, /(\d+)(ポイントの)?ダメージ/, 500); }
+    else if (/回復/.test(a)) { x.what = 'recover'; x.n = num(a, /(\d+)(LP|ライフ)?(ポイント)?回復/, 500); }
+    else if (/攻撃力/.test(a) && /(アップ|上げ|上がる)/.test(a)) { x.what = 'atkup'; x.n = num(a, /(\d+)(アップ|上げ|上がる)/, 500); }
+    if (!x.what) { notes.push(`読み取れなかった文：${seg}`); return; }
+    if (x.n > 4000) x.n = 4000;
+    if (['damage', 'recover', 'atkup'].includes(x.what)) x.n = Math.max(100, Math.round(x.n / 100) * 100);
+    // 条件と数（手札に加える・墓地へ送る・特殊召喚）
+    if (CUSTOM_WHAT[x.what].filt) {
+      const f = x.filt;
+      const tm = a.match(/「([^」]+)」/);
+      if (tm) { f.theme = tm[1]; themes.push(tm[1]); }
+      const lv = a.match(/レベル(\d+)以下/); if (lv) f.lv = Math.min(12, +lv[1]);
+      for (const [k, v] of Object.entries(ATTR)) if (a.includes(v + '属性')) f.attr = +k;
+      for (const [k, v] of Object.entries(RACE)) if (a.includes(v)) f.race = +k;
+      if (!CUSTOM_WHAT[x.what].mon) f.kind = /モンスター/.test(a) ? 'monster' : /魔法/.test(a) && !/罠/.test(a) ? 'spell' : /罠/.test(a) && !/魔法/.test(a) ? 'trap' : '';
+      x.cnt = Math.max(1, Math.min(5, num(a, /(\d+)(枚|体)/, 1)));
+    }
+    // 選んだ効果と合わないタイミングを直す
+    if (!CUSTOM_WHEN[x.when].ok(d)) x.when = Object.keys(CUSTOM_WHEN).find(w => CUSTOM_WHEN[w].ok(d)) || 'ignition';
+    if (x.what === 'negate' && !isChainWhen(x.when)) {
+      x.when = d.kind === 'monster' ? (x.when.startsWith('hand') ? 'handchain' : 'chain') : 'achain';
+      if (!CUSTOM_WHEN[x.when].ok(d)) { notes.push(`このカードの種類では「無効にする」効果は作れません：${seg}`); return; }
+    }
+    if (x.what === 'self' && !['handss', 'tograve'].includes(x.when)) x.when = d.kind === 'monster' && !isExtraMtype(d) ? 'handss' : 'tograve';
+    if (!whatOk(d, x.when, x.what)) { notes.push(`このカードでは使えない組み合わせです：${seg}`); return; }
+    effects.push(x);
+  });
+  const max = maxEffects(d);
+  if (effects.length > max) { notes.push(`このカードに入れられる効果は${max}つまでなので、${max + 1}つ目から先は入れていません`); effects.length = max; }
+  return { effects, themes: [...new Set(themes)], notes };
+}
+
 // ---------- 作る・直す画面 ----------
 function newCustomDef() {
   const used = new Set(customList().map(d => d.id));
@@ -534,6 +636,31 @@ function openCustomEditor(src, onSaved) {
       const max = maxEffects(d);
       const box = el('div', { class: 'custom-effects' });
       d.effects.slice(0, max).forEach((x, i) => box.append(effectRow(x, i)));
+      // 自由に書く → 読み取って下の効果に入れる → 下で直す
+      const src = el('textarea', { rows: 4, class: 'full', placeholder: '例：①：このカードが召喚に成功した場合に発動できる。デッキから「蒼炎」モンスター1体を手札に加える。\n②：相手が効果を発動した時、このカードを手札から捨てて発動できる。その発動を無効にし破壊する。' }, d.src || '');
+      src.addEventListener('input', () => { d.src = src.value; if (d.useSrc) redrawPreview(); });
+      const result = el('div', { class: 'custom-parse-note' });
+      if (d.parseNote) result.append(...d.parseNote.map(t => el('div', { class: t.startsWith('✓') ? '' : 'warn', text: t })));
+      const read = el('button', { type: 'button', class: 'btn small accent', text: '✨ この文から効果を作る', onclick: () => {
+        const r = parseEffectText(d.src, d);
+        const notes = [];
+        if (r.effects.length) {
+          d.effects = r.effects;
+          // 文に出てきた「テーマ名」を、このカードのテーマにも足す（3つまで）
+          const ts = customThemes(d);
+          const add = r.themes.filter(t => !ts.includes(t));
+          if (add.length && ts.length < 3) { d.theme = [...ts, ...add].slice(0, 3).join('、'); notes.push(`✓ テーマ名に「${add.slice(0, 3 - ts.length).join('」「')}」を足しました`); }
+          notes.push(`✓ ${r.effects.length}つの効果を読み取りました。下で確かめて、違うところを直してください`);
+        } else notes.push('効果を読み取れませんでした。下で選んで作ってください');
+        d.parseNote = [...notes, ...r.notes];
+        render();
+      } });
+      const useSrc = el('input', { type: 'checkbox', checked: !!d.useSrc });
+      useSrc.addEventListener('change', () => { d.useSrc = useSrc.checked; redrawPreview(); });
+      form.append(el('h4', { text: '効果を自由に書く' }),
+        el('div', { class: 'muted small-note', text: '書いた文から「いつ・何をする・条件・数」を読み取って、下の効果に入れます。そのあと下で直せます（動くのは下の効果のとおりです）' }),
+        src, el('div', { class: 'row' }, read), result,
+        el('label', { class: 'check' }, useSrc, ' カードには自分の書いた文をそのまま表示する'));
       form.append(el('h4', { text: `効果（${max}つまで）` }), box);
       if (d.effects.length < max) form.append(el('button', { type: 'button', class: 'btn small', text: '＋ 効果を足す', onclick: () => { d.effects.push(defaultEffect()); render(); } }));
       const memo = el('textarea', { rows: 2, class: 'full', placeholder: '効果文の最後に足す文（表示だけ。処理はされません）' }, d.memo || '');
@@ -607,6 +734,7 @@ function openCustomEditor(src, onSaved) {
     buttons: [{
       label: '保存', primary: true, onClick: () => {
         d.name = (d.name || '').trim();
+        delete d.parseNote;
         if (!d.name) { toast('カード名を入れてください'); return false; }
         if (d.kind === 'monster' && d.mtype === 'link' && !d.markers) { toast('リンクマーカーを1つ以上選んでください'); return false; }
         saveCustomDef(d);
