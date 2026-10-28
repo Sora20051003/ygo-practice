@@ -1629,3 +1629,22 @@ body:has(.ap-sheet:not([hidden])) .draw-tap, body:has(#modal-root .modal-back) .
 .opp-zone .bcard.opp { transform: rotate(180deg); }
 .opp-zone .bcard.opp.def { transform: rotate(90deg) scale(0.92); }
 .opp-zone .bcard.opp:not(.def) > .badge { transform: rotate(180deg); }
+/* オリジナルカード */
+.custom-cols { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: start; }
+.custom-preview { position: sticky; top: 0; display: flex; flex-direction: column; gap: 6px; }
+.custom-preview .cardface { width: 200px; }
+.custom-form { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.custom-field { display: flex; flex-direction: column; gap: 3px; font-size: 13px; min-width: 0; }
+.custom-field select, .custom-field input[type="number"] { min-width: 0; }
+.custom-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.custom-row > .custom-field { flex: 1 1 110px; }
+.custom-effects { display: flex; flex-direction: column; gap: 10px; }
+.custom-effect { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.custom-arrows { display: grid; grid-template-columns: repeat(3, 40px); gap: 4px; }
+.custom-arrows .btn.on { background: var(--accent); color: #fff; }
+.custom-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.custom-item { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.custom-face { cursor: pointer; }
+.custom-btns { display: flex; flex-direction: column; gap: 4px; }
+@media (max-width: 640px) { .custom-cols { grid-template-columns: 1fr; } .custom-preview { position: static; align-items: center; } .custom-preview .cardface { width: 160px; } }
+.custom-effect > .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; } .custom-effect > .row > .btn { flex: none; width: auto; }

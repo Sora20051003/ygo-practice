@@ -149,6 +149,11 @@ async function loadCardScripts(codes, onStatus, errata = 'post') {
     const pre = [...new Set(codes)].filter(c => usePre(spec, c) && !Engine.scripts.has(`pre:c${c}.lua`));
     await Promise.all(pre.map(async c => { const t = await fetchScript(`c${ERRATA[c]}.lua`, `pre-errata/c${ERRATA[c]}.lua`); Engine.scripts.set(`pre:c${c}.lua`, t || ''); }));
   }
+  // オリジナルカード：選んだ効果からスクリプトを作る（直したときに作り直すので、毎回作る）
+  for (const code of new Set(codes)) {
+    const cc = DB.byId.get(code);
+    if (cc && cc.custom && typeof customLua === 'function') Engine.scripts.set(`c${code}.lua`, customLua(cc.def0));
+  }
   const want = [...new Set(codes)].filter(c => !Engine.scripts.has(`c${c}.lua`));
   let done = 0;
   const one = async code => {
@@ -289,6 +294,7 @@ function descText(desc) {
   if (code === TOOL_CODE) return TOOL_LABELS[idx] || '練習ツール';
   if (code) {
     const c = DB.byId.get(code);
+    if (c && c.custom) return (c.jaStrs || [])[idx] || `「${c.name}」の効果${idx + 1}`;   // オリジナルカード
     // EDOPro の番号順の説明があればそれを使う（YGOPro 用の日本語の説明は番号の並びが違うことが多く、別の効果の説明になってしまう）
     const s = typeof EDO_STRS !== 'undefined' ? (EDO_STRS[code] || [])[idx] : (c && c.jaStrs && c.jaStrs[idx]);
     return s || `「${cardName(code)}」の効果${idx + 1}`;

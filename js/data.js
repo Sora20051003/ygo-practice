@@ -124,6 +124,7 @@ function withPreCards(cards) {
 
 function indexCards(cards) {
   cards = withPreCards(cards);
+  if (typeof withCustomCards === 'function') cards = withCustomCards(cards);   // オリジナルカード（custom.js）
   DB.cards = cards;
   DB.byId = new Map();
   DB.byCid = new Map();   // KONAMIのカード番号 → カード（デッキコードで使う）
@@ -477,7 +478,7 @@ function limitIn(c, ctx) {
 const limitOf = (c, fmt) => limitIn(c, { fmt, vector: DB.banlists[fmt] });   // 最新のリストで
 const LIMIT_LABEL = { 0: '禁止', 1: '制限', 2: '準制限' };
 const limitLabel = (c, ctx) => (isUnreleased(c, ctx) ? '未発売（禁止扱い）' : ctx.event && eventBlock(ctx.event, c) ? `イベントのルールで使えない：${eventBlock(ctx.event, c)}` : LIMIT_LABEL[limitIn(c, ctx)]);
-const cardAllowed = (c, fmt) => (FORMATS[fmt] || FORMATS.ocg).allowed(c);
+const cardAllowed = (c, fmt) => !!c.custom || (FORMATS[fmt] || FORMATS.ocg).allowed(c);   // オリジナルカードはどのルールでも使える
 
 // ---------- 日本語の効果文（テキスト検索用） ----------
 // 取得元: mycard/ygopro-database の日本語カードDB（SQLite）。sql.js で読んで id→効果文 の形で保存する。

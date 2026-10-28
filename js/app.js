@@ -134,6 +134,7 @@ async function init() {
   try {
     await loadCards(showLoading);
     await loadUserPics();   // デッキ画像から切り抜いたカード画像
+    setupCustomPics();      // オリジナルカードの絵
     await loadBanlists();   // 禁止・制限リスト（取れなくてもアプリは使える）
     loadRegDates().then(() => { if (typeof renderDeck === 'function' && Decks.list.length) renderDeck(); });   // 過去のリストの一覧は裏で
   } catch (e) {
