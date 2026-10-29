@@ -1792,3 +1792,12 @@ body.land .modal.wide:has(.big-detail) { width: calc(var(--lw) - 16px); max-heig
   .dec-answer-card { width: 80px; }
   .dec-cardbox.small { width: 64px; }
 }
+.dec-master { background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dec-master h3 { margin: 0; font-size: 14px; }
+.dec-pick { position: relative; }
+.dec-pick input { width: 100%; font-size: 15px; padding: 8px 10px; }
+.dec-suggest.down { top: 100%; bottom: auto; margin: 4px 0 0; }
+.dec-pick-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dec-pending { display: flex; gap: 10px; padding: 8px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); border: 1px solid var(--accent); }
+.dec-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.dec-slot.secret b { color: var(--muted); font-style: italic; opacity: 0.75; }

@@ -1,12 +1,13 @@
 // カードデコーダー（複数人で遊ぶカード当てゲーム）
-// ・部屋を作った人（ホスト）のアプリが、答えのカードを1枚こっそり選ぶ（ホストの画面にも出さない）
-// ・順番にチャットでカード名を出して答える。出したカードはイラストとステータスが表示される
+// ・部屋の中の1人が「出題者」になり、答えのカードを1枚決める（答えは出題者の端末にだけある。ほかの人には送らない）
+//   出題者を「コンピューター」にすると、ホストのアプリがランダムに選び、開示する項目もランダムに選ぶ（ひとりで遊ぶときもこれ）
+// ・出題者以外の人が、順番にチャットでカード名を出して答える。出したカードはイラストとステータスが表示される
 // ・出したカードと答えのカードで、同じ項目（属性・種族・レベル・攻撃力など）があれば「当たり」。
-//   当たりが複数あっても、まだ開示していない当たりの中から1つだけを全員に開示する
-// ・答えのカードそのものを出した人の勝ち。ホストが「次の問題」で続ける
-// 通信は対戦と同じ公開の中継サーバー（MQTT）。ホストのアプリが状態を持ち、全員に送る。
+//   当たりが複数あるときは、まだ開示していない当たりの中から、出題者が1つだけ選んで全員に開示する（1つだけなら自動）
+// ・答えのカードそのものを出した人の勝ち
+// 通信は対戦と同じ公開の中継サーバー（MQTT）。ホストのアプリが部屋の状態を持ち、全員に送る。
 //   <base>/dec/<コード>/alive ：部屋があるしるし（ホストが落ちると消える）
-//   <base>/dec/<コード>/msg   ：やり取り（参加者 → ホスト：join / chat / guess / bye、ホスト → 全員：state）
+//   <base>/dec/<コード>/msg   ：やり取り（全員 → ホスト：join / chat / guess / bye / master / start / judge / giveup、ホスト → 全員：state）
 
 const DEC_FIELDS = [
   ['kind', 'カードの種類'], ['frame', '種類'], ['attr', '属性'], ['race', '種族'],
@@ -18,10 +19,11 @@ const DEC_POOLS = {
   main: ['メインデッキのモンスター', c => isMonster(c) && !isExtraType(c)],
   extra: ['EXデッキのモンスター', c => isExtraType(c)],
   spelltrap: ['魔法・罠だけ', c => !isMonster(c)],
-  deck: ['ホストの今のデッキから', null],
+  deck: ['自分の今のデッキから', null],
 };
 const DEC_LIMITS = { 0: 'なし', 30: '30秒', 60: '60秒', 120: '2分' };
 const DEC_LOG_MAX = 200;
+const DEC_CPU = 'cpu';
 
 // 出せるカード（トークン・アニメ・オリジナルのカードは使わない）
 const decUsable = c => c && !isToken(c) && !c.anime && !c.custom;
@@ -56,6 +58,12 @@ function decVals(c) {
   v.theme = { list: th, text: th.length ? th.join('・') : 'なし' };
   return v;
 }
+// 答えの全項目（開示用の文）
+function decAllTexts(a) {
+  const v = decVals(a), out = {};
+  for (const [k] of DEC_FIELDS) if (v[k]) out[k] = v[k].text;
+  return out;
+}
 
 // 出したカード g と答え a で当たっている項目 → { key: 開示する文 }
 function decMatches(g, a) {
@@ -63,7 +71,7 @@ function decMatches(g, a) {
   for (const [k] of DEC_FIELDS) {
     if (k === 'theme') {
       const same = va.theme.list.filter(t => vg.theme.list.includes(t));
-      if (same.length) out.theme = same[Math.floor(Math.random() * same.length)];
+      if (same.length) out.theme = same.join('・');
       else if (!va.theme.list.length && !vg.theme.list.length) out.theme = 'なし';
       continue;
     }
@@ -71,6 +79,7 @@ function decMatches(g, a) {
   }
   return out;
 }
+const decIsAnswer = (c, a) => !!(c && a && (c.id === a.id || c.name === a.name));
 
 // ---------- 通信（対戦の MQTT の仕組みを、別の話題で使う） ----------
 class DecoderNet extends MqttDuelTransport {
@@ -126,15 +135,19 @@ class DecoderNet extends MqttDuelTransport {
 const Dec = {
   me: null, net: null, isHost: false, solo: false, code: null,
   G: null,          // 部屋の状態（ホストが持ち、全員に送る）
-  secret: null,     // 答えのカード（ホストだけが持つ。画面には出さない）
-  recvAt: 0, shownN: 0, shownRound: -1, tick: null, joinWait: null,
+  secret: null,     // 答えのカード（出題者の端末だけが持つ。コンピューターが出題するときはホスト）
+  judged: 0,        // 出題者：判定を送った答えの番号（同じ答えを二度判定しない）
+  recvAt: 0, shownN: 0, tick: null, joinWait: null,
 };
-const decMyTurn = () => !!(Dec.G && Dec.G.status === 'play' && Dec.G.turn === Dec.me.uid);
 const decPlayer = uid => Dec.G && Dec.G.players.find(p => p.uid === uid);
+const decIsMaster = () => !!(Dec.G && Dec.G.master && Dec.G.master === Dec.me.uid);
+const decMyTurn = () => !!(Dec.G && Dec.G.status === 'play' && !Dec.G.pending && Dec.G.turn === Dec.me.uid);
+const decMasterName = G => (G.master === DEC_CPU ? 'コンピューター' : (decPlayer(G.master) || {}).name || '？');
 
-function decNewState() {
+function decNewState(solo) {
   return {
     hostUid: Dec.me.uid, status: 'lobby', round: 0, turn: null, starter: null, winner: null,
+    master: solo ? DEC_CPU : null, pending: null,
     players: [{ uid: Dec.me.uid, name: Dec.me.name, wins: 0, online: true }],
     revealed: {}, answerId: null, log: [], seq: 0,
     settings: { pool: store.get('ygo.decPool', 'all'), limit: store.get('ygo.decLimit', 60) },
@@ -156,115 +169,176 @@ function decPublish() {
   Dec.recvAt = Date.now();
   renderDecoder();
 }
+// 次の番（出題者と、抜けた人は飛ばす）
 function decNextTurn(from) {
-  const G = Dec.G;
-  const on = G.players.filter(p => p.online);
-  if (!on.length) { G.turn = null; return; }
-  const all = G.players;
-  let i = all.findIndex(p => p.uid === (from || G.turn));
-  for (let k = 0; k < all.length; k++) { i = (i + 1) % all.length; if (all[i].online) break; }
+  const G = Dec.G, all = G.players;
+  const can = p => p.online && p.uid !== G.master;
+  if (!all.some(can)) { G.turn = null; G.turnEnds = 0; return; }
+  let i = all.findIndex(p => p.uid === from);
+  for (let k = 0; k < all.length; k++) { i = (i + 1) % all.length; if (can(all[i])) break; }
   G.turn = all[i].uid;
   G.turnEnds = G.settings.limit ? Date.now() + G.settings.limit * 1000 : 0;
 }
-function decPool() {
-  const p = Dec.G.settings.pool;
-  if (p === 'deck') {
+function decPool(pool) {
+  if (pool === 'deck') {
     const d = typeof Decks !== 'undefined' && Decks.current();
     const ids = d ? [...new Set([...(d.main || []), ...(d.extra || [])])] : [];
     return ids.map(id => DB.byId.get(id)).filter(decUsable);
   }
-  const f = (DEC_POOLS[p] || DEC_POOLS.all)[1];
+  const f = (DEC_POOLS[pool] || DEC_POOLS.all)[1];
   return DB.cards.filter(c => decUsable(c) && (c.cid || c.special) && !c.pre && f(c));
 }
-function decStartRound() {
+const decRandom = list => list[Math.floor(Math.random() * list.length)];
+function decStartRound(note) {
   const G = Dec.G;
-  const pool = decPool();
-  if (!pool.length) { toast(G.settings.pool === 'deck' ? '今のデッキにカードがありません（デッキ作成で選んでいるデッキから出題します）' : '出題できるカードがありません'); return; }
-  Dec.secret = pool[Math.floor(Math.random() * pool.length)];
-  G.round++; G.status = 'play'; G.revealed = {}; G.answerId = null; G.winner = null;
-  // 最初の番は、前の問題で最初だった人の次の人
-  const on = G.players.filter(p => p.online);
-  if (G.starter && on.length) { G.turn = G.starter; decNextTurn(G.starter); } else { G.turn = on[0] ? on[0].uid : null; G.turnEnds = G.settings.limit ? Date.now() + G.settings.limit * 1000 : 0; }
+  G.round++; G.status = 'play'; G.revealed = {}; G.answerId = null; G.winner = null; G.pending = null;
+  decNextTurn(G.starter || G.master);   // 最初の番は、前の問題で最初だった人の次の人
   G.starter = G.turn;
-  decLog({ t: 'sys', text: `第${G.round}問 スタート（出題：${(DEC_POOLS[G.settings.pool] || DEC_POOLS.all)[0]}・${pool.length}枚から）` });
+  decLog({ t: 'sys', text: `第${G.round}問 スタート（出題者：${decMasterName(G)}${note ? '・' + note : ''}）` });
   decPublish();
 }
-function decRevealAll() {
-  const G = Dec.G, a = Dec.secret;
-  if (!a) return;
-  G.answerId = a.id;
-  const v = decVals(a);
-  for (const [k] of DEC_FIELDS) if (v[k]) G.revealed[k] = v[k].text;
+// コンピューターが出題する（ホストのアプリが選ぶ）
+function decCpuStart() {
+  const G = Dec.G, pool = decPool(G.settings.pool);
+  if (!pool.length) { toast(G.settings.pool === 'deck' ? '今のデッキにカードがありません' : '出題できるカードがありません'); return; }
+  if (!G.players.some(p => p.online && p.uid !== G.master)) { toast('答える人がいません'); return; }
+  Dec.secret = decRandom(pool);
+  decStartRound(`${(DEC_POOLS[G.settings.pool] || DEC_POOLS.all)[0]}・${pool.length}枚から`);
 }
-function decGiveUp() {
+function decEndRound(winner, answerId, all, text) {
   const G = Dec.G;
-  if (G.status !== 'play') return;
-  G.status = 'over'; G.turn = null; G.turnEnds = 0;
-  decRevealAll();
-  decLog({ t: 'sys', text: `ギブアップ。答えは「${Dec.secret.name}」でした` });
-  decPublish();
+  G.status = 'over'; G.turn = null; G.turnEnds = 0; G.pending = null; G.winner = winner || null;
+  if (answerId) { G.answerId = answerId; Object.assign(G.revealed, all || {}); }
+  if (winner) { const p = decPlayer(winner); if (p) p.wins = (p.wins || 0) + 1; }
+  if (text) decLog({ t: 'sys', text });
 }
-function decGuess(uid, id) {
-  const G = Dec.G, a = Dec.secret, c = DB.byId.get(+id), p = decPlayer(uid);
-  if (G.status !== 'play' || G.turn !== uid || !decUsable(c) || !a || !p) return;
-  const entry = { t: 'guess', uid, name: p.name, id: c.id };
-  if (c.id === a.id || c.name === a.name) {
+// 判定を反映する（出題者の判定、またはコンピューターの判定）
+function decApplyJudge(j) {
+  const G = Dec.G, pd = G.pending;
+  if (!pd || j.n !== pd.n) return;
+  const entry = { t: 'guess', uid: pd.uid, name: pd.name, id: pd.id };
+  const c = DB.byId.get(pd.id);
+  if (j.correct) {
     entry.correct = true;
-    p.wins = (p.wins || 0) + 1;
-    G.status = 'over'; G.winner = uid; G.turn = null; G.turnEnds = 0;
-    decRevealAll();
     decLog(entry);
-    decLog({ t: 'sys', text: `🎉 ${p.name} が正解！ 答えは「${a.name}」でした` });
+    decEndRound(pd.uid, j.answerId || pd.id, j.all, `🎉 ${pd.name} が正解！ 答えは「${c ? c.name : '？'}」でした`);
   } else {
-    const hit = decMatches(c, a);
-    const fresh = Object.keys(hit).filter(k => G.revealed[k] == null);
-    if (fresh.length) {
-      const k = fresh[Math.floor(Math.random() * fresh.length)];
-      G.revealed[k] = hit[k];
-      entry.reveal = { k, text: hit[k] };
-    } else if (Object.keys(hit).length) entry.old = true;   // 当たりはあったが、もう全部開示している
+    if (j.k && G.revealed[j.k] == null) { G.revealed[j.k] = String(j.text || '').slice(0, 60); entry.reveal = { k: j.k, text: G.revealed[j.k] }; }
+    else if (j.old) entry.old = true;
     decLog(entry);
-    decNextTurn(uid);
+    G.pending = null;
+    decNextTurn(pd.uid);
   }
   decPublish();
 }
-// 参加者・自分からのメッセージ（ホストが受け取る）
+// コンピューターの判定（当たりの中からランダムに1つ開示）
+function decCpuJudge() {
+  const G = Dec.G, pd = G.pending, a = Dec.secret, c = pd && DB.byId.get(pd.id);
+  if (!pd || !a || !c) return;
+  if (decIsAnswer(c, a)) { decApplyJudge({ n: pd.n, correct: true, answerId: a.id, all: decAllTexts(a) }); return; }
+  const hit = decMatches(c, a), fresh = Object.keys(hit).filter(k => G.revealed[k] == null);
+  const k = fresh.length ? decRandom(fresh) : null;
+  decApplyJudge({ n: pd.n, k, text: k ? hit[k] : '', old: !k && Object.keys(hit).length > 0 });
+}
+// 全員・自分からのメッセージ（ホストが受け取る）
 function decHostHandle(uid, m) {
-  const G = Dec.G;
+  const G = Dec.G, p = decPlayer(uid);
   if (m.kind === 'join' && m.me) {
     const name = String(m.me.name || 'プレイヤー').slice(0, 20);
-    let p = decPlayer(uid);
     if (p) { p.online = true; p.name = name; decLog({ t: 'sys', text: `${name} が入り直しました` }); }
     else { G.players.push({ uid, name, wins: 0, online: true }); decLog({ t: 'sys', text: `${name} が入りました` }); }
-    if (G.status === 'play' && !G.turn) decNextTurn(uid);
+    if (G.status === 'play' && !G.turn && !G.pending) decNextTurn(uid);
     decPublish();
-  } else if (m.kind === 'bye') {
-    const p = decPlayer(uid);
-    if (!p || !p.online) return;
+    return;
+  }
+  if (!p) return;
+  if (m.kind === 'bye') {
+    if (!p.online) return;
     p.online = false;
     decLog({ t: 'sys', text: `${p.name} が抜けました` });
-    if (G.status === 'play' && G.turn === uid) decNextTurn(uid);
+    if (G.status === 'play' && G.master === uid) decEndRound(null, null, null, '出題者が抜けたので、この問題は中止です');
+    else if (G.status === 'play' && G.pending && G.pending.uid === uid) { G.pending = null; decNextTurn(uid); }
+    else if (G.status === 'play' && G.turn === uid) decNextTurn(uid);
+    if (G.master === uid && G.status !== 'play') G.master = null;
     decPublish();
   } else if (m.kind === 'chat') {
-    const p = decPlayer(uid), text = String(m.text || '').slice(0, 200).trim();
-    if (!p || !text) return;
+    const text = String(m.text || '').slice(0, 200).trim();
+    if (!text) return;
     decLog({ t: 'chat', uid, name: p.name, text });
     decPublish();
-  } else if (m.kind === 'guess') decGuess(uid, m.id);
+  } else if (m.kind === 'master') {
+    // 出題者になる（問題の途中は変えない）。ホストはコンピューターも選べる
+    if (G.status === 'play') return;
+    const to = m.cpu && uid === G.hostUid ? DEC_CPU : uid;
+    if (G.master === to) return;
+    G.master = to;
+    decLog({ t: 'sys', text: `${decMasterName(G)} が出題者になりました` });
+    decPublish();
+  } else if (m.kind === 'start') {
+    if (G.status === 'play' || G.master !== uid) return;
+    if (!G.players.some(x => x.online && x.uid !== G.master)) return;
+    decStartRound('');
+  } else if (m.kind === 'guess') {
+    const c = DB.byId.get(+m.id);
+    if (G.status !== 'play' || G.pending || G.turn !== uid || !decUsable(c)) return;
+    G.pending = { n: ++G.seq, uid, name: p.name, id: c.id };
+    G.turnEnds = 0;   // 判定のあいだは時間を止める
+    decPublish();
+    if (G.master === DEC_CPU) decCpuJudge();
+  } else if (m.kind === 'judge') {
+    if (G.status === 'play' && G.master === uid) decApplyJudge(m);
+  } else if (m.kind === 'giveup') {
+    if (G.status !== 'play' || !(G.master === uid || (uid === G.hostUid && G.master === DEC_CPU))) return;
+    const a = m.answerId && DB.byId.get(+m.answerId);
+    decEndRound(null, a ? a.id : null, m.all, a ? `ギブアップ。答えは「${a.name}」でした` : 'この問題は中止です');
+    decPublish();
+  } else if (m.kind === 'abort') {
+    if (G.status !== 'play' || uid !== G.hostUid) return;
+    decEndRound(null, null, null, 'ホストがこの問題を中止しました');
+    decPublish();
+  }
 }
 function decHostTick() {
   const G = Dec.G;
-  if (!Dec.isHost || !G || G.status !== 'play' || !G.turnEnds || Date.now() < G.turnEnds) return;
+  if (!Dec.isHost || !G || G.status !== 'play' || G.pending || !G.turnEnds || Date.now() < G.turnEnds) return;
   const p = decPlayer(G.turn);
   decLog({ t: 'sys', text: `${p ? p.name : '？'} の時間切れ。次の人の番です` });
   decNextTurn(G.turn);
   decPublish();
 }
 
-// 自分の操作：ホストならそのまま処理、参加者ならホストへ送る
+// 自分の操作：ホストならそのまま処理、ほかの人はホストへ送る
 function decAct(m) {
   if (Dec.isHost) decHostHandle(Dec.me.uid, m);
   else if (Dec.net) Dec.net.send(m);
+}
+
+// ---------- 出題者の端末の処理 ----------
+// 答えを持っているのは出題者（コンピューターならホスト）だけ。それ以外になったら忘れる
+function decKeepSecret() {
+  const G = Dec.G;
+  if (!G) return;
+  const mine = G.master === Dec.me.uid || (G.master === DEC_CPU && Dec.isHost);
+  if (!mine) Dec.secret = null;
+  else if (G.master !== DEC_CPU && G.status === 'over' && Dec.secret && G.answerId === Dec.secret.id) Dec.secret = null;   // 終わった問題の答えは、次の問題に持ち越さない
+}
+// 出題者：答えが出されたら判定する。当たりが2つ以上なら、どれを開示するか選んでもらう（画面の decRenderPending）
+function decMasterAuto() {
+  const G = Dec.G, pd = G && G.pending, a = Dec.secret;
+  if (!decIsMaster() || !pd || !a || Dec.judged === pd.n) return;
+  const c = DB.byId.get(pd.id);
+  if (!c) return;
+  if (decIsAnswer(c, a)) { decSendJudge({ correct: true, answerId: a.id, all: decAllTexts(a) }); return; }
+  const hit = decMatches(c, a), fresh = Object.keys(hit).filter(k => G.revealed[k] == null);
+  if (fresh.length === 1) decSendJudge({ k: fresh[0], text: hit[fresh[0]] });
+  else if (!fresh.length) decSendJudge({ old: Object.keys(hit).length > 0 });
+  // 2つ以上：選ぶまで待つ
+}
+function decSendJudge(j) {
+  const pd = Dec.G.pending;
+  if (!pd) return;
+  Dec.judged = pd.n;
+  decAct({ kind: 'judge', n: pd.n, ...j });
 }
 
 // ---------- 部屋に入る・出る ----------
@@ -274,8 +348,8 @@ function decStartTimers() {
 }
 async function decCreate(solo) {
   Dec.me = duelMe();
-  Dec.solo = !!solo; Dec.isHost = true; Dec.secret = null;
-  Dec.G = decNewState();
+  Dec.solo = !!solo; Dec.isHost = true; Dec.secret = null; Dec.judged = 0;
+  Dec.G = decNewState(solo);
   if (!solo) {
     const net = new DecoderNet(Dec.me);
     showLoading('部屋を作っています…');
@@ -284,8 +358,8 @@ async function decCreate(solo) {
     Dec.net = net;
     net.onMsg = m => { if (m.from && m.from !== Dec.me.uid) decHostHandle(m.from, m); };
   } else Dec.code = null;
-  decLog({ t: 'sys', text: solo ? 'ひとりで遊ぶ部屋です。「スタート」で始めます' : '部屋を作りました。部屋コードを友だちに教えてください' });
-  Dec.shownN = 0; Dec.shownRound = -1;
+  decLog({ t: 'sys', text: solo ? 'ひとりで遊ぶ部屋です（コンピューターが出題します）。「スタート」で始めます' : '部屋を作りました。部屋コードを友だちに教えて、出題者を決めてください' });
+  Dec.shownN = 0;
   decStartTimers();
   renderDecoder(true);
 }
@@ -311,8 +385,8 @@ async function decJoin(code) {
     });
   } catch (e) { showLoading(''); net.close(); toast(e.message); return; }
   showLoading('');
-  Dec.net = net; Dec.code = code; Dec.isHost = false; Dec.solo = false;
-  Dec.shownN = 0; Dec.shownRound = -1;
+  Dec.net = net; Dec.code = code; Dec.isHost = false; Dec.solo = false; Dec.secret = null; Dec.judged = 0;
+  Dec.shownN = 0;
   store.set('ygo.decLastCode', code);
   decStartTimers();
   renderDecoder(true);
@@ -335,20 +409,20 @@ function decCardStats(c, hiKey) {
     isMonster(c) ? el('div', null, row('atk', 'ATK ' + v.atk.text), v.def ? [' ', row('def', 'DEF ' + v.def.text)] : [' ', el('span', { class: 'muted' }, linkArrowsText(c))]) : null,
     el('div', null, row('theme', 'テーマ：' + v.theme.text)));
 }
-function decCardView(c, cls) {
-  return el('div', { class: 'dec-cardbox ' + (cls || '') }, cardFace(c));
-}
+const decCardView = (c, cls) => el('div', { class: 'dec-cardbox ' + (cls || '') }, cardFace(c));
 
 function renderDecoder(full) {
   const root = $('#dec-root');
   if (!root) return;
   if (!Dec.G) { root.innerHTML = ''; root.append(decLobby()); return; }
+  decKeepSecret();
   if (full || !$('#dec-room', root)) {
     root.innerHTML = '';
     root.append(decRoomSkeleton());
-    Dec.shownN = 0; Dec.shownRound = -1;
+    Dec.shownN = 0;
   }
-  decRenderSide(); decRenderSlots(); decRenderLog(); decRenderTurn(); decRenderSuggest();
+  decRenderSide(); decRenderSlots(); decRenderMaster(); decRenderPending(); decRenderLog(); decRenderTurn(); decRenderSuggest();
+  decMasterAuto();
 }
 
 function decLobby() {
@@ -357,13 +431,13 @@ function decLobby() {
   const code = el('input', { type: 'text', class: 'room-input', maxlength: '8', placeholder: 'コード', value: store.get('ygo.decLastCode', '') });
   return el('div', { class: 'duel-lobby' }, el('div', { class: 'duel-card' },
     el('h2', { text: 'カードデコーダー' }),
-    el('p', { class: 'muted', text: '隠された1枚のカードを、みんなで順番にカード名を出して当てるゲームです。出したカードと同じ項目（属性・種族・レベル・攻撃力・テーマなど）があると「当たり」になり、当たりの中から1つだけが全員に開示されます。答えのカードを出した人の勝ちです。' }),
+    el('p', { class: 'muted', text: '部屋の中の1人が「出題者」になって答えのカードを決め、ほかの人が順番にカード名を出して当てるゲームです。出したカードと同じ項目（属性・種族・レベル・攻撃力・テーマなど）があると「当たり」。当たりが複数あるときは、出題者がその中から1つだけ選んで開示します。答えのカードを出した人の勝ちです。' }),
     el('label', { class: 'auth-field' }, '表示名', name),
     el('div', { class: 'duel-actions' },
       el('div', { class: 'duel-box' }, el('h3', { text: '部屋を作る' }),
         el('p', { class: 'muted small-note', text: '部屋コードを友だちに教えて、同じ部屋に入ってもらいます。' }),
         el('button', { class: 'btn primary', text: '部屋を作る', onclick: () => decCreate(false) }),
-        el('button', { class: 'btn', text: 'ひとりで遊ぶ', onclick: () => decCreate(true) })),
+        el('button', { class: 'btn', text: 'ひとりで遊ぶ（コンピューターが出題）', onclick: () => decCreate(true) })),
       el('div', { class: 'duel-box' }, el('h3', { text: '部屋に入る' }), code,
         el('button', { class: 'btn primary', text: '入る', onclick: () => decJoin(code.value) }))),
   ));
@@ -380,7 +454,9 @@ function decRoomSkeleton() {
     el('aside', { class: 'dec-side', id: 'dec-side' }),
     el('div', { class: 'dec-main' },
       el('div', { class: 'dec-answer' }, el('div', { class: 'dec-answer-card', id: 'dec-answer-card' }), el('div', { class: 'dec-slots', id: 'dec-slots' })),
+      el('div', { class: 'dec-master', id: 'dec-master', hidden: true }),
       el('div', { class: 'dec-turn', id: 'dec-turn' }),
+      el('div', { class: 'dec-pending', id: 'dec-pending', hidden: true }),
       el('ul', { class: 'dec-log', id: 'dec-log' }),
       el('div', { class: 'dec-inputbar' },
         el('div', { class: 'dec-suggest', id: 'dec-suggest', hidden: true }),
@@ -391,39 +467,116 @@ function decRoomSkeleton() {
 function decRenderSide() {
   const G = Dec.G, box = $('#dec-side');
   box.innerHTML = '';
+  const playing = G.status === 'play';
   if (Dec.code) box.append(el('div', { class: 'duel-box' }, el('div', { class: 'muted small-note', text: '部屋コード' }),
     el('div', { class: 'room-code', text: Dec.code }),
     el('button', { class: 'btn small', text: 'コードをコピー', onclick: () => navigator.clipboard.writeText(Dec.code).then(() => toast('コピーしました')) })));
   box.append(el('div', { class: 'duel-box' }, el('h3', { text: 'プレイヤー' }),
     el('ul', { class: 'dec-players' }, G.players.map(p => el('li', { class: (p.uid === G.turn ? 'turn ' : '') + (p.online ? '' : 'off') },
-      el('span', { text: (p.uid === G.turn ? '▶ ' : '') + p.name + (p.uid === Dec.me.uid ? '（あなた）' : '') + (p.uid === G.hostUid ? ' 👑' : '') + (p.online ? '' : '（抜けた）') }),
-      el('b', { text: `${p.wins || 0}勝` }))))));
+      el('span', { text: (p.uid === G.turn ? '▶ ' : '') + (p.uid === G.master ? '🎯 ' : '') + p.name + (p.uid === Dec.me.uid ? '（あなた）' : '') + (p.uid === G.hostUid ? ' 👑' : '') + (p.online ? '' : '（抜けた）') }),
+      el('b', { text: `${p.wins || 0}勝` })))),
+    el('div', { class: 'muted small-note', text: `🎯 出題者：${G.master ? decMasterName(G) : 'まだ決まっていません'}` })));
+  // 出題者を決める（問題の途中は変えられない）
+  if (!playing) {
+    const btns = [];
+    if (G.master !== Dec.me.uid) btns.push(el('button', { class: 'btn' + (G.master ? '' : ' primary'), text: '自分が出題する', onclick: () => decAct({ kind: 'master' }) }));
+    if (Dec.isHost && G.master !== DEC_CPU) btns.push(el('button', { class: 'btn', text: 'コンピューターが出題', onclick: () => decAct({ kind: 'master', cpu: true }) }));
+    if (btns.length) box.append(el('div', { class: 'duel-box' }, el('h3', { text: '出題者' }), ...btns));
+  } else if (decIsMaster()) {
+    box.append(el('button', { class: 'btn', text: 'ギブアップ（答えを開示）', onclick: () => { if (confirm('この問題を終わりにして答えを開示しますか？')) decAct({ kind: 'giveup', answerId: Dec.secret && Dec.secret.id, all: Dec.secret && decAllTexts(Dec.secret) }); } }));
+  }
   if (Dec.isHost) {
-    const playing = G.status === 'play';
-    const sel = (key, opts, val, onChange) => {
-      const s = el('select', { disabled: playing ? true : null }, Object.entries(opts).map(([k, v]) => el('option', { value: k, text: Array.isArray(v) ? v[0] : v })));
+    const sel = (opts, val, onChange, dis) => {
+      const s = el('select', { disabled: dis ? true : null }, Object.entries(opts).map(([k, v]) => el('option', { value: k, text: Array.isArray(v) ? v[0] : v })));
       s.value = String(val);
       s.addEventListener('change', () => onChange(s.value));
       return s;
     };
+    const cpu = G.master === DEC_CPU;
     box.append(el('div', { class: 'duel-box' }, el('h3', { text: '設定（ホスト）' }),
-      el('label', { class: 'auth-field' }, '出題の範囲', sel('pool', DEC_POOLS, G.settings.pool, v => { G.settings.pool = v; store.set('ygo.decPool', v); decPublish(); })),
-      el('label', { class: 'auth-field' }, '1人の持ち時間', sel('limit', DEC_LIMITS, G.settings.limit, v => { G.settings.limit = +v; store.set('ygo.decLimit', +v); decPublish(); })),
-      playing ? el('button', { class: 'btn', text: 'ギブアップ（答えを見る）', onclick: () => { if (confirm('この問題を終わりにして答えを見ますか？')) decGiveUp(); } })
-        : el('button', { class: 'btn primary', text: G.round ? '次の問題' : 'スタート', onclick: decStartRound })));
-  } else if (G.status !== 'play') box.append(el('p', { class: 'muted small-note', text: 'ホストが問題を始めるのを待っています' }));
+      el('label', { class: 'auth-field' }, '1人の持ち時間', sel(DEC_LIMITS, G.settings.limit, v => { G.settings.limit = +v; store.set('ygo.decLimit', +v); decPublish(); }, playing)),
+      cpu ? el('label', { class: 'auth-field' }, 'コンピューターの出題の範囲', sel(DEC_POOLS, G.settings.pool, v => { G.settings.pool = v; store.set('ygo.decPool', v); decPublish(); }, playing)) : null,
+      cpu && !playing ? el('button', { class: 'btn primary', text: G.round ? '次の問題' : 'スタート', onclick: decCpuStart }) : null,
+      cpu && playing ? el('button', { class: 'btn', text: 'ギブアップ（答えを見る）', onclick: () => { if (confirm('この問題を終わりにして答えを見ますか？')) decAct({ kind: 'giveup', answerId: Dec.secret && Dec.secret.id, all: Dec.secret && decAllTexts(Dec.secret) }); } }) : null,
+      !cpu && playing && !decIsMaster() ? el('button', { class: 'btn', text: 'この問題を中止', onclick: () => { if (confirm('この問題を中止しますか？（答えは開示されません）')) decAct({ kind: 'abort' }); } }) : null));
+  }
   box.append(el('button', { class: 'btn', text: Dec.isHost && !Dec.solo ? '部屋を閉じる' : '部屋を出る', onclick: () => decLeave() }));
 }
 
+// 答えの欄：開示した項目。出題者には、答えのカードと全部の項目が見える（まだ開示していない項目は薄く）
 function decRenderSlots() {
   const G = Dec.G, box = $('#dec-slots'), ans = $('#dec-answer-card');
   box.innerHTML = ''; ans.innerHTML = '';
-  const a = G.answerId && DB.byId.get(G.answerId);
+  const a = G.answerId ? DB.byId.get(G.answerId) : (decIsMaster() ? Dec.secret : null);
   ans.append(a ? decCardView(a, 'answer') : el('div', { class: 'dec-cardbox q' }, el('div', { class: 'cardface back' }, el('div', { class: 'cf-name', text: G.status === 'play' ? `第${G.round}問` : '？' }))));
+  if (a && !G.answerId) ans.append(el('div', { class: 'muted small-note', text: 'あなただけに見えています' }));
+  const mine = decIsMaster() && Dec.secret ? decAllTexts(Dec.secret) : {};
   for (const [k, label] of DEC_FIELDS) {
     const v = G.revealed[k];
-    box.append(el('div', { class: 'dec-slot' + (v != null ? ' open' : '') }, el('small', { text: label }), el('b', { text: v != null ? v : '？' })));
+    const hidden = v == null && mine[k] != null;
+    box.append(el('div', { class: 'dec-slot' + (v != null ? ' open' : '') + (hidden ? ' secret' : '') }, el('small', { text: label + (hidden ? '（未開示）' : '') }), el('b', { text: v != null ? v : hidden ? mine[k] : '？' })));
   }
+}
+
+// 出題者：問題の前に答えのカードを選ぶ
+function decRenderMaster() {
+  const G = Dec.G, box = $('#dec-master');
+  const show = decIsMaster() && G.status !== 'play';
+  box.hidden = !show;
+  if (!show) { Dec.pickBuilt = false; return; }
+  if (Dec.pickBuilt) { decRenderPickInfo(); return; }
+  Dec.pickBuilt = true;
+  box.innerHTML = '';
+  const input = el('input', { type: 'text', id: 'dec-pick-input', autocomplete: 'off', placeholder: '答えにするカード名を入れて選ぶ（ほかの人には見えません）' });
+  const sug = el('div', { class: 'dec-suggest down', id: 'dec-pick-sug', hidden: true });
+  input.addEventListener('input', () => {
+    sug.innerHTML = '';
+    const list = decCandidates(input.value.trim());
+    sug.hidden = !list.length;
+    for (const c of list) sug.append(el('button', { type: 'button', class: 'dec-sug', onclick: () => { Dec.secret = c; input.value = ''; sug.hidden = true; renderDecoder(); } }, rowMark(c), el('span', { text: c.name }), el('small', { class: 'muted', text: typeLine(c) })));
+  });
+  const pool = el('select', null, Object.entries(DEC_POOLS).map(([k, v]) => el('option', { value: k, text: v[0] })));
+  pool.value = store.get('ygo.decPool', 'all');
+  pool.addEventListener('change', () => store.set('ygo.decPool', pool.value));
+  box.append(el('h3', { text: '🎯 あなたが出題者です。答えのカードを決めてください' }),
+    el('div', { class: 'dec-pick' }, input, sug),
+    el('div', { class: 'dec-pick-row' }, el('span', { class: 'muted small-note', text: 'ランダムに選ぶ：' }), pool,
+      el('button', { class: 'btn small', text: 'ランダム', onclick: () => { const list = decPool(pool.value); if (!list.length) { toast('選べるカードがありません'); return; } Dec.secret = decRandom(list); renderDecoder(); } })),
+    el('div', { class: 'dec-pick-row', id: 'dec-pick-info' }));
+  decRenderPickInfo();
+}
+function decRenderPickInfo() {
+  const box = $('#dec-pick-info');
+  if (!box) return;
+  box.innerHTML = '';
+  const others = Dec.G.players.some(p => p.online && p.uid !== Dec.me.uid);
+  box.append(el('span', { text: Dec.secret ? `答え：「${Dec.secret.name}」` : 'まだ選んでいません' }),
+    el('button', { class: 'btn primary', text: 'このカードで出題する', disabled: Dec.secret && others ? null : true, onclick: () => { Dec.judged = 0; decAct({ kind: 'start' }); } }),
+    others ? null : el('span', { class: 'muted small-note', text: '（答える人が入るのを待っています）' }));
+}
+
+// 出されたカード（判定待ち）。出題者には、開示する項目を選ぶボタンを出す
+function decRenderPending() {
+  const G = Dec.G, box = $('#dec-pending'), pd = G.pending;
+  const key = pd ? pd.n + ':' + (decIsMaster() ? 'm' : '') : '';
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.innerHTML = '';
+  box.hidden = !pd;
+  if (!pd) return;
+  const c = DB.byId.get(pd.id);
+  const body = el('div', { class: 'dec-guess-body' },
+    el('div', null, el('b', { text: pd.name }), ' が出したカード'),
+    el('div', { class: 'dec-guess-name', text: c ? c.name : '？' }),
+    c ? decCardStats(c) : null);
+  if (decIsMaster() && Dec.secret && c && !decIsAnswer(c, Dec.secret)) {
+    const hit = decMatches(c, Dec.secret), fresh = Object.keys(hit).filter(k => G.revealed[k] == null);
+    if (fresh.length > 1) {
+      body.append(el('div', { class: 'dec-res hit', text: `当たりが${fresh.length}つあります。開示する項目を1つ選んでください` }),
+        el('div', { class: 'dec-choices' }, fresh.map(k => el('button', { class: 'btn small', onclick: () => decSendJudge({ k, text: hit[k] }) }, `${DEC_FIELDS.find(f => f[0] === k)[1]}：${hit[k]}`))));
+    }
+  } else body.append(el('div', { class: 'muted', text: G.master === DEC_CPU ? '判定中…' : '出題者が判定しています…' }));
+  box.append(c ? decCardView(c, 'small') : null, body);
 }
 
 function decLogEntry(e) {
@@ -460,11 +613,14 @@ function decRenderTurn() {
   if (G.status === 'play') {
     mine = decMyTurn();
     const p = decPlayer(G.turn);
-    text = mine ? `あなたの番です！ カード名を入れて答えてください${tail}` : `${p ? p.name : '？'} の番です${tail}`;
-  } else if (G.status === 'over') text = G.winner ? `${(decPlayer(G.winner) || {}).name || '？'} の勝ち！` + (Dec.isHost ? '「次の問題」で続けます' : '') : '答えを開示しました';
-  else text = Dec.isHost ? '「スタート」を押すと問題が始まります' : 'ホストが問題を始めるのを待っています';
+    if (G.pending) text = decIsMaster() ? `${G.pending.name} が答えました。判定してください` : `${G.pending.name} が答えました`;
+    else if (decIsMaster()) text = `あなたは出題者です。${p ? p.name : '？'} の番です${tail}`;
+    else text = mine ? `あなたの番です！ カード名を入れて答えてください${tail}` : `${p ? p.name : '？'} の番です${tail}`;
+  } else if (G.status === 'over') text = G.winner ? `${(decPlayer(G.winner) || {}).name || '？'} の勝ち！ 出題者が決まったら次の問題です` : 'この問題は終わりました';
+  else text = G.master ? `出題者（${decMasterName(G)}）が答えのカードを決めるのを待っています` : '出題者を決めてください（「自分が出題する」）';
+  if (G.status !== 'play' && G.master === DEC_CPU) text = Dec.isHost ? '「スタート」を押すと、コンピューターが出題します' : 'ホストが問題を始めるのを待っています';
   if (box.textContent !== text) box.textContent = text;
-  box.classList.toggle('mine', mine);
+  box.classList.toggle('mine', mine || (decIsMaster() && !!G.pending));
   const input = $('#dec-input');
   if (input) {
     const ph = mine ? 'カード名を入れて答える（候補から選ぶ）／チャット' : 'チャット';
