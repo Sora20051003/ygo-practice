@@ -81,8 +81,9 @@ const maxEffects = d => (d.kind === 'monster' ? (d.mtype === 'normal' ? 0 : 3) :
 
 // ---------- カードのデータ（アプリの形） ----------
 function customType(d) {
-  if (d.kind === 'spell') return T.SPELL | ({ quick: T.QUICKPLAY, continuous: T.CONTINUOUS, field: T.FIELD }[d.stype] || 0);
-  if (d.kind === 'trap') return T.TRAP | ({ continuous: T.CONTINUOUS, counter: T.COUNTER }[d.ttype] || 0);
+  const stLink = d.stLink && d.markers ? T.LINK : 0;   // リンクマーカーを持つ魔法・罠
+  if (d.kind === 'spell') return T.SPELL | stLink | ({ quick: T.QUICKPLAY, continuous: T.CONTINUOUS, field: T.FIELD }[d.stype] || 0);
+  if (d.kind === 'trap') return T.TRAP | stLink | ({ continuous: T.CONTINUOUS, counter: T.COUNTER }[d.ttype] || 0);
   const ex = { fusion: T.FUSION, synchro: T.SYNCHRO, xyz: T.XYZ, link: T.LINK }[d.mtype] || 0;
   const eff = d.mtype === 'normal' ? T.NORMAL : (d.mtype === 'effect' || (d.effects || []).length ? T.EFFECT : 0);
   return T.MONSTER | ex | eff | (d.tuner && d.mtype !== 'link' && d.mtype !== 'xyz' ? T.TUNER : 0);
@@ -153,7 +154,7 @@ function customToCard(d) {
   const c = {
     id: d.id, cid: 0, name: d.name || 'オリジナルカード', ruby: '', en: '', type,
     atk: d.kind === 'monster' ? +d.atk || 0 : 0,
-    def: d.kind === 'monster' ? (link ? +d.markers || 0 : +d.def || 0) : 0,
+    def: d.kind === 'monster' ? (link ? +d.markers || 0 : +d.def || 0) : (type & T.LINK ? +d.markers || 0 : 0),
     level: d.kind === 'monster' ? Math.max(1, Math.min(13, +d.level || 1)) : 0, ls: 0, rs: 0,
     race: d.kind === 'monster' ? +d.race || 1 : 0, attr: d.kind === 'monster' ? +d.attr || 1 : 0,
     setcode: customSetcodes(d).reduce((a, s, i) => a + s * 65536 ** i, 0), desc: '', pdesc: '', md: false, noJp: false,
@@ -565,6 +566,16 @@ function openCustomEditor(src, onSaved) {
     return i;
   };
   const field = (label, ...ctl) => el('label', { class: 'custom-field' }, el('span', { class: 'muted', text: label }), ...ctl);
+  // リンクマーカーを選ぶ 3×3 のボタン
+  const markerGrid = () => {
+    const grid = el('div', { class: 'custom-arrows' });
+    for (const [bit, ch] of LINK_ARROWS) {
+      if (!bit) { grid.append(el('span')); continue; }
+      const b = el('button', { type: 'button', class: 'btn small' + (d.markers & bit ? ' on' : ''), text: ch, onclick: () => { d.markers ^= bit; b.classList.toggle('on'); redrawPreview(); } });
+      grid.append(b);
+    }
+    return grid;
+  };
 
   const redrawPreview = () => {
     preview.innerHTML = '';
@@ -590,24 +601,20 @@ function openCustomEditor(src, onSaved) {
         field('攻撃力', num(d.atk, 0, 9999, 100, v => { d.atk = v; redrawPreview(); })));
       if (d.mtype !== 'link') row2.append(field('守備力', num(d.def, 0, 9999, 100, v => { d.def = v; redrawPreview(); })));
       form.append(row2);
-      if (d.mtype === 'link') {
-        const grid = el('div', { class: 'custom-arrows' });
-        for (const [bit, ch] of LINK_ARROWS) {
-          if (!bit) { grid.append(el('span')); continue; }
-          const b = el('button', { type: 'button', class: 'btn small' + (d.markers & bit ? ' on' : ''), text: ch, onclick: () => { d.markers ^= bit; b.classList.toggle('on'); redrawPreview(); } });
-          grid.append(b);
-        }
-        form.append(field('リンクマーカー', grid));
-      }
+      if (d.mtype === 'link') form.append(field('リンクマーカー', markerGrid()));
       if (!['xyz', 'link'].includes(d.mtype)) {
         const tu = el('input', { type: 'checkbox', checked: !!d.tuner });
         tu.addEventListener('change', () => { d.tuner = tu.checked; redrawPreview(); });
         form.append(el('label', { class: 'check' }, tu, ' チューナー'));
       }
-    } else if (d.kind === 'spell') {
-      form.append(field('魔法の種類', sel(CUSTOM_STYPES, d.stype, v => { d.stype = v; fixEffects(); render(); })));
     } else {
-      form.append(field('罠の種類', sel(CUSTOM_TTYPES, d.ttype, v => { d.ttype = v; fixEffects(); render(); })));
+      if (d.kind === 'spell') form.append(field('魔法の種類', sel(CUSTOM_STYPES, d.stype, v => { d.stype = v; fixEffects(); render(); })));
+      else form.append(field('罠の種類', sel(CUSTOM_TTYPES, d.ttype, v => { d.ttype = v; fixEffects(); render(); })));
+      // リンクマーカーを持つ魔法・罠（マーカーの先のモンスターゾーンを指す）
+      const lk = el('input', { type: 'checkbox', checked: !!d.stLink });
+      lk.addEventListener('change', () => { d.stLink = lk.checked; if (d.stLink && !d.markers) d.markers = 0x02; render(); });
+      form.append(el('label', { class: 'check' }, lk, ' リンクマーカーを持つ'));
+      if (d.stLink) form.append(field('リンクマーカー（魔法＆罠ゾーンから、マーカーの先のモンスターゾーンを指します）', markerGrid()));
     }
     const theme = el('input', { type: 'text', value: d.theme || '', class: 'full', placeholder: '例：ドラゴン騎士、蒼炎（空欄＝テーマなし）', maxlength: 60 });
     theme.addEventListener('input', () => { d.theme = theme.value; redrawPreview(); });
@@ -736,7 +743,7 @@ function openCustomEditor(src, onSaved) {
         d.name = (d.name || '').trim();
         delete d.parseNote;
         if (!d.name) { toast('カード名を入れてください'); return false; }
-        if (d.kind === 'monster' && d.mtype === 'link' && !d.markers) { toast('リンクマーカーを1つ以上選んでください'); return false; }
+        if (((d.kind === 'monster' && d.mtype === 'link') || (d.kind !== 'monster' && d.stLink)) && !d.markers) { toast('リンクマーカーを1つ以上選んでください'); return false; }
         saveCustomDef(d);
         toast(`「${d.name}」を保存しました`);
         onSaved && onSaved(d);
