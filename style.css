@@ -1833,3 +1833,4 @@ details.multi.has-ex > summary { color: var(--danger); }
   .dec-cands { position: static; max-height: none; }
   .dec-cand-list { overflow: visible; }
 }
+.dec-hint-pick { display: flex; align-items: center; gap: 6px; }

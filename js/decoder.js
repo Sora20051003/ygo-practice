@@ -158,7 +158,7 @@ function decNewState(solo) {
     master: solo ? DEC_CPU : null, pending: null,
     players: [{ uid: Dec.me.uid, name: Dec.me.name, wins: 0, online: true }],
     revealed: {}, answerId: null, log: [], seq: 0,
-    settings: { pool: store.get('ygo.decPool', 'all'), limit: store.get('ygo.decLimit', 60) },
+    settings: { pool: store.get('ygo.decPool', 'all'), limit: store.get('ygo.decLimit', 60), hint: store.get('ygo.decHint', true) },
     turnLeft: 0,
   };
 }
@@ -197,12 +197,16 @@ function decPool(pool) {
   return DB.cards.filter(c => decUsable(c) && (c.cid || c.special) && !c.pre && f(c));
 }
 const decRandom = list => list[Math.floor(Math.random() * list.length)];
-function decStartRound(note) {
+// hint：最初（1人目が答える前）に開示する項目 { k, text }。出題者が選ぶ（なしでもよい）
+function decStartRound(note, hint) {
   const G = Dec.G;
-  G.round++; G.status = 'play'; G.revealed = {}; G.answerId = null; G.winner = null; G.pending = null;
+  G.round++; G.status = 'play'; G.revealed = {}; G.answerId = null; G.winner = null; G.pending = null; G.hint = null;
+  const f = hint && DEC_FIELDS.find(x => x[0] === hint.k);
+  if (f && hint.text) { G.hint = { k: f[0], text: String(hint.text).slice(0, 60) }; G.revealed[f[0]] = G.hint.text; }
   decNextTurn(G.starter || G.master);   // 最初の番は、前の問題で最初だった人の次の人
   G.starter = G.turn;
   decLog({ t: 'sys', text: `第${G.round}問 スタート（出題者：${decMasterName(G)}${note ? '・' + note : ''}）` });
+  if (G.hint) decLog({ t: 'sys', text: `最初のヒント：${f[1]}は「${G.hint.text}」` });
   decPublish();
 }
 // コンピューターが出題する（ホストのアプリが選ぶ）
@@ -211,7 +215,9 @@ function decCpuStart() {
   if (!pool.length) { toast(G.settings.pool === 'deck' ? '今のデッキにカードがありません' : '出題できるカードがありません'); return; }
   if (!G.players.some(p => p.online && p.uid !== G.master)) { toast('答える人がいません'); return; }
   Dec.secret = decRandom(pool);
-  decStartRound(`${(DEC_POOLS[G.settings.pool] || DEC_POOLS.all)[0]}・${pool.length}枚から`);
+  // 「最初に1つ開示」の設定なら、答えの項目からランダムに1つ
+  const all = decAllTexts(Dec.secret), ks = Object.keys(all), hk = G.settings.hint && ks.length ? decRandom(ks) : null;
+  decStartRound(`${(DEC_POOLS[G.settings.pool] || DEC_POOLS.all)[0]}・${pool.length}枚から`, hk ? { k: hk, text: all[hk] } : null);
 }
 function decEndRound(winner, answerId, all, text) {
   const G = Dec.G;
@@ -285,7 +291,7 @@ function decHostHandle(uid, m) {
   } else if (m.kind === 'start') {
     if (G.status === 'play' || G.master !== uid) return;
     if (!G.players.some(x => x.online && x.uid !== G.master)) return;
-    decStartRound('');
+    decStartRound('', m.hint);
   } else if (m.kind === 'guess') {
     const c = DB.byId.get(+m.id);
     if (G.status !== 'play' || G.pending || G.turn !== uid || !decUsable(c)) return;
@@ -453,6 +459,7 @@ function decCandList() {
     if (!decUsable(c) || !(c.cid || c.special) || c.pre || tried.has(c.name) || !pf(c)) continue;
     const v = decVals(c);
     if (rev.some(([k, t]) => !v[k] || v[k].text !== t)) continue;
+    if (G.hint && G.hint.k === 'theme' && v.theme.text !== G.hint.text) continue;   // 最初のヒントのテーマは、答えのテーマ全部
     let ok = true;
     for (const { e, c: g } of guesses) {
       const m = decMatches(g, c), keys = Object.keys(m);
@@ -591,6 +598,12 @@ function decRenderSide() {
     box.append(el('div', { class: 'duel-box' }, el('h3', { text: '設定（ホスト）' }),
       el('label', { class: 'auth-field' }, '1人の持ち時間', sel(DEC_LIMITS, G.settings.limit, v => { G.settings.limit = +v; store.set('ygo.decLimit', +v); decPublish(); }, playing)),
       cpu ? el('label', { class: 'auth-field' }, 'コンピューターの出題の範囲', sel(DEC_POOLS, G.settings.pool, v => { G.settings.pool = v; store.set('ygo.decPool', v); decPublish(); }, playing)) : null,
+      cpu ? (() => {
+        const cb = el('input', { type: 'checkbox', disabled: playing ? true : null });
+        cb.checked = !!G.settings.hint;
+        cb.addEventListener('change', () => { G.settings.hint = cb.checked; store.set('ygo.decHint', cb.checked); decPublish(); });
+        return el('label', { class: 'check', title: '1人目が答える前に、答えの項目を1つランダムに開示します' }, cb, '最初に1つ開示する');
+      })() : null,
       cpu && !playing ? el('button', { class: 'btn primary', text: G.round ? '次の問題' : 'スタート', onclick: decCpuStart }) : null,
       cpu && playing ? el('button', { class: 'btn', text: 'ギブアップ（答えを見る）', onclick: () => { if (confirm('この問題を終わりにして答えを見ますか？')) decAct({ kind: 'giveup', answerId: Dec.secret && Dec.secret.id, all: Dec.secret && decAllTexts(Dec.secret) }); } }) : null,
       !cpu && playing && !decIsMaster() ? el('button', { class: 'btn', text: 'この問題を中止', onclick: () => { if (confirm('この問題を中止しますか？（答えは開示されません）')) decAct({ kind: 'abort' }); } }) : null));
@@ -645,8 +658,24 @@ function decRenderPickInfo() {
   if (!box) return;
   box.innerHTML = '';
   const others = Dec.G.players.some(p => p.online && p.uid !== Dec.me.uid);
+  // 最初に開示する項目（1人目が答える前に全員に見せる）
+  let hintSel = null;
+  if (Dec.secret) {
+    const all = decAllTexts(Dec.secret);
+    hintSel = el('select', { title: '1人目が答える前に、全員に開示する項目' },
+      el('option', { value: '', text: '最初は開示しない' }),
+      DEC_FIELDS.filter(([k]) => all[k] != null).map(([k, l]) => el('option', { value: k, text: `${l}：${all[k]}` })));
+    if (Dec.hintKey && all[Dec.hintKey] != null) hintSel.value = Dec.hintKey;
+    hintSel.addEventListener('change', () => { Dec.hintKey = hintSel.value; });
+  }
+  const start = () => {
+    const all = decAllTexts(Dec.secret), k = hintSel && hintSel.value;
+    Dec.judged = 0;
+    decAct({ kind: 'start', hint: k ? { k, text: all[k] } : null });
+  };
   box.append(el('span', { text: Dec.secret ? `答え：「${Dec.secret.name}」` : 'まだ選んでいません' }),
-    el('button', { class: 'btn primary', text: 'このカードで出題する', disabled: Dec.secret && others ? null : true, onclick: () => { Dec.judged = 0; decAct({ kind: 'start' }); } }),
+    hintSel ? el('label', { class: 'dec-hint-pick' }, el('span', { class: 'muted small-note', text: '最初に開示する項目' }), hintSel) : null,
+    el('button', { class: 'btn primary', text: 'このカードで出題する', disabled: Dec.secret && others ? null : true, onclick: start }),
     others ? null : el('span', { class: 'muted small-note', text: '（答える人が入るのを待っています）' }));
 }
 
