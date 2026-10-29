@@ -1801,3 +1801,9 @@ body.land .modal.wide:has(.big-detail) { width: calc(var(--lw) - 16px); max-heig
 .dec-pending { display: flex; gap: 10px; padding: 8px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); border: 1px solid var(--accent); }
 .dec-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .dec-slot.secret b { color: var(--muted); font-style: italic; opacity: 0.75; }
+/* 絞り込みの除外（2回押すと赤いチェック） */
+.multi-panel input[type=checkbox].ex { accent-color: var(--danger); }
+.multi-panel .check.ex { color: var(--danger); text-decoration: line-through; }
+.multi-panel.arrows > .check.ex { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 18%, transparent); }
+details.multi.has-ex > summary { color: var(--danger); }
+.multi-note { grid-column: 1 / -1; font-size: 11px; }

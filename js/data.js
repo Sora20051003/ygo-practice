@@ -814,7 +814,7 @@ function splitQuery(s, mode) {
   return { pos, neg };
 }
 
-function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new', atkMin = null, atkMax = null, defMin = null, defMax = null, animeOnly = false }) {
+function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new', atkMin = null, atkMax = null, defMin = null, defMax = null, animeOnly = false, exclude = null }) {
   // 攻撃力・守備力の範囲（片方だけでもよい）。「？」（マイナスの値）と、守備力の無いリンクモンスターは、指定したら出さない
   const inRange = (v, lo, hi) => v >= 0 && (lo == null || v >= lo) && (hi == null || v <= hi);
   const useAtk = atkMin != null || atkMax != null, useDef = defMin != null || defMax != null;
@@ -833,6 +833,15 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
   const markers = toList(marker);
   const markerOk = c => has(c, T.LINK) && (markerMode === 'and' ? markers.every(b => c.def & b) : markers.some(b => c.def & b));
   const starOk = c => isMonster(c) && stars[levelKind(c)].includes(c.level);
+  // 除外（絞り込みの赤いチェック）：当てはまるカードを出さない
+  const ex = exclude || {};
+  const exSubs = (ex.sub || []).map(s => SUB_FILTERS[s]).filter(Boolean);
+  const exAttr = toList(ex.attr), exRace = toList(ex.race), exMarker = toList(ex.marker);
+  const exStars = { level: toList(ex.level), rank: toList(ex.rank), link: toList(ex.link) };
+  const excluded = c => exSubs.some(f => f(c))
+    || (isMonster(c) && (exAttr.includes(c.attr) || exRace.includes(c.race) || exStars[levelKind(c)].includes(c.level)))
+    || (has(c, T.LINK) && exMarker.some(b => c.def & b));
+  const useEx = exSubs.length + exAttr.length + exRace.length + exMarker.length + exStars.level.length + exStars.rank.length + exStars.link.length > 0;
   const out = [];
   const showAnime = store.get('ygo.showAnime', true);
   for (const c of DB.cards) {
@@ -848,6 +857,7 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
     if (races.length && !(isMonster(c) && races.includes(c.race))) continue;
     if (useStars && !starOk(c)) continue;
     if (markers.length && !markerOk(c)) continue;
+    if (useEx && excluded(c)) continue;
     if (useAtk && !(isMonster(c) && inRange(c.atk, atkMin, atkMax))) continue;
     if (useDef && !(isMonster(c) && !has(c, T.LINK) && inRange(c.def, defMin, defMax))) continue;
     if (terms.length && !matchTerms(c.key, terms, qMode)) continue;

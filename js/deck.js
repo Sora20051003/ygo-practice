@@ -579,12 +579,16 @@ function setupMulti(sel, label, entries, onChange, { modeToggle = false } = {}) 
   const panel = box.querySelector('.multi-panel');
   box.dataset.mode = 'or';
   const update = () => {
-    const names = $$('input[type=checkbox]:checked', panel).map(i => i.dataset.label);
+    const names = $$('input[type=checkbox]:checked:not(.ex)', panel).map(i => i.dataset.label);
+    const exNames = $$('input[type=checkbox].ex', panel).map(i => i.dataset.label);
     const mode = box.dataset.mode.toUpperCase();
-    summary.textContent = !names.length ? label
+    const inc = !names.length ? ''
       : names.length === 1 ? names[0]
-      : names.length === 2 ? names.join(` ${mode} `) : `${label}：${names.length}つ ${mode}`;
-    box.classList.toggle('active', names.length > 0);
+      : names.length === 2 ? names.join(` ${mode} `) : `${names.length}つ ${mode}`;
+    const exc = !exNames.length ? '' : exNames.length <= 2 ? `${exNames.join('・')}を除外` : `${exNames.length}つ除外`;
+    summary.textContent = !inc && !exc ? label : (names.length > 2 || (inc && exc) ? `${label}：` : '') + [inc, exc].filter(Boolean).join('／');
+    box.classList.toggle('active', names.length > 0 || exNames.length > 0);
+    box.classList.toggle('has-ex', exNames.length > 0);
     onChange();
   };
   if (modeToggle) {
@@ -603,17 +607,26 @@ function setupMulti(sel, label, entries, onChange, { modeToggle = false } = {}) 
   for (const entry of entries) {
     if (!entry) { panel.append(el('div', { class: 'multi-gap' })); continue; } // 配置用の空きマス
     const [v, l] = entry;
+    // 押すたびに：選ぶ（チェック）→ 除外（赤いチェック）→ なし
     const cb = el('input', { type: 'checkbox', value: v, dataset: { label: l } });
-    cb.addEventListener('change', update);
-    panel.append(el('label', { class: 'check' }, cb, l));
+    cb.addEventListener('change', () => {
+      // （押した時点で、ブラウザがチェックを外している）
+      if (!cb.checked && !cb.classList.contains('ex')) { cb.checked = true; cb.classList.add('ex'); }   // 選んでいた → 除外
+      else if (!cb.checked) cb.classList.remove('ex');   // 除外していた → なし
+      cb.closest('.check').classList.toggle('ex', cb.classList.contains('ex'));
+      update();
+    });
+    panel.append(el('label', { class: 'check', title: 'もう一度押すと赤いチェック（除外）になります' }, cb, l));
   }
+  panel.append(el('div', { class: 'multi-note muted', text: '2回押すと赤いチェックになり、そのカードを除外します' }));
   panel.append(el('button', { class: 'btn small multi-clear', text: '選択を解除', onclick: () => {
-    $$('input[type=checkbox]', panel).forEach(i => { i.checked = false; });
+    $$('input[type=checkbox]', panel).forEach(i => { i.checked = false; i.classList.remove('ex'); i.closest('.check').classList.remove('ex'); });
     update();
   } }));
 }
 const segMode = sel => ($(sel + ' button.on') || {}).dataset?.mode || 'and';
-const getMulti = sel => $$(sel + ' .multi-panel input[type=checkbox]:checked').map(i => i.value);
+const getMulti = sel => $$(sel + ' .multi-panel input[type=checkbox]:checked:not(.ex)').map(i => i.value);
+const getMultiEx = sel => $$(sel + ' .multi-panel input[type=checkbox].ex').map(i => i.value);   // 赤いチェック（除外）
 
 // 絞り込みパネルの外をクリックしたら閉じる
 document.addEventListener('pointerdown', e => {
@@ -632,6 +645,7 @@ function renderResults() {
     format: fmt, q: $('#q').value, qMode: segMode('#q-mode'), text, textMode: segMode('#qt-mode'), kind: $('#f-kind').value, sub: getMulti('#f-sub'), subMode: $('#f-sub').dataset.mode,
     attr: getMulti('#f-attr'), race: getMulti('#f-race'), level: getMulti('#f-level'), rank: getMulti('#f-rank'), link: getMulti('#f-link'), marker: getMulti('#f-marker'), markerMode: $('#f-marker').dataset.mode, sort: $('#f-sort').value,
     atkMin: statNum('#f-atk-min'), atkMax: statNum('#f-atk-max'), defMin: statNum('#f-def-min'), defMax: statNum('#f-def-max'), animeOnly: $('#f-anime-only').checked,
+    exclude: { sub: getMultiEx('#f-sub'), attr: getMultiEx('#f-attr'), race: getMultiEx('#f-race'), level: getMultiEx('#f-level'), rank: getMultiEx('#f-rank'), link: getMultiEx('#f-link'), marker: getMultiEx('#f-marker') },
   });
   // 選んだレギュレーションの時点で未発売のカードは出さない（設定でオフにできる）
   if (hideUnreleased(ctx)) res = res.filter(c => !isUnreleased(c, ctx));
