@@ -1669,3 +1669,13 @@ body:has(.ap-sheet:not([hidden])) .draw-tap, body:has(#modal-root .modal-back) .
 .theme-list { max-height: 220px; overflow-y: auto; border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 6px 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 2px 10px; }
 .theme-list .theme-head { grid-column: 1 / -1; font-size: 12px; opacity: .7; margin-top: 4px; }
 .theme-opt.on { font-weight: bold; }
+
+/* 三幻神の別の表示：神の色の枠・ヒエラティックテキスト（デッキ作成のカードの説明で選ぶ） */
+.cardface.jp.god-obelisk { --fr1: #5f93da; --fr2: #1b3c84; }
+.cardface.jp.god-slifer { --fr1: #e45a4c; --fr2: #8a140e; }
+.cardface.jp.god-ra { --fr1: #f6dc72; --fr2: #b8860b; }
+.cardface.jp.god-obelisk .jp-name, .cardface.jp.god-slifer .jp-name { color: #fff; text-shadow: 0 0 0.6cqw rgba(0, 0, 0, 0.7); }
+.cardface.jp.god-obelisk .jp-pass, .cardface.jp.god-slifer .jp-pass { color: #f2f2f2; }
+.cardface.jp.hieratic .jp-name, .cardface.jp.hieratic .jp-desc, .cardface.jp.hieratic .jp-type {
+  font-family: 'Noto Sans Egyptian Hieroglyphs', 'Segoe UI Historic', serif; letter-spacing: 0.05em; word-break: break-all;
+}

@@ -250,7 +250,7 @@ const missingJp = new Set();
 function jpPhotoOrDrawn(c, big) {
   // デッキ画像から切り抜いた画像はそのまま出さず、アプリのカード（名前・効果文などをアプリで描いたもの）にする。
   // 切り抜きは、イラストが取れないカードのイラストとしてだけ使う（jpCard）
-  if (!LOCAL_FILES || !c.id || missingJp.has(c.id)) return jpCard(c, big);
+  if (!LOCAL_FILES || !c.id || missingJp.has(c.id) || faceOf(c)) return jpCard(c, big);   // 三幻神の別の表示はアプリで描く
   const node = el('div', { class: 'cardface photo jpphoto ' + frameClass(c), title: c.name });
   const img = el('img', { src: `pics/jp/${c.id}.jpg`, loading: 'lazy', alt: c.name, draggable: 'false' });
   img.addEventListener('error', () => {
@@ -333,7 +333,34 @@ function splitPendulum(text) {
   return m ? { p: m[1].trim(), main: m[2].trim() } : { p: '', main: text };
 }
 
+// ---------- 三幻神の別の表示（デッキごとに選ぶ。deck.faces = { カード: 'god'／'hieratic' }） ----------
+// god：神の色の枠（オベリスク＝青・オシリス＝赤・ラー＝金）／hieratic：ラーの翼神竜のヒエラティックテキスト（アニメのカードのように、名前と効果文を神官文字で描く）
+const GOD_FACES = {
+  10000000: { cls: 'god-obelisk', opts: { god: '神の色の枠（青）' } },
+  10000020: { cls: 'god-slifer', opts: { god: '神の色の枠（赤）' } },
+  10000010: { cls: 'god-ra', opts: { god: '神の色の枠（金）', hieratic: 'ヒエラティックテキスト' } },
+};
+const godBaseId = c => (c && (c.animeBase || c.id)) || 0;
+function faceOf(c) {
+  const g = GOD_FACES[godBaseId(c)];
+  if (!g) return null;
+  const d = artDeck();
+  const v = d && d.faces && d.faces[godBaseId(c)];
+  return v && g.opts[v] ? { kind: v, cls: g.cls + (v === 'hieratic' ? ' hieratic' : '') } : null;
+}
+// 文を神官文字（エジプトのヒエログリフの字）に置き換える。同じ文はいつも同じ字になる
+function hieraticize(s) {
+  let out = '';
+  for (const ch of String(s || '')) {
+    if (/[\s。、・：:（）()【】「」\n]/.test(ch)) { out += ch === '。' ? ' ' : ch === '\n' ? '\n' : ''; continue; }
+    out += String.fromCodePoint(0x13000 + (ch.codePointAt(0) * 37) % 1070);
+  }
+  return out;
+}
+
 function jpCard(c, big = false) {
+  const face = faceOf(c);
+  const hier = face && face.kind === 'hieratic';
   const mon = isMonster(c);
   const spell = has(c, T.SPELL);
   const pend = has(c, T.PENDULUM);
@@ -367,8 +394,8 @@ function jpCard(c, big = false) {
   const atk = c.atk < 0 ? '?' : c.atk;
   const def = c.def < 0 ? '?' : c.def;
   const box = el('div', { class: 'jp-box' },
-    mon ? el('div', { class: 'jp-type', text: `【${typeLine(c)}】` }) : null,
-    fitLater(el('div', { class: 'jp-desc' + (flavor ? ' flavor' : ''), text: main }), descSize(main.length)),
+    mon ? el('div', { class: 'jp-type', text: hier ? `【${hieraticize(typeLine(c))}】` : `【${typeLine(c)}】` }) : null,
+    fitLater(el('div', { class: 'jp-desc' + (flavor ? ' flavor' : ''), text: hier ? hieraticize(main) : main }), descSize(main.length)),
     mon ? el('div', { class: 'jp-stat' },
       el('span', { text: `ATK/${String(atk).padStart(4, ' ')}` }),
       el('span', { text: has(c, T.LINK) ? `LINK-${c.level}` : `DEF/${String(def).padStart(4, ' ')}` })) : null);
@@ -380,9 +407,9 @@ function jpCard(c, big = false) {
     fitLater(el('div', { class: 'jp-pdesc', text: p }), 3.2),
     el('div', { class: 'jp-pscale r' }, el('span', { text: '◆' }), el('b', { text: c.rs }))) : null;
 
-  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}`, title: c.name },
+  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}${face ? ' ' + face.cls : ''}`, title: c.name },
     el('div', { class: 'jp-head' },
-      el('div', { class: 'jp-name', style: `font-size:max(${jpNameSize(c.name)}cqw, 7px)`, text: c.name }),
+      el('div', { class: 'jp-name', style: `font-size:max(${jpNameSize(c.name)}cqw, 7px)`, text: hier ? hieraticize(c.name) : c.name }),
       el('div', { class: 'jp-attr ' + attr.cls, text: attr.label })),
     sub, art, pbox, box,
     c.id ? el('div', { class: 'jp-pass', text: String(c.id).padStart(8, '0') }) : null);

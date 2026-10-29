@@ -323,6 +323,25 @@ function animeChoice(deck, c) {
     el('div', { class: 'small-note muted', text: 'アニメ・漫画で使われた効果があるカードです。このデッキで使う効果（デッキに入っている分をまとめて入れ替えます）' }),
     el('div', { class: 'seg full' }, fam.map(x => el('button', { class: x.id === c.id ? 'on' : '', text: label(x), onclick: () => set(x) }))));
 }
+// 三幻神：このデッキでの表示（通常／神の色の枠／ヒエラティックテキスト）。表示だけで、効果は変わらない
+function faceChoice(deck, c) {
+  const g = typeof GOD_FACES !== 'undefined' && GOD_FACES[godBaseId(c)];
+  if (!g) return null;
+  const id = godBaseId(c);
+  const cur = (deck.faces && deck.faces[id]) || '';
+  const set = v => {
+    deck.faces = deck.faces || {};
+    if (v) deck.faces[id] = v; else delete deck.faces[id];
+    Decks.save();
+    renderDeck();
+    if (isMobile()) closeAllModals();
+    showDeckCard(c);
+  };
+  const opts = { '': '通常の表示', ...g.opts };
+  return el('div', { class: 'd-errata d-face' },
+    el('div', { class: 'small-note muted', text: 'このデッキでのカードの表示（見た目だけで、効果は変わりません）' }),
+    el('div', { class: 'seg full' }, Object.entries(opts).map(([k, t]) => el('button', { class: k === cur ? 'on' : '', text: t, onclick: () => set(k) }))));
+}
 function deckCardBar(c) {
   const bar = el('div', { class: 'd-addbar' });
   const draw = () => {
@@ -351,7 +370,7 @@ function deckCardBar(c) {
         el('button', { class: 'btn small side-btn', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })),
       el('div', { class: 'd-addbtns' },
         el('button', { class: 'btn small', text: '🔍 関連カードを検索', onclick: () => showRelated(c) })),
-      ...[animeChoice(deck, c), errataChoice(deck, c, draw), artChoice(deck, c)].filter(Boolean));
+      ...[animeChoice(deck, c), faceChoice(deck, c), errataChoice(deck, c, draw), artChoice(deck, c)].filter(Boolean));
   };
   draw();
   return bar;
