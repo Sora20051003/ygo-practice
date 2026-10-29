@@ -95,6 +95,7 @@ const CUSTOM_WHAT = {
   recover: { label: '自分のLPを回復する', n: [100, 4000, 100] },
   atkup: { label: '自分のモンスター1体の攻撃力を上げる', n: [100, 3000, 100] },
   negate: { label: 'その発動を無効にして破壊する', chain: true },
+  protect: { label: 'このターン、自分のカードを守る（対象にできない・チェーンできない）', prot: true },
 };
 const isZoneST = d => (d.kind === 'spell' && (d.stype === 'continuous' || d.stype === 'field')) || (d.kind === 'trap' && d.ttype === 'continuous');
 const isExtraMtype = d => ['fusion', 'synchro', 'xyz', 'link'].includes(d.mtype);
@@ -126,7 +127,7 @@ function customType(d) {
 }
 const CIRCLED = ['①', '②', '③', '④', '⑤'];
 const zen = s => String(s).replace(/[0-9]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0xFEE0));
-function filtText(f, d, mon, cnt) {
+function filtText(f, d, mon, cnt, upto) {
   f = f || {};
   const parts = [];
   // 本物のカードの順：レベル・攻守 →「の」→ 属性 → 種族 →「テーマ」→ 種類（例：レベル４以下の闇属性戦士族「〇〇」モンスター）
@@ -142,7 +143,9 @@ function filtText(f, d, mon, cnt) {
   if (stats.length) parts.push(stats.join('で') + (tail || !(f.lvMode === 'eq' && stats.length === 1) ? 'の' : ''));
   parts.push(tail);
   const kind = mon || f.kind === 'monster' ? 'モンスター' : f.kind === 'spell' ? '魔法カード' : f.kind === 'trap' ? '罠カード' : 'カード';
-  return parts.join('') + kind + zen(cnt || 1) + (kind === 'モンスター' ? '体' : '枚');
+  const count = zen(cnt || 1) + (kind === "モンスター" ? "体" : "枚");
+  // 「〜を３枚まで」（1枚から選べる）／「〜３枚を」
+  return upto ? parts.join("") + kind + "を" + count + "まで" : parts.join("") + kind + count + "を";
 }
 // 効果1つの文。tgt：対象にするもの（あれば「〜を対象として発動できる」）／rest：処理
 function customWhatText(x, d) {
@@ -152,11 +155,11 @@ function customWhatText(x, d) {
   const that = area === 'monster' ? 'そのモンスター' : 'そのカード';
   switch (x.what) {
     case 'draw': return { rest: `自分は${n}枚ドローする` };
-    case 'search': return { rest: `デッキから${filtText(x.filt, d, false, effCount(x))}を手札に加える` };
-    case 'send': return { rest: `デッキから${filtText(x.filt, d, false, effCount(x))}を墓地へ送る` };
-    case 'deckss': return { rest: `デッキから${filtText(x.filt, d, true, effCount(x))}を特殊召喚する` };
-    case 'handsp': return { rest: `手札から${filtText(x.filt, d, true, effCount(x))}を特殊召喚する` };
-    case 'gyss': return { rest: `自分の墓地から${filtText(x.filt, d, true, effCount(x))}を選んで特殊召喚する` };
+    case 'search': return { rest: `デッキから${filtText(x.filt, d, false, effCount(x), x.upto)}手札に加える` };
+    case 'send': return { rest: `デッキから${filtText(x.filt, d, false, effCount(x), x.upto)}墓地へ送る` };
+    case 'deckss': return { rest: `デッキから${filtText(x.filt, d, true, effCount(x), x.upto)}特殊召喚する` };
+    case 'handsp': return { rest: `手札から${filtText(x.filt, d, true, effCount(x), x.upto)}特殊召喚する` };
+    case 'gyss': return { rest: `自分の墓地から${filtText(x.filt, d, true, effCount(x), x.upto)}選んで特殊召喚する` };
     case 'self': return { rest: x.when === 'handattack' ? 'このカードを手札から特殊召喚する' : 'このカードを特殊召喚する' };
     case 'destroy': return { tgt: one, rest: `${that}を破壊する` };
     case 'destroyall': return { rest: `相手フィールドの${{ monster: 'モンスター', st: '魔法・罠カード', card: 'カード' }[area]}を全て破壊する` };
@@ -166,6 +169,14 @@ function customWhatText(x, d) {
     case 'recover': return { rest: `自分は${n}LP回復する` };
     case 'atkup': return { tgt: '自分フィールドの表側表示モンスター１体', rest: `そのモンスターの攻撃力はターン終了時まで${n}アップする` };
     case 'negate': return { rest: 'その発動を無効にし破壊する' };
+    case 'protect': {
+      const p = x.prot || { target: true, chain: true };
+      const th = filtThemes(x.filt, d);
+      const S = `自分の${th.length ? th.map(themeLabel).join('または') : ''}カード`;
+      const r = p.target && p.chain ? `相手は${S}を効果の対象にできず、${S}の効果の発動に対して効果を発動できない`
+        : p.chain ? `${S}の効果の発動に対して相手は効果を発動できない` : `相手は${S}を効果の対象にできない`;
+      return { rest: `このターン、${r}` };
+    }
     default: return { rest: '' };
   }
 }
@@ -179,7 +190,6 @@ function customText(d) {
     if (mat) lines.push(mat);
   }
   if (d.kind === 'monster' && d.mtype === 'normal') return [...lines, d.flavor || ''].filter(Boolean).join('\n');
-  if (d.useAi && d.aiLua && (d.aiText || '').trim()) return [d.aiText.trim(), d.memo || ''].filter(Boolean).join('\n');   // AI が作った効果文
   if (d.useSrc && (d.src || '').trim()) return [...lines, d.src.trim()].join('\n');   // 自分の書いた文をそのまま出す
   const single = effs.length === 1 && CUSTOM_WHEN[effs[0].when].card;   // 魔法・罠の発動の効果だけ（今のカードと同じく①は付ける）
   const opt = effs.map((x, i) => (optOf(x) === 'name' ? CIRCLED[i] : null)).filter(Boolean);
@@ -217,7 +227,7 @@ function customToCard(d) {
   };
   c.jaText = customText(d);
   c.tkey = normalizeText(c.jaText);
-  c.jaStrs = d.useAi && d.aiLua ? (d.aiStrs || []) : (d.effects || []).map(x => (CUSTOM_WHAT[x.what] ? CUSTOM_WHAT[x.what].label : '効果'));
+  c.jaStrs = (d.effects || []).map(x => (CUSTOM_WHAT[x.what] ? CUSTOM_WHAT[x.what].label : '効果'));
   c.key = normalizeText(c.name) + '||';
   c.nkey = normalizeText(c.name);
   return c;
@@ -281,17 +291,19 @@ function luaAction(x, d, i) {
   const head = `function ${TG}(e,tp,eg,ep,ev,re,r,rp,chk,chkc)`;
   const opHead = `function ${OP}(e,tp,eg,ep,ev,re,r,rp)`;
   const k = effCount(x);
+  const lo = x.upto ? 1 : k;   // 「〜まで」は1枚から選べる
   const fromDeck = (loc, cat, able, hint, act, mon) => ({
     cat, tgt: false,
     code: `function ${F}(c,e,tp) return ${LUA_FILTER(x, d, mon)} and ${able} end
 ${head}
-	if chk==0 then return ${mon ? `Duel.GetLocationCount(tp,LOCATION_MZONE)>=${k} and ` : ''}Duel.IsExistingMatchingCard(${F},tp,${loc},0,${k},nil,e,tp) end
-	Duel.SetOperationInfo(0,${cat.split('+')[0]},nil,${k},tp,${loc})
+	if chk==0 then return ${mon ? `Duel.GetLocationCount(tp,LOCATION_MZONE)>=${lo} and ` : ''}Duel.IsExistingMatchingCard(${F},tp,${loc},0,${lo},nil,e,tp) end
+	Duel.SetOperationInfo(0,${cat.split('+')[0]},nil,${lo},tp,${loc})
 end
 ${opHead}
-	${mon ? `if Duel.GetLocationCount(tp,LOCATION_MZONE)<${k} then return end\n\t` : ''}if not Duel.IsExistingMatchingCard(${F},tp,${loc},0,${k},nil,e,tp) then return end
+	local mx=${k}
+	${mon ? `mx=math.min(mx,Duel.GetLocationCount(tp,LOCATION_MZONE))\n\tif mx<${lo} then return end\n\t` : ''}if not Duel.IsExistingMatchingCard(${F},tp,${loc},0,${lo},nil,e,tp) then return end
 	Duel.Hint(HINT_SELECTMSG,tp,${hint})
-	local g=Duel.SelectMatchingCard(tp,${F},tp,${loc},0,${k},${k},nil,e,tp)
+	local g=Duel.SelectMatchingCard(tp,${F},tp,${loc},0,${lo},mx,nil,e,tp)
 	if #g>0 then ${act} end
 end`,
   });
@@ -384,6 +396,41 @@ ${opHead}
 	end
 end`,
     };
+    case 'protect': {
+      // このターン、相手は自分の（テーマの）カードを効果の対象にできない・その効果の発動にチェーンできない
+      const p = x.prot || { target: true, chain: true };
+      const th = [...new Set(filtThemes(x.filt, d).map(t => themeCodes(t).edo).filter(Boolean))];
+      const cond = th.length ? '(' + th.map(s => `c:IsSetCard(${s})`).join(' or ') + ')' : 'true';
+      const CH = `s.chop${i}`;
+      return {
+        cat: '0', tgt: false,
+        code: `function ${F}(e,c) return ${cond} end
+${head}
+	if chk==0 then return true end
+end
+${opHead}
+	local c=e:GetHandler()${p.target ? `
+	local e1=Effect.CreateEffect(c)
+	e1:SetType(EFFECT_TYPE_FIELD)
+	e1:SetCode(EFFECT_CANNOT_BE_EFFECT_TARGET)
+	e1:SetProperty(EFFECT_FLAG_IGNORE_IMMUNE)
+	e1:SetTargetRange(LOCATION_ONFIELD+LOCATION_GRAVE+LOCATION_REMOVED,0)
+	e1:SetTarget(${F})
+	e1:SetValue(function(_,re,rp) return rp==1-tp end)
+	e1:SetReset(RESET_PHASE+PHASE_END)
+	Duel.RegisterEffect(e1,tp)` : ''}${p.chain ? `
+	local e2=Effect.CreateEffect(c)
+	e2:SetType(EFFECT_TYPE_FIELD+EFFECT_TYPE_CONTINUOUS)
+	e2:SetCode(EVENT_CHAINING)
+	e2:SetOperation(${CH})
+	e2:SetReset(RESET_PHASE+PHASE_END)
+	Duel.RegisterEffect(e2,tp)` : ''}
+end
+function ${CH}(e,tp,eg,ep,ev,re,r,rp)
+	if rp==tp and ${F}(e,re:GetHandler()) then Duel.SetChainLimit(function(e,rp,tp) return tp==rp end) end
+end`,
+      };
+    }
     case 'negate': return {
       cat: 'CATEGORY_NEGATE+CATEGORY_DESTROY', tgt: false,
       code: `${head}
@@ -443,7 +490,6 @@ function luaRegister(x, d, i, act) {
   return lines.join('\n');
 }
 function customLua(d) {
-  if (d.useAi && d.aiLua) return d.aiLua;   // AI が作ったスクリプト（js/ai.js）
   const init = [];
   if (d.kind === 'monster') {
     const lv = Math.max(1, +d.level || 1);
@@ -499,20 +545,42 @@ ${funcs.join('\n')}
 const KANSUJI = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
 function normEffText(s) {
   return String(s || '')
+    // 行の終わりに「。」が無ければ足す（行ごとに別の文として読む）
+    .split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => (/[。:：]$/.test(l) ? l : l + '。')).join('')
     .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
     .replace(/[一二三四五六七八九](?=[枚体つ度])/g, ch => KANSUJI[ch])
-    .replace(/[\s　]+/g, '');
+    // いろいろな丸数字（➀➁…、❶❷…）を ①② にそろえる
+    .replace(/[➀-➄]/g, ch => '①②③④⑤'[ch.charCodeAt(0) - 0x2780])
+    .replace(/[❶-❺]/g, ch => '①②③④⑤'[ch.charCodeAt(0) - 0x2776])
+    .replace(/[➊-➎]/g, ch => '①②③④⑤'[ch.charCodeAt(0) - 0x278A])
+    .replace(/[\s　]+/g, '')
+    // 書き方のゆれ
+    .replace(/墓地に送/g, '墓地へ送')
+    .replace(/召喚[、,，]特殊召喚/g, '召喚・特殊召喚')
+    .replace(/召喚[、,，]反転召喚/g, '召喚・反転召喚')
+    .replace(/(召喚|特殊召喚|反転召喚)された/g, '$1した')
+    .replace(/墓地に(存在する|ある)このカード/g, '墓地のこのカード')
+    .replace(/。+/g, '。');
 }
 function parseEffectText(text, d) {
   const notes = [], themes = [];
   const all = normEffText(text);
   if (!all) return { effects: [], themes, notes: ['文が空です'] };
   // ①②…で分ける。無ければ「。」で文ごとにまとめて1つの効果として読む
-  // 「①：」「②:」のように番号のあとに「：」があるところで分ける（「①②の効果は」の番号では分けない）
-  const numbered = /[①②③④⑤][:：]/.test(all);
-  let segs = all.split(/(?=[①②③④⑤][:：])/).filter(Boolean);
+  // 効果の頭の番号で分ける（「①：」「②」など。「①、②の効果は」「①②の効果は」の番号では分けない）
+  const NUM_START = /(?=[①②③④⑤](?![、・,，の①②③④⑤]))/;
+  const numbered = /[①②③④⑤](?![、・,，の①②③④⑤])/.test(all);
+  let segs = all.split(NUM_START).filter(Boolean);
   let header = '';
-  if (numbered && !/^[①②③④⑤][:：]/.test(segs[0])) header = segs.shift();
+  if (numbered && !/^[①②③④⑤]/.test(segs[0])) {
+    // 番号より前：「このカード名の〜は1ターンに1度」の文は見出し、残り（番号を書き忘れた①など）は1つ目の効果
+    const first = segs.shift();
+    let restFirst = '';
+    for (const s of first.split(/(?<=。)/).filter(Boolean)) {
+      if (/1ターンに1(度|回|枚)しか/.test(s)) header += s; else restFirst += s;
+    }
+    if (restFirst) segs.unshift(restFirst);
+  }
   if (!numbered) {
     // 番号が無いとき：処理（ドローなど）まで書いてある所で1つの効果として区切る
     const ACT = /(ドロー|手札に加え|墓地へ送|特殊召喚|破壊|除外|手札に戻|ダメージ|回復|アップ|無効)/;
@@ -528,8 +596,8 @@ function parseEffectText(text, d) {
   }
   const allOpt = /カード名のカードは1ターンに1(枚|度)/.test(header) || /1ターンに1(枚|度)しか発動/.test(header);
   const optNums = new Set();
-  const hm = header.match(/([①②③④⑤]+)の効果/);
-  if (hm) for (const ch of hm[1]) optNums.add('①②③④⑤'.indexOf(ch));
+  const hm = header.match(/((?:[①②③④⑤][、・,，]?)+)の効果/);
+  if (hm) for (const ch of hm[1].replace(/[、・,，]/g, '')) optNums.add('①②③④⑤'.indexOf(ch));
   else if (/1ターンに1度/.test(header)) segs.forEach((_, i) => optNums.add(i));
 
   const num = (s, re, def) => { const m = s.match(re); return m ? +m[1] : def; };
@@ -539,8 +607,13 @@ function parseEffectText(text, d) {
     const no = CIRCLED[i] || `${i + 1}つ目`;
     const cutM = body.match(/発動(できる|する)。?/);
     const cut = cutM ? cutM.index : -1;
-    const pre = cut >= 0 ? body.slice(0, cut) : '';
-    const act = cut >= 0 ? body.slice(cut + cutM[0].length) : body;
+    let pre = cut >= 0 ? body.slice(0, cut) : '';
+    let act = cut >= 0 ? body.slice(cut + cutM[0].length) : body;
+    // 「発動できる」が書かれていないとき：「〜場合」「〜時」までを条件として読む
+    if (cut < 0) {
+      const cm = body.match(/^([^。]*?(?:場合|時|とき))[、,，]?(?=[^。])/);
+      if (cm) { pre = cm[1]; act = body.slice(cm[0].length); }
+    }
     // 処理の中心は、「発動できる。」のあとの最初の文（「この効果で特殊召喚したモンスターの効果は無効化される」のような後ろの文で決めない）
     const sentences = act.split(/(?<=。)/).filter(Boolean);
     const main = (sentences[0] || '').replace(/。$/, '');
@@ -595,6 +668,7 @@ function parseEffectText(text, d) {
       ['damage', at(/ダメージを与え/)],
       ['recover', at(/回復/)],
       ['atkup', /攻撃力/.test(main) ? at(/(アップ|上げ|上がる)/) : Infinity],
+      ['protect', at(/対象に(取|と)れ|対象にでき|発動に対して/)],
     ].filter(c => c[1] < Infinity).sort((p, q) => p[1] - q[1]);
     let what = cands.length ? cands[0][0] : '';
     if (what === 'sp') {
@@ -614,6 +688,13 @@ function parseEffectText(text, d) {
     if (x.what === 'atkup') x.n = num(main, /(\d+)(アップ|上げ|上がる)/, 500);
     if (x.n > 4000) x.n = 4000;
     if (['damage', 'recover', 'atkup'].includes(x.what)) x.n = Math.max(100, Math.round(x.n / 100) * 100);
+    // 守る効果：相手は対象にできない／効果の発動に対して相手は発動できない（どのテーマのカードか）
+    if (x.what === 'protect') {
+      x.prot = { target: /対象に(取|と)れ|対象にでき/.test(main), chain: /発動に対して/.test(main) };
+      const tms = [...main.matchAll(/「([^」]+)」/g)].map(m => themeByLooseName(m[1]));
+      if (tms.length) { x.filt.themes = [...new Set(tms)]; themes.push(...x.filt.themes); }
+      if (!/このターン/.test(main)) notes.push(`${no}：守る効果は「このターン」だけ続く効果にしました`);
+    }
     if (x.what === 'destroyall' && /(攻撃|守備)表示/.test(main)) notes.push(`${no}：「攻撃表示の」などの条件は付けられないので、表示形式に関係なく破壊します`);
     // 相手フィールドのどのカードか
     if (CUSTOM_WHAT[x.what].area) x.area = /魔法・罠/.test(scope) ? 'st' : /モンスター/.test(scope) ? 'monster' : 'card';
@@ -633,6 +714,7 @@ function parseEffectText(text, d) {
       for (const [k, v] of Object.entries(RACE)) if (fs.includes(v)) f.race = +k;
       if (!CUSTOM_WHAT[x.what].mon) f.kind = /モンスター/.test(fs) ? 'monster' : /魔法/.test(fs) && !/罠/.test(fs) ? 'spell' : /罠/.test(fs) && !/魔法/.test(fs) ? 'trap' : '';
       x.cnt = Math.max(1, Math.min(5, num(fs, /(\d+)(枚|体)/, 1)));
+      if (/\d+(枚|体)まで/.test(fs)) x.upto = true;   // 「３枚まで」＝1枚から選べる
     }
     // 処理に入れなかった後ろの文・「その後」の処理を知らせる
     if (/その後|さらに/.test(main)) notes.push(`${no}：「その後」から先の処理は入れていません`);
@@ -872,7 +954,6 @@ function openCustomEditor(src, onSaved) {
         el('div', { class: 'muted small-note', text: '書いた文から「いつ・何をする・条件・数」を読み取って、下の効果に入れます。そのあと下で直せます（動くのは下の効果のとおりです）' }),
         src, el('div', { class: 'row' }, read), result,
         el('label', { class: 'check' }, useSrc, ' カードには自分の書いた文をそのまま表示する'));
-      if (typeof aiPanel === 'function') form.append(aiPanel(d, render));
       form.append(el('h4', { text: max > 1 ? `効果（${max}枠。効果ごとに「いつ・何をする・1ターンに使える回数」を決めます）` : '効果' }), box);
       const memo = el('textarea', { rows: 2, class: 'full', placeholder: '効果文の最後に足す文（表示だけ。処理はされません）' }, d.memo || '');
       memo.addEventListener('input', () => { d.memo = memo.value; redrawPreview(); });
@@ -942,7 +1023,28 @@ function openCustomEditor(src, onSaved) {
       }
       row.append(fr);
       x.cnt = effCount(x);
-      row.append(field(w.mon ? '体数' : '枚数', num(x.cnt, 1, 5, 1, v => { x.cnt = v === '' ? 1 : Math.max(1, Math.min(5, v)); redrawPreview(); })));
+      const upto = el('input', { type: 'checkbox', checked: !!x.upto });
+      upto.addEventListener('change', () => { x.upto = upto.checked; redrawPreview(); });
+      row.append(el('div', { class: 'custom-row' }, field(w.mon ? '体数' : '枚数', num(x.cnt, 1, 5, 1, v => { x.cnt = v === '' ? 1 : Math.max(1, Math.min(5, v)); redrawPreview(); })),
+        el('label', { class: 'check' }, upto, ' 「〜まで」（1枚から選べる）')));
+    }
+    // 守る効果：対象にできない／チェーンできない、どのテーマのカードか
+    if (w && w.prot) {
+      x.prot = x.prot || { target: true, chain: true };
+      x.filt = x.filt || {};
+      const cb = (key, label) => { const i2 = el('input', { type: 'checkbox', checked: !!x.prot[key] }); i2.addEventListener('change', () => { x.prot[key] = i2.checked; redrawPreview(); }); return el('label', { class: 'check' }, i2, ' ' + label); };
+      row.append(cb('target', '相手は効果の対象にできない'), cb('chain', '効果の発動に対して相手は効果を発動できない'));
+      const ts = customThemes(d);
+      if (ts.length) {
+        x.filt.themes = filtThemes(x.filt, d); delete x.filt.theme;
+        const opts = el('div', { class: 'theme-chips' });
+        for (const t of ts) {
+          const c2 = el('input', { type: 'checkbox', checked: x.filt.themes.includes(t) });
+          c2.addEventListener('change', () => { x.filt.themes = ts.filter(n => n === t ? c2.checked : x.filt.themes.includes(n)); redrawPreview(); });
+          opts.append(el('label', { class: 'check' }, c2, ` ${themeLabel(t)}のカード`));
+        }
+        row.append(el('div', { class: 'custom-field eff-themes' }, el('span', { class: 'muted', text: '守るカード（チェックなし＝自分のカード全部）' }), opts));
+      }
     }
     // 相手フィールドのどのカードか
     if (w && w.area) row.append(field('相手フィールドの', sel(CUSTOM_AREAS, CUSTOM_AREAS[x.area] ? x.area : 'card', v => { x.area = v; redrawPreview(); })));
