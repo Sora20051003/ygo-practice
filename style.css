@@ -1680,3 +1680,10 @@ body:has(.ap-sheet:not([hidden])) .draw-tap, body:has(#modal-root .modal-back) .
 .cardface.jp.hieratic .jp-desc, .cardface.jp.hieratic .jp-type {
   font-family: 'Noto Sans Egyptian Hieroglyphs', 'Segoe UI Historic', serif; letter-spacing: 0.05em; word-break: break-all;
 }
+/* ヒエラティックテキスト版：フィールドに出るまで効果欄は空（フィールドのカードと、それを押したときの説明だけ文が見える） */
+.cardface.jp.hieratic .jp-desc, .cardface.jp.hieratic .jp-type { visibility: hidden; }
+.zone.slot .cardface.jp.hieratic .jp-desc, .zone.slot .cardface.jp.hieratic .jp-type,
+.opp-zone .cardface.jp.hieratic .jp-desc, .opp-zone .cardface.jp.hieratic .jp-type,
+body.detail-on-field #board-detail .cardface.jp.hieratic .jp-desc, body.detail-on-field #board-detail .cardface.jp.hieratic .jp-type,
+body.detail-on-field #m-preview .cardface.jp.hieratic .jp-desc, body.detail-on-field #m-preview .cardface.jp.hieratic .jp-type,
+body.detail-on-field .detail-sheet .cardface.jp.hieratic .jp-desc, body.detail-on-field .detail-sheet .cardface.jp.hieratic .jp-type { visibility: visible; }

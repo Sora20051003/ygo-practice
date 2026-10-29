@@ -938,7 +938,8 @@ const previewFromEvent = e => {
   if (e.target.closest('#board-detail, .detail-sheet, #m-preview')) return;
   const n = e.target.closest('[data-cid]');
   if (!n && isLand() && e.target.closest('#view-board .board-center') && !e.target.closest('#land-rail, #ph-pop')) hideLandDetail();
-  if (n) previewCard(DB.byId.get(+n.dataset.cid));
+  // フィールドのカードを押したか（ヒエラティックテキスト版のラーは、フィールドにあるときだけ効果文を見せる）
+  if (n) { document.body.classList.toggle('detail-on-field', !!n.closest('.zone.slot, .opp-zone')); previewCard(DB.byId.get(+n.dataset.cid)); }
 };
 document.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') previewFromEvent(e); }, true);
 document.addEventListener('click', e => { if (!matchMedia('(pointer: fine)').matches || e.pointerType === 'touch') previewFromEvent(e); }, true);
