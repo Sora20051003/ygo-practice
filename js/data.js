@@ -788,6 +788,16 @@ const KIND_FILTERS = {
 const splitTerms = s => (s || '').split(/[\s　]+/).map(normalizeText).filter(Boolean);
 // and: すべての語を含む / or: どれかの語を含む
 const matchTerms = (hay, terms, mode) => (mode === 'or' ? terms.some(t => hay.includes(t)) : terms.every(t => hay.includes(t)));
+// 除外検索：先頭に「-」を付けた語は「含まない」。mode が not なら、すべての語を「含まない」
+function splitQuery(s, mode) {
+  const pos = [], neg = [];
+  for (const w of (s || '').split(/[\s　]+/)) {
+    const ex = /^[-－−]./.test(w);
+    const t = normalizeText(ex ? w.slice(1) : w);
+    if (t) (ex || mode === 'not' ? neg : pos).push(t);
+  }
+  return { pos, neg };
+}
 
 function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new', atkMin = null, atkMax = null, defMin = null, defMax = null, animeOnly = false }) {
   // 攻撃力・守備力の範囲（片方だけでもよい）。「？」（マイナスの値）と、守備力の無いリンクモンスターは、指定したら出さない
@@ -795,9 +805,9 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
   const useAtk = atkMin != null || atkMax != null, useDef = defMin != null || defMax != null;
   const subs = (Array.isArray(sub) ? sub : (sub ? [sub] : [])).map(s => SUB_FILTERS[s]).filter(Boolean);
   const subOk = c => (subMode === 'and' ? subs.every(f => f(c)) : subs.some(f => f(c)));
-  const terms = splitTerms(q);
+  const { pos: terms, neg: negTerms } = splitQuery(q, qMode);
   const nq = terms.join('');
-  const textTerms = splitTerms(text);
+  const { pos: textTerms, neg: negText } = splitQuery(text, textMode);
   // 属性・種族は複数指定（配列）に対応。どれか1つに当てはまればOK
   const toList = v => (Array.isArray(v) ? v.map(Number) : (v ? [+v] : []));
   const attrs = toList(attr), races = toList(race);
@@ -827,6 +837,8 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
     if (useDef && !(isMonster(c) && !has(c, T.LINK) && inRange(c.def, defMin, defMax))) continue;
     if (terms.length && !matchTerms(c.key, terms, qMode)) continue;
     if (textTerms.length && !(c.tkey && matchTerms(c.tkey, textTerms, textMode))) continue;
+    if (negTerms.length && negTerms.some(t => c.key.includes(t))) continue;
+    if (negText.length && c.tkey && negText.some(t => c.tkey.includes(t))) continue;
     out.push(c);
   }
   // 名前が完全一致 → 前方一致 → その他 の順に並べる（ORのときは各語で一番良いもの）

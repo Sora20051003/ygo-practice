@@ -13,6 +13,7 @@ function switchView(name) {
   $('#view-deck').hidden = name !== 'deck';
   $('#view-board').hidden = name !== 'board';
   $('#view-duel').hidden = name !== 'duel';
+  $('#view-decoder').hidden = name !== 'decoder';
   store.set('ygo.view', name);
   document.body.dataset.view = name;   // スマホ横向きのとき、一人回しだけ横画面の配置にする
   if (name !== 'board') unlockLandscape();
@@ -24,6 +25,7 @@ function switchView(name) {
     if (d && typeof isPrompt === 'function' && isPrompt(d.pending) && !$('#ap-sheet') && !Board.pick && !$('#modal-root').children.length && typeof openPrompt === 'function') openPrompt();
   }
   if (name === 'duel') renderDuelLobby();
+  if (name === 'decoder' && typeof renderDecoder === 'function') renderDecoder();
 }
 
 // 新しい版が公開されたら知らせる（ネット版のみ。5分ごとと、画面に戻ってきたときに確認）
@@ -105,7 +107,7 @@ async function prepareTextSearch(task) {
 function checkScriptsLoaded() {
   const missing = [
     ['board.js', typeof renderBoard], ['engine.js', typeof engineLoad], ['autoplay.js', typeof autoStart], ['glow.js', typeof computeGlow],
-    ['duel.js', typeof setupDuel], ['friends.js', typeof startFriends], ['replay.js', typeof startReplay], ['deck.js', typeof openSamples],
+    ['duel.js', typeof setupDuel], ['friends.js', typeof startFriends], ['decoder.js', typeof renderDecoder], ['replay.js', typeof startReplay], ['deck.js', typeof openSamples],
   ].filter(x => x[1] !== 'function').map(x => x[0]);
   if (!missing.length) return;
   console.warn('読み込めなかったファイル', missing);

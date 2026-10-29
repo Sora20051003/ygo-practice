@@ -1744,3 +1744,51 @@ body.land .modal.wide:has(.big-detail) { width: calc(var(--lw) - 16px); max-heig
 #deck-warn .anime-warn { color: #ffb347; }
 .tile-anime { position: absolute; right: 2px; bottom: 2px; padding: 0 4px; border-radius: 6px; background: #c2185b; color: #fff; font-size: 10px; font-weight: 800; line-height: 16px; pointer-events: none; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
 #deck-warn .warn-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+
+/* ---------- カードデコーダー ---------- */
+#view-decoder { overflow: auto; }
+.dec-room { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 12px; padding: 12px; max-width: 1100px; margin: 0 auto; height: 100%; min-height: 0; }
+.dec-side { display: flex; flex-direction: column; gap: 10px; }
+.dec-side .room-code { font-size: 22px; }
+.dec-players { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.dec-players li { display: flex; justify-content: space-between; gap: 6px; padding: 4px 8px; border-radius: 6px; background: var(--panel); }
+.dec-players li.turn { background: color-mix(in srgb, var(--accent) 22%, var(--panel)); font-weight: 700; }
+.dec-players li.off { opacity: 0.5; }
+.dec-main { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.dec-answer { display: flex; gap: 12px; align-items: stretch; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.dec-answer-card { width: 110px; flex: none; }
+.dec-slots { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; align-content: start; }
+.dec-slot { background: var(--panel-2); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; min-width: 0; }
+.dec-slot small { color: var(--muted); font-size: 11px; }
+.dec-slot b { font-size: 15px; overflow-wrap: anywhere; color: var(--muted); }
+.dec-slot.open { background: color-mix(in srgb, #2a8a4a 18%, var(--panel)); }
+.dec-slot.open b { color: var(--text); }
+.dec-turn { font-weight: 700; padding: 6px 10px; border-radius: 8px; background: var(--panel-2); text-align: center; }
+.dec-turn.mine { background: color-mix(in srgb, var(--accent) 25%, var(--panel)); }
+.dec-log { list-style: none; margin: 0; padding: 8px; flex: 1; min-height: 240px; max-height: 60vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; gap: 6px; }
+.dec-log li.sys { color: var(--muted); font-size: 12px; text-align: center; }
+.dec-log li.chat.me b { color: var(--accent); }
+.dec-log li.guess { display: flex; gap: 10px; padding: 8px; border-radius: 8px; background: var(--panel-2); }
+.dec-log li.guess.me { border-left: 3px solid var(--accent); }
+.dec-cardbox { width: 110px; flex: none; }
+.dec-cardbox.small { width: 84px; }
+.dec-guess-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
+.dec-guess-name { font-weight: 700; font-size: 15px; }
+.dec-stats { color: var(--muted); font-size: 12px; }
+.dec-stat.hit { color: #fff; background: #2a8a4a; border-radius: 4px; padding: 0 4px; font-weight: 700; }
+.dec-res { font-weight: 700; margin-top: 2px; }
+.dec-res.ok { color: #c08a00; }
+.dec-res.hit { color: #2a8a4a; }
+.dec-res.miss { color: var(--muted); }
+.dec-inputbar { position: relative; display: flex; gap: 6px; }
+.dec-inputbar input { flex: 1; min-width: 0; font-size: 15px; padding: 8px 10px; }
+.dec-suggest { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); max-height: 50vh; overflow-y: auto; z-index: 5; }
+.dec-sug { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.dec-sug:hover, .dec-sug:focus { background: var(--panel-2); }
+.dec-sug small { margin-left: auto; white-space: nowrap; }
+@media (max-width: 720px) {
+  .dec-room { grid-template-columns: 1fr; padding: 8px 16px; }
+  .dec-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dec-answer-card { width: 80px; }
+  .dec-cardbox.small { width: 64px; }
+}
