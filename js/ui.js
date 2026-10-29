@@ -695,6 +695,13 @@ function openSettings() {
         cb.checked = store.get('ygo.tilt', true);
         cb.onchange = () => { store.set('ygo.tilt', cb.checked); if (typeof updateLandscape === 'function') updateLandscape(); if (typeof drawChainLinks === 'function') requestAnimationFrame(drawChainLinks); };
         return el('label', { class: 'check' }, cb, '盤面を奥へ傾けて大きく表示する（横長の画面の一人回し・対戦）');
+      })(),
+      (() => {
+        // 端末によっては横向きに固定しても画面が回らず、横長のページが縦の画面の真ん中に小さく出る。そのときはオフにする
+        const cb = el('input', { type: 'checkbox' });
+        cb.checked = store.get('ygo.lockLand', true);
+        cb.onchange = () => { store.set('ygo.lockLand', cb.checked); if (!cb.checked && typeof unlockLandscape === 'function') unlockLandscape(); };
+        return el('label', { class: 'check' }, cb, 'スマホを縦に持っているとき、全画面にして横向きに固定する（オフにするとページを回して表示します。画面の真ん中に小さく表示されてしまう端末はオフにしてください）');
       })());
   };
   draw();

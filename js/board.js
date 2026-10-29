@@ -1251,22 +1251,37 @@ function setupRotateHint() {
 let lockTried = 0, lockFailed = false;
 function tryLandscapeLock() {
   if (!(screen.orientation && screen.orientation.lock)) return;
-  if (lockFailed || !document.body.classList.contains('rotated') || document.fullscreenElement) return;
+  if (lockFailed || !store.get('ygo.lockLand', true) || !document.body.classList.contains('rotated') || document.fullscreenElement) return;
   // ホーム画面に追加したアプリとして開いているとき：全画面の案内を出さずに、そのまま横向きに固定する
   if (matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches) {
-    screen.orientation.lock('landscape').catch(() => { lockFailed = true; });
+    screen.orientation.lock('landscape').then(offerNoLock).catch(() => { lockFailed = true; });
     return;
   }
   if (!document.documentElement.requestFullscreen) return;
   if (Date.now() - lockTried < 1500) return;   // touchend と click で2回呼ばれないように
   lockTried = Date.now();
   document.documentElement.requestFullscreen({ navigationUI: 'hide' })
-    .then(() => screen.orientation.lock('landscape').catch(() => {
+    .then(() => screen.orientation.lock('landscape').then(offerNoLock).catch(() => {
       // 全画面にはなったが向きを固定できない端末：回した表示のまま使う（何度も全画面を出し入れしないよう、以後は試さない）
       lockFailed = true;
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     }))
     .catch(() => { lockTried = 0; });   // タップ以外から呼ばれたなど。次にタップしたときにまた試す
+}
+// 横向きに固定できても、画面が回らずに縦の画面の真ん中へ小さく表示される端末がある（ページからは見分けられない）。
+// 固定した直後に少しのあいだ「小さく表示されるときは こちら」を出し、押されたら固定をやめて、ページを回す表示に切り替える（設定にも残す）
+function offerNoLock() {
+  const prev = $('#nolock-bar'); if (prev) prev.remove();
+  const bar = el('div', { class: 'nolock-bar', id: 'nolock-bar' },
+    el('span', { text: '画面が小さく表示されるときは' }),
+    el('button', { class: 'btn primary', text: 'こちら', onclick: () => {
+      store.set('ygo.lockLand', false); lockFailed = true; bar.remove(); unlockLandscape();
+      setTimeout(updateLandscape, 300);
+      toast('横向きの固定をやめました（設定でまた戻せます）');
+    } }),
+    el('button', { class: 'btn', text: '×', onclick: () => bar.remove() }));
+  document.body.append(bar);
+  setTimeout(() => bar.remove(), 10000);
 }
 function unlockLandscape() {
   try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch { /* 固定していなければ何もしない */ }

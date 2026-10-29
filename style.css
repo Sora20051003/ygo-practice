@@ -1696,3 +1696,8 @@ body.detail-on-field .detail-sheet .cardface.jp.hieratic .jp-desc, body.detail-o
     linear-gradient(to bottom, transparent 0 63.3%, #36b394 63.3%, #11755d 100%),
     linear-gradient(97deg, #e8935a 0%, #d0773e 20%, #a77bc6 28%, #7a4b98 45%, #f2f2f5 54%, #c9c9cc 68%, #4a4a52 76%, #0d0d10 100%);
 }
+
+/* 横向きに固定した直後の「画面が小さく表示されるときは こちら」 */
+.nolock-bar { position: fixed; left: 50%; top: 8px; transform: translateX(-50%); z-index: 9999; display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 10px; background: #ffd34d; color: #222; font-size: 13px; font-weight: 700; box-shadow: 0 4px 16px rgba(0,0,0,.35); white-space: nowrap; }
+.nolock-bar .btn { padding: 3px 10px; font-size: 13px; }
