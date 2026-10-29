@@ -834,7 +834,8 @@ function setupBoardView() {
     $('#b-speed').value = speedMode();
     $('#b-speed').onchange = e => {
       store.set('ygo.speedMode', e.target.value);
-      toast({ '': '通常のデュエルにします', turbo: "ライディングデュエル（5D's）：両方のフィールドゾーンに「スピード・ワールド２」が置かれます。「Sp」以外の魔法を発動すると2000ダメージ", action: 'ライディングデュエル（ARC-V）：両方のフィールドゾーンに「クロス・オーバー・アクセル」が置かれ、アクションカードを拾えます' }[e.target.value] + '（次に開始したときから。効果を自動処理）');
+      if (typeof renderPauseSummary === 'function') renderPauseSummary();
+      toast({ '': '通常のデュエルにします', turbo: "スピードデュエル（5D's版）：両方のフィールドゾーンに「スピード・ワールド２」が置かれます。「Sp」以外の魔法を発動すると2000ダメージ", action: 'スピードデュエル（ARC-V版）：両方のフィールドゾーンに「クロス・オーバー・アクセル」が置かれ、アクションカードを拾えます' }[e.target.value] + '（次に開始したときから。効果を自動処理）');
     };
   }
   $('#b-errata').value = errataMode();
@@ -1031,7 +1032,7 @@ function renderPauseSummary() {
   if (!box) return;
   const d = Decks.get($('#b-deck').value);
   const mode = $('#view-board').classList.contains('auto-mode') ? '効果を自動処理' : '手動';
-  box.textContent = `${d ? d.name : 'デッキ未選択'}・${$('#b-handsize').value === '6' ? '後攻' : '先攻'}・${mode}・制限時間 ${timeLabel(timeLimit())}`;
+  box.textContent = `${d ? d.name : 'デッキ未選択'}・${$('#b-handsize').value === '6' ? '後攻' : '先攻'}・${mode}${speedMode() ? '・' + ({ turbo: "スピードデュエル（5D's版）", action: 'スピードデュエル（ARC-V版）' })[speedMode()] : ''}・制限時間 ${timeLabel(timeLimit())}`;
 }
 
 // ---------- 制限時間（一人回し） ----------
