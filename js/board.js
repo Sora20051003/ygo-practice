@@ -1003,16 +1003,15 @@ async function confirmDeckRules(deck, go) {
     try { await Promise.all([ctx.src ? loadRegulation(...ctx.src) : null, loadReleaseDates()]); } catch { /* 読めなくても続ける */ }
     showLoading(null);
   }
-  const { notAllowed, over, anime } = deckProblems(deck);
+  const { notAllowed, over } = deckProblems(deck);   // アニメ版のカードは、このあとの confirmErrataGo（confirmAnimeGo）で確かめる
   const size = [];
   if (deck.main.length < 40) size.push(`メインデッキが${deck.main.length}枚です（40枚以上必要）`);
   if (deck.main.length > 60) size.push(`メインデッキが${deck.main.length}枚です（60枚まで）`);
   if (deck.extra.length > 15) size.push(`EXデッキが${deck.extra.length}枚です（15枚まで）`);
-  if (!notAllowed.length && !over.length && !size.length && !anime.length) { go(); return; }
+  if (!notAllowed.length && !over.length && !size.length) { go(); return; }
   const fmt = FORMATS[deckFormat(deck)].label;
   const body = el('div', { class: 'stack' },
-    notAllowed.length || over.length || size.length ? el('p', { text: `このデッキは${regText(deck).replace('ルール：', '')}のルールに合っていません。` }) : null,
-    anime.length ? el('div', null, el('b', { text: '⚠ アニメ版のカード（公式のデュエルでは使えません。効果もアニメのものです）' }), el('ul', null, anime.map(n => el('li', { text: n })))) : null,
+    el('p', { text: `このデッキは${regText(deck).replace('ルール：', '')}のルールに合っていません。` }),
     notAllowed.length ? el('div', null, el('b', { text: `${fmt}では使えないカード` }), el('ul', null, notAllowed.map(n => el('li', { text: n })))) : null,
     over.length ? el('div', null, el('b', { text: '禁止・制限の枚数を超えているカード' }), el('ul', null, over.map(n => el('li', { text: n })))) : null,
     size.length ? el('div', null, el('b', { text: '枚数' }), el('ul', null, size.map(n => el('li', { text: n })))) : null,

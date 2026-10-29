@@ -250,7 +250,76 @@ const deckErrata = (deck, id) => (deck && deck.errata && deck.errata[id]) || nul
 // 一人回し・対戦へ移るとき（画面の切り替え・一人回しの開始・対戦の準備OK）、エラッタのあったカードが入っていたら、
 // どちらの効果になっているかを出して、このまま進んでよいか聞く。同じデッキ・同じ状態で一度「このまま進む」を選んだら、もう聞かない
 let errataOkKey = null;
-function confirmErrataGo(deck, go, mode = typeof errataMode === 'function' ? errataMode() : 'post') {
+// 先にアニメ版のあるカードを確かめてから、エラッタのあるカードを確かめる
+function confirmErrataGo(deck, go, mode) {
+  confirmAnimeGo(deck, () => confirmErrataOnly(deck, go, mode));
+}
+
+// ---------- アニメ版のあるカード：まとめて OCG 版／アニメ版にする ----------
+// デッキに入っている、アニメ版のあるカード（OCG 版・アニメ版のどちらで入っていても）と、アニメ・漫画だけのカード
+function animeCardsOf(deck) {
+  const out = [], seen = new Set();
+  for (const sec of ['main', 'extra', 'side']) for (const id of deck[sec] || []) {
+    const c = DB.byId.get(id);
+    if (!c || seen.has(id)) continue;
+    seen.add(id);
+    const fam = animeFamily(c);
+    if (fam.length || c.anime) out.push({ c, fam });
+  }
+  return out;
+}
+const animeLabel = c => (/（[^）]*）$/.test(c.name) ? c.name : `${c.name}（${c.anime ? (c.animeTag && c.animeTag !== 'アニメ' ? c.animeTag : 'アニメ') + '版' : 'OCG版'}）`);
+// toAnime：true ならアニメ版（ダークシンクロ版よりアニメの効果を先に選ぶ）、false なら OCG 版に入れ替える。入れ替えた枚数を返す
+function setAllAnime(deck, toAnime) {
+  let n = 0;
+  const pick = id => {
+    const c = DB.byId.get(id);
+    const fam = c ? animeFamily(c) : [];
+    if (!fam.length) return id;   // アニメ・漫画だけのカード（OCG 版が無い）はそのまま
+    const to = toAnime ? (c.anime ? c : fam.find(x => x.anime && x.animeTag !== 'ダークシンクロ') || fam.find(x => x.anime)) : fam[0];
+    if (!to || to.id === id) return id;
+    n++; return to.id;
+  };
+  for (const sec of ['main', 'extra', 'side']) deck[sec] = (deck[sec] || []).map(pick);
+  if (n) { Decks.save(); if (typeof renderDeck === 'function' && Decks.current() === deck) renderDeck(); }
+  return n;
+}
+let animeOkKey = null;
+function confirmAnimeGo(deck, go) {
+  const list = deck ? animeCardsOf(deck) : [];
+  if (!list.length) { go(); return; }
+  const key = deck.id + '|' + list.map(x => x.c.id).join(',');
+  if (key === animeOkKey) { go(); return; }
+  const anime = list.filter(x => x.c.anime), ocg = list.filter(x => !x.c.anime);
+  const ul = a => el('ul', null, a.map(x => el('li', { text: animeLabel(x.c) })));
+  const body = el('div', { class: 'stack' },
+    anime.length ? el('div', null, el('p', { text: '⚠ アニメ版のカードが入っています（公式のデュエルでは使えません。効果もアニメのものです）' }), ul(anime)) : null,
+    ocg.length ? el('div', null, el('p', { text: 'アニメ版もあるカードが入っています（今は OCG 版の効果です）' }), ul(ocg)) : null,
+    anime.some(x => !x.fam.length) ? el('p', { class: 'muted small-note', text: 'アニメ・漫画だけのカード（OCG 版が無いもの）は、「すべてOCG版」にしてもそのままです。' }) : null);
+  const after = toAnime => () => {
+    const n = setAllAnime(deck, toAnime);
+    toast(n ? `${n}枚を${toAnime ? 'アニメ版' : 'OCG版'}にしました` : `すでにすべて${toAnime ? 'アニメ版' : 'OCG版'}です`);
+    animeOkKey = deck.id + '|' + animeCardsOf(deck).map(x => x.c.id).join(',');
+    go();
+  };
+  showModal({ title: 'アニメ版のあるカードの確認', body, buttons: [
+    { label: 'すべてOCG版にする', onClick: after(false) },
+    { label: 'すべてアニメ版にする', onClick: after(true) },
+    { label: 'このまま進む', primary: true, onClick: () => { animeOkKey = key; go(); } },
+    { label: 'やめる', onClick: () => {} },
+  ] });
+}
+
+// エラッタのあるカードを、このデッキでまとめてエラッタ前（'pre'）／エラッタ後（'post'）にする
+function setAllErrata(deck, v) {
+  const ids = [...new Set([...(deck.main || []), ...(deck.extra || []), ...(deck.side || [])])].filter(id => typeof hasErrata === 'function' && hasErrata(id));
+  deck.errata = deck.errata || {};
+  for (const id of ids) deck.errata[id] = v;
+  Decks.save();
+  if (typeof renderDeck === 'function' && Decks.current() === deck) renderDeck();
+  return ids.length;
+}
+function confirmErrataOnly(deck, go, mode = typeof errataMode === 'function' ? errataMode() : 'post') {
   const ids = deck && typeof hasErrata === 'function' ? [...new Set([...(deck.main || []), ...(deck.extra || [])])].filter(id => hasErrata(id)) : [];
   if (!ids.length) { go(); return; }
   const st = id => deckErrata(deck, id) || (mode === 'pre' ? 'pre' : 'post');
@@ -262,8 +331,16 @@ function confirmErrataGo(deck, go, mode = typeof errataMode === 'function' ? err
   const body = el('div', { class: 'stack' },
     pre.length ? el('div', null, el('p', { text: 'エラッタされているカードが含まれています　エラッタ前の状態になっています' }), list(pre)) : null,
     post.length ? el('div', null, el('p', { text: 'エラッタされているカードが含まれています　エラッタ後の状態になっています' }), list(post)) : null,
-    el('p', { class: 'muted', text: 'このまま進みますか？（切り替えは、デッキ作成でカードを選んだときの説明から行えます）' }));
+    el('p', { class: 'muted', text: 'まとめて切り替えるか、このまま進んでください（1枚ずつの切り替えは、デッキ作成でカードを選んだときの説明から行えます）' }));
+  const all = v => () => {
+    setAllErrata(deck, v);
+    toast(`このデッキのエラッタのあるカードを、すべて${v === 'pre' ? 'エラッタ前' : 'エラッタ後（今）'}の効果にしました`);
+    errataOkKey = deck.id + '|' + (v === 'pre' ? ids.join(',') + '|' : '|' + ids.join(','));
+    go();
+  };
   showModal({ title: 'エラッタの確認', body, buttons: [
+    { label: 'すべてエラッタ後にする', onClick: all('post') },
+    { label: 'すべてエラッタ前にする', onClick: all('pre') },
     { label: 'このまま進む', primary: true, onClick: () => { errataOkKey = key; go(); } },
     { label: 'やめる', onClick: () => {} },
   ] });
@@ -858,7 +935,10 @@ function renderDeck() {
   warn.hidden = !notAllowed.length && !over.length && !anime.length;
   if (notAllowed.length) warn.append(el('div', { text: `⚠ ${FORMATS[fmt].label}で使えないカード：${notAllowed.join('、')}` }));
   if (over.length) warn.append(el('div', { text: `⚠ 禁止・制限の枚数オーバー：${over.join('、')}` }));
-  if (anime.length) warn.append(el('div', { class: 'anime-warn', text: `⚠ アニメ版のカードが入っています（公式のデュエルでは使えません）：${anime.join('、')}` }));
+  if (anime.length) warn.append(el('div', { class: 'anime-warn' }, `⚠ アニメ版のカードが入っています（公式のデュエルでは使えません）：${anime.join('、')}`,
+    el('div', { class: 'warn-acts' },
+      el('button', { class: 'btn small', text: 'すべてOCG版にする', onclick: () => { const n = setAllAnime(deck, false); toast(n ? `${n}枚をOCG版にしました` : 'OCG版があるカードはありません'); } }),
+      el('button', { class: 'btn small', text: 'すべてアニメ版にする', onclick: () => { const n = setAllAnime(deck, true); toast(n ? `${n}枚をアニメ版にしました` : 'すでにすべてアニメ版です'); } }))));
   // レギュレーション（禁止・制限リスト）の選択
   const ctx = regContext(deck);
   renderRegSelect(deck);
