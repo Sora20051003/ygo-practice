@@ -36,12 +36,16 @@ function themeByLooseName(s) {
 }
 const customSetcodes = d => [...new Set(customThemes(d).map(t => themeCodes(t).own).filter(Boolean))];
 const customEdoSetcodes = d => [...new Set(customThemes(d).map(t => themeCodes(t).edo).filter(Boolean))];
-// 効果の「テーマのカードだけ」が指すテーマ名（前の形 true は1つ目のテーマ）
-const filtTheme = (f, d) => {
+// 効果の「テーマのカードだけ」が指すテーマ名の一覧（どれかのテーマのカード）。
+// f.themes（配列）。前の形：f.theme が文字ならそのテーマ、true ならこのカードの1つ目のテーマ
+const filtThemes = (f, d) => {
   const ts = customThemes(d);
-  if (!f || !f.theme || !ts.length) return '';
-  return typeof f.theme === 'string' && ts.includes(f.theme) ? f.theme : ts[0];
+  if (!f || !ts.length) return [];
+  if (Array.isArray(f.themes)) return f.themes.filter(t => ts.includes(t));
+  if (!f.theme) return [];
+  return [typeof f.theme === 'string' && ts.includes(f.theme) ? f.theme : ts[0]];
 };
+const themeLabel = t => `「${t.replace(/（[^）]*）$/, '')}」`;   // 公式のテーマ名の読み（「古代の機械（アンティーク・ギア）」など）は文に入れない
 // 手札に加える・墓地へ送る・特殊召喚する枚数
 const effCount = x => Math.max(1, Math.min(5, +(x && x.cnt) || 1));
 
@@ -112,8 +116,8 @@ const zen = s => String(s).replace(/[0-9]/g, ch => String.fromCharCode(ch.charCo
 function filtText(f, d, mon, cnt) {
   f = f || {};
   const parts = [];
-  const th = filtTheme(f, d);
-  if (th) parts.push(`「${th.replace(/（[^）]*）$/, "")}」`);   // 公式のテーマ名の読み（「古代の機械（アンティーク・ギア）」など）は文に入れない
+  const th = filtThemes(f, d);
+  if (th.length) parts.push(th.map(themeLabel).join('または'));   // 「A」または「B」モンスター
   if (f.lv) parts.push(`レベル${zen(f.lv)}以下の`);
   if (f.attr) parts.push(`${ATTR[f.attr]}属性`);
   if (f.race) parts.push(RACE[f.race]);
@@ -232,9 +236,8 @@ const LUA_FILTER = (x, d, mon, id) => {
   if (f.race) cond.push(`c:IsRace(${+f.race})`);
   if (f.attr) cond.push(`c:IsAttribute(${+f.attr})`);
   if (f.lv) cond.push(`c:IsLevelBelow(${+f.lv})`);
-  const tn = filtTheme(f, d);
-  const th = tn ? themeCodes(tn).edo : 0;
-  if (th) cond.push(`c:IsSetCard(${th})`);
+  const th = [...new Set(filtThemes(f, d).map(t => themeCodes(t).edo).filter(Boolean))];
+  if (th.length) cond.push('(' + th.map(s => `c:IsSetCard(${s})`).join(' or ') + ')');
   return cond.join(' and ');
 };
 // 効果1つの「対象・処理」と、カテゴリ・対象を取るか
@@ -498,7 +501,9 @@ function parseEffectText(text, d) {
     if (CUSTOM_WHAT[x.what].filt) {
       const f = x.filt;
       const tm = a.match(/「([^」]+)」/);
-      if (tm) { const nm = themeByLooseName(tm[1]); f.theme = nm; themes.push(nm); }
+      // 「A」または「B」のように複数書かれていれば、すべて
+      const tms = [...a.matchAll(/「([^」]+)」/g)].map(m => themeByLooseName(m[1]));
+      if (tms.length) { f.themes = [...new Set(tms)]; themes.push(...f.themes); }
       const lv = a.match(/レベル(\d+)以下/); if (lv) f.lv = Math.min(12, +lv[1]);
       for (const [k, v] of Object.entries(ATTR)) if (a.includes(v + '属性')) f.attr = +k;
       for (const [k, v] of Object.entries(RACE)) if (a.includes(v)) f.race = +k;
@@ -787,9 +792,17 @@ function openCustomEditor(src, onSaved) {
       }
       const ts = customThemes(d);
       if (ts.length) {
-        const cur = filtTheme(f, d);
-        if (f.theme) f.theme = cur;
-        fr.append(field('テーマ', sel({ '': 'どれでも', ...Object.fromEntries(ts.map(t => [t, `「${t}」のカードだけ`])) }, cur, v => { f.theme = v || ''; redrawPreview(); })));
+        // チェックしたテーマのどれかのカード（何もチェックしなければテーマは問わない）
+        f.themes = filtThemes(f, d); delete f.theme;
+        const box = el('div', { class: 'custom-field eff-themes' }, el('span', { class: 'muted', text: 'テーマ（チェックしたテーマのどれかのカード。チェックなし＝どれでも）' }));
+        const opts = el('div', { class: 'theme-chips' });
+        for (const t of ts) {
+          const cb = el('input', { type: 'checkbox', checked: f.themes.includes(t) });
+          cb.addEventListener('change', () => { f.themes = ts.filter(n => n === t ? cb.checked : f.themes.includes(n)); redrawPreview(); });
+          opts.append(el('label', { class: 'check' }, cb, ` ${themeLabel(t)}のカード`));
+        }
+        box.append(opts);
+        fr.append(box);
       } else {
         fr.append(el('span', { class: 'muted small-note', text: 'テーマ名を入れると「テーマのカードだけ」にできます' }));
       }
