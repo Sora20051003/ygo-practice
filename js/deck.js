@@ -1875,6 +1875,37 @@ function sampleMatcher(qRaw) {
     return false;
   };
 }
+// アニメのキャラのデッキ（data/char-decks.js）。禁止・制限なし（OCG のデッキとして作る。アニメのカードも入る）
+async function drawCharDecks(body, close) {
+  if (typeof CHAR_DECKS === 'undefined') { try { await loadScript('data/char-decks.js?v=' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '')); } catch { /* 無ければ空 */ } }
+  const decks = typeof CHAR_DECKS !== 'undefined' ? CHAR_DECKS : [];
+  body.append(el('p', { class: 'muted small-note', text: 'アニメのキャラが使っていたカードを中心に、今のカードで組んだデッキです（禁止・制限なしのデッキとして追加します）。アニメだけのカードは、アプリにあれば入ります。' }));
+  const list = el('div', { class: 'sample-list' });
+  for (const s of decks) {
+    const d = sampleToDeck({ m: (s.m || []).filter(x => x[1] > 0), x: (s.x || []).filter(x => x[1] > 0) }, 'ocg', 'none');
+    const cardsOf = ids => { const m = new Map(); for (const id of ids) m.set(id, (m.get(id) || 0) + 1); return [...m].map(([id, n]) => `${DB.byId.get(id).name}×${n}`).join('、'); };
+    const inner = el('div', { class: 'sample-cards', hidden: true },
+      el('div', null, el('b', { text: `メイン${d.main.length}枚：` }), cardsOf(d.main)),
+      el('div', null, el('b', { text: `EX${d.extra.length}枚：` }), cardsOf(d.extra) || 'なし'),
+      d.unknown.length ? el('div', { class: 'warn', text: 'アプリに無いカード（入りません）：' + d.unknown.join('、') }) : null);
+    list.append(el('div', { class: 'sample-item' },
+      el('div', { class: 'sample-head' }, el('b', { text: s.t }), el('span', { class: 'muted small-note', text: s.s }),
+        el('span', { class: 'muted small-note', text: `メイン${d.main.length}・EX${d.extra.length}` })),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn small', text: '中身を見る', onclick: () => { inner.hidden = !inner.hidden; } }),
+        el('button', { class: 'btn small primary', text: '＋ デッキに追加', onclick: () => {
+          const nd = Decks.blank(`${s.t}のデッキ`, 'ocg');
+          nd.reg = 'none';
+          nd.main = d.main; nd.extra = d.extra;
+          Decks.list.push(nd); Decks.currentId = nd.id; Decks.save();
+          renderDeck(); renderResults();
+          close();
+          toast(`「${nd.name}」を追加しました`);
+        } })),
+      inner));
+  }
+  body.append(list);
+}
 async function openSamples() {
   const cur = Decks.current();
   let fmt = cur ? deckFormat(cur) : 'ocg';
@@ -1883,10 +1914,11 @@ async function openSamples() {
   const draw = async () => {
     body.innerHTML = '';
     body.append(el('p', { class: 'muted', text: '読み込み中…' }));
-    const data = await loadSamples(fmt);
+    const data = fmt === 'char' ? null : await loadSamples(fmt);
     body.innerHTML = '';
-    const tabs = el('div', { class: 'seg' }, Object.entries(FORMATS).map(([k, f]) => el('button', { class: k === fmt ? 'on' : '', text: f.label, onclick: () => { fmt = k; draw(); } })));
+    const tabs = el('div', { class: 'seg' }, [...Object.entries(FORMATS).map(([k, f]) => [k, f.label]), ['char', 'アニメのキャラ']].map(([k, label]) => el('button', { class: k === fmt ? 'on' : '', text: label, onclick: () => { fmt = k; draw(); } })));
     body.append(tabs);
+    if (fmt === 'char') { await drawCharDecks(body, close); return; }
     const periods = data ? Object.keys(data.periods).filter(p => (data.periods[p] || []).length).sort().reverse() : [];
     if (!periods.length) { body.append(el('p', { class: 'muted', text: 'このルールのサンプルデッキはまだありません。' })); return; }
     // 今のデッキのレギュレーションに当たる期間を最初に選ぶ
