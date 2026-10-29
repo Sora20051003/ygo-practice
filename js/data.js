@@ -127,7 +127,7 @@ function withPreCards(cards) {
 // ANIME_CARDS.d[id] = [base, tag, en, ja, type, lv, race, attr, atk, def, setcodes, alias, jaText, enText, strs]
 //   base：同じ名前の今のカード（あればアニメ版。無ければ 0＝アニメだけのカード）／tag：「アニメ」「漫画」など
 // アニメ版（今のカードと同じ名前）は検索に出さず、デッキ作成のカードの説明で「アニメの効果」に切り替える
-const ANIME_FILE = 'data/anime-cards.js?v=5';
+const ANIME_FILE = 'data/anime-cards.js?v=6';
 async function loadAnimeCards() {
   if (typeof ANIME_CARDS !== 'undefined') return;
   try { await loadScript(ANIME_FILE); } catch (e) { console.warn('アニメのカードを読めませんでした', e); }
@@ -150,8 +150,11 @@ function withAnimeCards(cards) {
     const [base0, tag, en, ja, type, lv, race, attr, atk, def, sc, alias, jaText, enText, strs, ruby] = a;
     let base = base0;
     let b = base ? byId.get(base) : null;
+    // スピードスペル（Ｓｐ－〜）は、元のカードのアニメ版ではなく別のカードとして扱う（検索に出し、名前は「Ｓｐ－〜」）
+    const isSp = /^Speed Spell/i.test(en || "");
+    if (isSp) { b = null; base = 0; }
     // 今のカードと同じ名前なのに、つながっていないもの → そのカードのアニメ版にする
-    if (!b) { b = (ja && byName.get(nameKey(ja))) || byName.get('en:' + nameKey(en)) || null; base = b ? b.id : 0; }
+    if (!b && !isSp) { b = (ja && byName.get(nameKey(ja))) || byName.get("en:" + nameKey(en)) || null; base = b ? b.id : 0; }
     // アニメだけのカードで、同じ名前のものが前にある（同じカードの別の版） → 前のもののもう1つの版にする（検索には1枚だけ出す）
     let dupOf = null;
     if (!b) {
@@ -168,6 +171,10 @@ function withAnimeCards(cards) {
     if (typeof EXTRA_ANIME !== 'undefined' && EXTRA_ANIME[id]) c.luaInline = EXTRA_ANIME[id].lua;   // EDOPro に無いアニメ版のスクリプト
     const text = jaText || enText || '';
     if (text) { c.jaText = text; c.tkey = normalizeText(text); }
+    if (isSp) {
+      c.ruby = 'スピードスペル ' + (c.ruby || '');   // 「スピードスペル」でも探せる
+      if (!/^(Ｓｐ|Sp)/.test(c.name)) c.name = `Ｓｐ－${c.name.replace(/（[^）]*）$/, '')}`;   // 名前は「Ｓｐ－〜」にそろえる
+    }
     // 機皇帝のパーツ（ワイゼルＴ など）：「機皇帝」「トップ」などでも探せるようにする
     const mk = c.name.match(/^(ワイゼル|スキエル|グランエル)([ＴＡＧＣTAGC])/);
     if (mk) c.ruby = `機皇帝${mk[1]}のパーツ ${mk[1]}${{ Ｔ: 'トップ', T: 'トップ', Ａ: 'アタック', A: 'アタック', Ｇ: 'ガード', G: 'ガード', Ｃ: 'キャリア', C: 'キャリア' }[mk[2]]}`;
