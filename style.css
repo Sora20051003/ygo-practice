@@ -1721,3 +1721,18 @@ body.land #view-board .ap-chainbox .small-note { display: none; }
 .result-row .r-count { flex: none; min-width: 34px; text-align: center; padding: 1px 6px; border-radius: 10px; background: var(--accent); color: var(--accent-text, #fff); font-size: 12px; font-weight: 800; }
 .result-row.in-deck { box-shadow: inset 3px 0 0 var(--accent); }
 .result-row .minus-btn:disabled { opacity: .3; cursor: default; }
+
+/* 効果を大きく表示する窓（横画面の盤面）。絵は小さく、文字を大きく */
+.big-detail { font-size: var(--big-fs, 20px); line-height: 1.6; display: flex; flex-direction: column; gap: 6px; }
+.big-detail .card-text, .big-detail .ja-text .card-text { font-size: var(--big-fs, 20px) !important; line-height: 1.6; }
+.big-detail .d-name { font-size: calc(var(--big-fs, 20px) * 1.1); }
+.big-detail .d-type, .big-detail .d-stats, .big-detail .d-ruby, .big-detail .d-en { font-size: calc(var(--big-fs, 20px) * .8); }
+.big-detail .d-image, .big-detail .d-related, .big-detail .d-formats { display: none; }
+.big-detail .d-related, .big-detail .d-formats { font-size: 13px; }
+body.land .modal.wide:has(.big-detail) { width: calc(var(--lw) - 16px); max-height: calc(var(--lh) - 8px); }
+.d-big { margin-top: 2px; }
+.big-detail > * { order: 3; }
+.big-detail > .detail-head { order: 0; padding: 4px 10px; }
+.big-detail > .d-type, .big-detail > .d-stats { order: 1; }
+.big-detail > .ja-text { order: 2; }
+.big-detail .d-ruby, .big-detail .d-en { display: none; }

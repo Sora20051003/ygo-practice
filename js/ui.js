@@ -538,6 +538,20 @@ function showCardDetail(c, panelSel, extra) {
   showModal({ title: c.name, body });
 }
 
+// 効果を大きな文字で読む窓（横画面の盤面用）。文字の大きさは「小さく」「大きく」で変えられ、次からも同じ大きさで出す
+function openBigDetail(c, extra) {
+  const body = el('div', { class: 'detail-sheet big-detail' });
+  const apply = () => body.style.setProperty('--big-fs', store.get('ygo.bigText', 20) + 'px');
+  const step = d => { store.set('ygo.bigText', Math.max(12, Math.min(40, store.get('ygo.bigText', 20) + d))); apply(); };
+  apply();
+  renderDetail(body, c, null);
+  showModal({ title: c.name, body, wide: true, buttons: [
+    { label: 'Ａ－ 小さく', onClick: () => { step(-2); return false; } },
+    { label: 'Ａ＋ 大きく', onClick: () => { step(2); return false; } },
+    { label: '閉じる', primary: true, onClick: () => {} },
+  ] });
+}
+
 // OCG・マスターデュエルそれぞれで使えるか／禁止・制限か
 function formatInfo(c) {
   if (typeof FORMATS === 'undefined' || !c.cid) return null;
@@ -588,6 +602,8 @@ function renderDetail(box, c, extra) {
     img,
     // 一人回し・対戦の盤面では、関連カードを窓で見られるようにする（デッキ作成の画面には「関連カードを検索」がある）
     document.body.dataset.view === 'board' && c.id && typeof openRelatedModal === 'function' ? el('button', { class: 'btn small full d-related', text: '🔍 関連カードを見る', onclick: () => openRelatedModal(c) }) : null,
+    // 横画面の盤面では詳細の欄が小さいので、効果を大きな文字で読める窓を出せるようにする
+    document.body.dataset.view === 'board' && document.body.classList.contains('land') && !box.closest('.big-detail') ? el('button', { class: 'btn small full d-big', text: '🔎 効果を大きく表示', onclick: () => openBigDetail(c, extra) }) : null,
     el('div', { class: 'detail-head ' + frameClass(c) },
       el('div', { class: 'd-name', text: c.name }),
       c.ruby && c.ruby !== c.name ? el('div', { class: 'd-ruby', text: c.ruby }) : null,
