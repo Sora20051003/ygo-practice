@@ -1690,7 +1690,7 @@ body.detail-on-field .detail-sheet .cardface.jp.hieratic .jp-desc, body.detail-o
 /* 英語のカード（オベリスク・オシリスの神の色の枠） */
 .cardface.jp .jp-name.en { font-family: 'Times New Roman', serif; letter-spacing: 0; }
 .cardface.jp.god-obelisk .jp-desc, .cardface.jp.god-slifer .jp-desc, .cardface.jp.god-obelisk .jp-type, .cardface.jp.god-slifer .jp-type { font-family: 'Times New Roman', serif; word-break: normal; overflow-wrap: break-word; line-break: auto; text-align: justify; }
-/* 覇王龍ズァーク：アニメのカードと同じ枠（上は効果・融合・シンクロ・エクシーズの色を左から順に、下はペンデュラムの緑） */
+/* 覇王龍ズァーク（アニメ版だけ。OCG は元の枠）：アニメのカードと同じ枠（上は効果・融合・シンクロ・エクシーズの色を左から順に、下はペンデュラムの緑） */
 .cardface.jp.zarc {
   background:
     linear-gradient(to bottom, transparent 0 63.3%, #36b394 63.3%, #11755d 100%),

@@ -189,11 +189,12 @@ function withAnimeCards(cards) {
 // EDOPro に無いアニメ版（効果のスクリプトもここで書く）
 // d[id] と同じ形＋lua（スクリプト）
 const EXTRA_ANIME = {
-  // オレイカルコスの結界（アニメ）：破壊されず・フィールドから離れず・ほかのカードの効果を受けない。自分のモンスターの攻撃力５００アップ
-  // （アニメの「魔法・罠ゾーンをモンスターゾーンとして使う」は、エンジンのゾーンの作りでは再現できないので入れていない）
+  // オレイカルコスの結界（アニメ）：破壊されず・フィールドから離れず・ほかのカードの効果を受けない・効果は無効にならない。
+  // 自分のモンスターの攻撃力５００アップ。モンスターを魔法・罠ゾーンに置ける（エンジンには魔法・罠ゾーンのモンスターが無いので、
+  // 永続魔法扱いで置き、攻撃されない。自分のメインフェイズにモンスターゾーンへ特殊召喚して戻せる）
   919000001: {
     a: [48179391, 'アニメ', 'The Seal of Orichalcos', '', 0x80002, 0, 0, 0, 0, 0, 0, 48179391,
-      '我が力を求めよ　さすれば\n大いなる力　汝に宿る\n宿るだろう\n我に贄を捧げよ　さすれば我は復活するだろう\n\n①：このカードは破壊されず、フィールドから離れない。このカードは他のカードの効果を受けない。\n②：自分フィールドのモンスターの攻撃力は５００アップする。', '', ['']],
+      '我が力を求めよ　さすれば\n大いなる力　汝に宿る\n宿るだろう\n我に贄を捧げよ　さすれば我は復活するだろう\n\n①：このカードは破壊されず、フィールドから離れない。このカードは他のカードの効果を受けず、このカードの効果は無効化されない。\n②：自分フィールドのモンスターの攻撃力は５００アップする。\n③：自分メインフェイズに、自分の手札・モンスターゾーンのモンスター１体を自分の魔法＆罠ゾーンに置く。そのモンスターは永続魔法カード扱いとなり、攻撃されない。\n④：自分メインフェイズに、③の効果で魔法＆罠ゾーンに置いたモンスター１体を自分のモンスターゾーンに特殊召喚する。', '', ['モンスターを魔法・罠ゾーンに置く', '魔法・罠ゾーンのモンスターを特殊召喚する']],
     lua: `local s,id=GetID()
 function s.initial_effect(c)
 	local e1=Effect.CreateEffect(c)
@@ -204,10 +205,37 @@ function s.initial_effect(c)
 	local e2=Effect.CreateEffect(c)
 	e2:SetType(EFFECT_TYPE_FIELD)
 	e2:SetCode(EFFECT_UPDATE_ATTACK)
+	e2:SetProperty(EFFECT_FLAG_CANNOT_DISABLE)
 	e2:SetRange(LOCATION_FZONE)
 	e2:SetTargetRange(LOCATION_MZONE,0)
 	e2:SetValue(500)
 	c:RegisterEffect(e2)
+	--このカードの効果は無効にならない
+	local e0=Effect.CreateEffect(c)
+	e0:SetType(EFFECT_TYPE_SINGLE)
+	e0:SetProperty(EFFECT_FLAG_SINGLE_RANGE+EFFECT_FLAG_CANNOT_DISABLE)
+	e0:SetRange(LOCATION_FZONE)
+	e0:SetCode(EFFECT_CANNOT_DISABLE)
+	c:RegisterEffect(e0)
+	--モンスターを魔法・罠ゾーンに置く
+	local e5=Effect.CreateEffect(c)
+	e5:SetDescription(aux.Stringid(id,0))
+	e5:SetType(EFFECT_TYPE_IGNITION)
+	e5:SetProperty(EFFECT_FLAG_CANNOT_DISABLE)
+	e5:SetRange(LOCATION_FZONE)
+	e5:SetTarget(s.mvtg)
+	e5:SetOperation(s.mvop)
+	c:RegisterEffect(e5)
+	--魔法・罠ゾーンのモンスターをモンスターゾーンに特殊召喚する
+	local e6=Effect.CreateEffect(c)
+	e6:SetDescription(aux.Stringid(id,1))
+	e6:SetCategory(CATEGORY_SPECIAL_SUMMON)
+	e6:SetType(EFFECT_TYPE_IGNITION)
+	e6:SetProperty(EFFECT_FLAG_CANNOT_DISABLE)
+	e6:SetRange(LOCATION_FZONE)
+	e6:SetTarget(s.sptg)
+	e6:SetOperation(s.spop)
+	c:RegisterEffect(e6)
 	local e3=Effect.CreateEffect(c)
 	e3:SetType(EFFECT_TYPE_SINGLE)
 	e3:SetProperty(EFFECT_FLAG_SINGLE_RANGE+EFFECT_FLAG_CANNOT_DISABLE)
@@ -224,6 +252,39 @@ function s.initial_effect(c)
 	e4:SetCode(EFFECT_IMMUNE_EFFECT)
 	e4:SetValue(function(e,te) return te:GetOwner()~=e:GetOwner() end)
 	c:RegisterEffect(e4)
+end
+function s.mvfilter(c)
+	return c:IsMonster() and (c:IsLocation(LOCATION_HAND) or c:IsFaceup())
+end
+function s.mvtg(e,tp,eg,ep,ev,re,r,rp,chk)
+	if chk==0 then return Duel.GetLocationCount(tp,LOCATION_SZONE)>0 and Duel.IsExistingMatchingCard(s.mvfilter,tp,LOCATION_HAND+LOCATION_MZONE,0,1,nil) end
+end
+function s.mvop(e,tp,eg,ep,ev,re,r,rp)
+	if Duel.GetLocationCount(tp,LOCATION_SZONE)<=0 then return end
+	Duel.Hint(HINT_SELECTMSG,tp,HINTMSG_TOFIELD)
+	local tc=Duel.SelectMatchingCard(tp,s.mvfilter,tp,LOCATION_HAND+LOCATION_MZONE,0,1,1,nil):GetFirst()
+	if not tc or not Duel.MoveToField(tc,tp,tp,LOCATION_SZONE,POS_FACEUP,true) then return end
+	local e1=Effect.CreateEffect(e:GetHandler())
+	e1:SetType(EFFECT_TYPE_SINGLE)
+	e1:SetCode(EFFECT_CHANGE_TYPE)
+	e1:SetProperty(EFFECT_FLAG_CANNOT_DISABLE)
+	e1:SetValue(TYPE_SPELL+TYPE_CONTINUOUS)
+	e1:SetReset(RESET_EVENT+RESETS_STANDARD-RESET_TURN_SET)
+	tc:RegisterEffect(e1)
+	tc:RegisterFlagEffect(id,RESET_EVENT+RESETS_STANDARD-RESET_TURN_SET,0,1)
+end
+function s.spfilter(c,e,tp)
+	return c:GetFlagEffect(id)>0 and c:IsCanBeSpecialSummoned(e,0,tp,true,false)
+end
+function s.sptg(e,tp,eg,ep,ev,re,r,rp,chk)
+	if chk==0 then return Duel.GetLocationCount(tp,LOCATION_MZONE)>0 and Duel.IsExistingMatchingCard(s.spfilter,tp,LOCATION_SZONE,0,1,nil,e,tp) end
+	Duel.SetOperationInfo(0,CATEGORY_SPECIAL_SUMMON,nil,1,tp,LOCATION_SZONE)
+end
+function s.spop(e,tp,eg,ep,ev,re,r,rp)
+	if Duel.GetLocationCount(tp,LOCATION_MZONE)<=0 then return end
+	Duel.Hint(HINT_SELECTMSG,tp,HINTMSG_SPSUMMON)
+	local g=Duel.SelectMatchingCard(tp,s.spfilter,tp,LOCATION_SZONE,0,1,1,nil,e,tp)
+	if #g>0 then Duel.SpecialSummon(g,0,tp,tp,true,false,POS_FACEUP) end
 end
 `,
   },
