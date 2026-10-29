@@ -382,6 +382,30 @@ function removeFromDeck(section, index) {
   Decks.save();
   renderDeck();
 }
+// 検索結果の「−」：デッキからこのカードを1枚減らす（メイン・EX を先に、無ければサイドから。同じ絵のものを先に、無ければ同じ名前のもの）
+function removeOneOf(card) {
+  const deck = Decks.current(), key = ruleKey(card);
+  for (const match of [id => id === card.id, id => { const c = DB.byId.get(id); return c && ruleKey(c) === key; }]) {
+    for (const sec of ['main', 'extra', 'side']) {
+      for (let i = deck[sec].length - 1; i >= 0; i--) if (match(deck[sec][i])) { removeFromDeck(sec, i); return; }
+    }
+  }
+}
+// 検索結果に出している「デッキに○枚」を今のデッキに合わせる
+function refreshResultCounts() {
+  const deck = Decks.current();
+  if (!deck) return;
+  for (const row of document.querySelectorAll('#results .result-row[data-cid]')) {
+    const c = DB.byId.get(+row.dataset.cid);
+    if (!c) continue;
+    const n = countCopies(deck, c);
+    const badge = row.querySelector('.r-count');
+    badge.textContent = n ? `${n}枚` : '';
+    badge.hidden = !n;
+    row.querySelector('.minus-btn').disabled = !n;
+    row.classList.toggle('in-deck', n > 0);
+  }
+}
 
 // ---------- 検索 ----------
 let searchTimer = null;
@@ -553,13 +577,16 @@ function resultRow(c, ctx, text) {
   const info = isMonster(c)
     ? `${levelText(c)} ${ATTR[c.attr] || ''} ${RACE[c.race] || ''}　${statText(c)}${has(c, T.LINK) ? "　" + linkArrowsText(c) : ""}`
     : typeLine(c);
-  const row = el('div', { class: 'result-row', onclick: () => showDeckCard(c) },
+  const n = countCopies(Decks.current(), c);
+  const row = el('div', { class: 'result-row' + (n ? ' in-deck' : ''), 'data-cid': c.id, onclick: () => showDeckCard(c) },
     rowMark(c),
     el('div', { class: 'r-main' },
       el('div', { class: 'r-name' }, limitBadge(c, ctx), mdRarityBadge(c, ctx), c.name + (c.pre ? (c.id >= 101000000 ? '（TCG・発売前）' : '（発売前）') : c.noJp ? '（TCG）' : '')),
       el('div', { class: 'r-info', text: info }),
       text ? snippetEl(c.jaText, text) : null),
+    el('span', { class: 'r-count', title: 'デッキに入っている枚数', text: n ? `${n}枚` : '', hidden: !n }),
     el('button', { class: 'btn small side-btn', title: 'サイドデッキに追加', text: 'S', onclick: e => { e.stopPropagation(); addToDeck(c, 'side'); } }),
+    el('button', { class: 'btn small minus-btn', title: 'デッキから1枚減らす', text: '−', disabled: !n, onclick: e => { e.stopPropagation(); removeOneOf(c); } }),
     el('button', { class: 'btn small primary', title: 'デッキに追加', text: '＋', onclick: e => { e.stopPropagation(); addToDeck(c); } }),
   );
   row.addEventListener('contextmenu', e => { e.preventDefault(); addToDeck(c); });
@@ -843,15 +870,24 @@ function renderDeck() {
   for (const sec of ['main', 'extra', 'side']) {
     const grid = $('#deck-' + sec);
     grid.innerHTML = '';
+    // 同じカードが何枚入っているか（この欄の中で）。最初の1枚に「×2」のように出す
+    const keyOf = id => { const c = DB.byId.get(id); return c ? ruleKey(c) : 'x' + id; };
+    const secCount = new Map();
+    for (const id of deck[sec]) secCount.set(keyOf(id), (secCount.get(keyOf(id)) || 0) + 1);
+    const shown = new Set();
     deck[sec].forEach((id, i) => {
       const c = DB.byId.get(id);
       if (!c) { grid.append(el('div', { class: 'deck-tile missing', text: '不明なカード ' + id })); return; }
+      const k = keyOf(id), cnt = secCount.get(k), first = !shown.has(k);
+      shown.add(k);
       const badge = limitBadge(c, ctx);
       const tile = el('div', { class: 'deck-tile' + (bad.has(c.name) ? ' invalid' : ''), onclick: () => showDeckCard(c) },
         cardFace(c, { small: true }),
         badge ? el('div', { class: 'tile-lim' }, badge) : null,
         (r => (r ? el('div', { class: 'tile-rar' }, r) : null))(mdRarityBadge(c, ctx)),
         deckErrata(deck, id) === 'pre' ? el('div', { class: 'tile-errata', title: 'エラッタ前の効果で処理', text: '旧' }) : null,
+        first && cnt > 1 ? el('div', { class: 'tile-count', title: `${cnt}枚入っています`, text: `×${cnt}` }) : null,
+        el('button', { class: 'tile-add', title: '1枚増やす', text: '＋', onclick: e => { e.stopPropagation(); addToDeck(c, sec); } }),
         el('button', { class: 'tile-remove', title: '1枚減らす', text: '−', onclick: e => { e.stopPropagation(); removeFromDeck(sec, i); } }));
       tile.addEventListener('contextmenu', e => { e.preventDefault(); removeFromDeck(sec, i); });
       grid.append(tile);
@@ -860,6 +896,7 @@ function renderDeck() {
     const warn = sec === 'main' && n < 40 ? '（40枚以上必要）' : '';
     $('#cnt-' + sec).textContent = `${n}枚${warn}`;
   }
+  refreshResultCounts();
   if (typeof refreshBoardDeckSelect === 'function') refreshBoardDeckSelect();
 }
 
