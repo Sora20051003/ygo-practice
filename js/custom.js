@@ -54,20 +54,30 @@ const CUSTOM_MTYPES = { normal: '通常モンスター', effect: '効果モン�
 const CUSTOM_STYPES = { normal: '通常魔法', quick: '速攻魔法', continuous: '永続魔法', field: 'フィールド魔法' };
 const CUSTOM_TTYPES = { normal: '通常罠', continuous: '永続罠', counter: 'カウンター罠' };
 
-// いつ発動するか。pre：条件の文（「〜場合」）／cost：コストの文／quick：相手ターンでも発動できる／ok：そのカードで選べるか
+const OPP_ACT = '相手がモンスターの効果・魔法・罠カードを発動した時';
+// いつ発動するか。pre：条件の文（「〜場合」）／cost：コストの文／quick：相手ターンでも発動できる／trig：誘発効果（強制にもできる）／ok：そのカードで選べるか
 const CUSTOM_WHEN = {
   ignition: { label: '起動効果（自分のメインフェイズに）', pre: '', cost: '', ok: d => d.kind === 'monster' || isZoneST(d) },
-  summon: { label: 'このカードが召喚・特殊召喚した場合', pre: 'このカードが召喚・特殊召喚した場合', cost: '', ok: d => d.kind === 'monster' },
-  tograve: { label: 'このカードが墓地へ送られた場合', pre: 'このカードが墓地へ送られた場合', cost: '', ok: d => d.kind === 'monster' },
+  summon: { label: 'このカードが召喚・特殊召喚した場合', pre: 'このカードが召喚・特殊召喚した場合', cost: '', trig: true, ok: d => d.kind === 'monster' },
+  nsummon: { label: 'このカードが召喚した場合（通常召喚だけ）', pre: 'このカードが召喚した場合', cost: '', trig: true, ok: d => d.kind === 'monster' && !isExtraMtype(d) },
+  spsummon: { label: 'このカードが特殊召喚した場合', pre: 'このカードが特殊召喚した場合', cost: '', trig: true, ok: d => d.kind === 'monster' },
+  tograve: { label: 'このカードが墓地へ送られた場合', pre: 'このカードが墓地へ送られた場合', cost: '', trig: true, ok: d => d.kind === 'monster' },
   quick: { label: 'フリーチェーン（相手ターンでも）', pre: '', cost: '', quick: true, ok: d => d.kind === 'monster' || (d.kind === 'trap' && d.ttype === 'continuous') },
-  chain: { label: '相手が効果を発動した時', pre: '相手が効果を発動した時', cost: '', ok: d => d.kind === 'monster' },
+  chain: { label: '相手が効果を発動した時', pre: OPP_ACT, cost: '', ok: d => d.kind === 'monster' },
   handquick: { label: '手札から捨てて（相手ターンでも）', pre: '', cost: 'このカードを手札から捨てて', quick: true, ok: d => d.kind === 'monster' && !isExtraMtype(d) },
-  handchain: { label: '手札から捨てて・相手が効果を発動した時', pre: '相手が効果を発動した時', cost: 'このカードを手札から捨てて', ok: d => d.kind === 'monster' && !isExtraMtype(d) },
+  handchain: { label: '手札から捨てて・相手が効果を発動した時', pre: OPP_ACT, cost: 'このカードを手札から捨てて', ok: d => d.kind === 'monster' && !isExtraMtype(d) },
   handss: { label: '手札にある場合（起動効果）', pre: 'このカードが手札に存在する場合', cost: '', ok: d => d.kind === 'monster' && !isExtraMtype(d) },
+  handattack: { label: '手札にある場合・相手モンスターの攻撃宣言時', pre: '相手モンスターの攻撃宣言時', cost: '', ok: d => d.kind === 'monster' && !isExtraMtype(d) },
   gyban: { label: '墓地から除外して（起動効果）', pre: '', cost: '墓地のこのカードを除外して', ok: d => d.kind === 'monster' },
   activate: { label: 'カードの発動', pre: '', cost: '', card: true, ok: d => (d.kind === 'spell' || d.kind === 'trap') && !isZoneST(d) },
-  achain: { label: '相手が効果を発動した時（カードの発動）', pre: '相手が効果を発動した時', cost: '', card: true, ok: d => (d.kind === 'trap' || (d.kind === 'spell' && d.stype === 'quick')) && !isZoneST(d) },
+  achain: { label: '相手が効果を発動した時（カードの発動）', pre: OPP_ACT, cost: '', card: true, ok: d => (d.kind === 'trap' || (d.kind === 'spell' && d.stype === 'quick')) && !isZoneST(d) },
+  attack: { label: '相手モンスターの攻撃宣言時（カードの発動）', pre: '相手モンスターの攻撃宣言時', cost: '', card: true, ok: d => (d.kind === 'trap' || (d.kind === 'spell' && d.stype === 'quick')) && !isZoneST(d) },
 };
+// 発動のコスト（自分で決める分）。手札から捨てる・墓地から除外するタイミングには付けない
+const CUSTOM_COSTS = { '': 'なし', discard: '手札を１枚捨てる', lp: 'LPを払う' };
+const costOk = when => !CUSTOM_WHEN[when] || !CUSTOM_WHEN[when].cost;
+// 相手フィールドのどのカードか（破壊・除外・手札に戻す）
+const CUSTOM_AREAS = { card: 'カード', monster: 'モンスター', st: '魔法・罠カード' };
 // 何をするか。n：数を選ぶ（その範囲）／filt：カードの条件を選べる／chain：相手の発動に対してだけ
 const CUSTOM_WHAT = {
   draw: { label: 'ドローする', n: [1, 3] },
@@ -75,10 +85,12 @@ const CUSTOM_WHAT = {
   send: { label: 'デッキからカードを墓地へ送る', filt: true },
   deckss: { label: 'デッキからモンスターを特殊召喚する', filt: true, mon: true },
   gyss: { label: '自分の墓地のモンスターを特殊召喚する', filt: true, mon: true },
+  handsp: { label: '手札からモンスターを特殊召喚する', filt: true, mon: true },
   self: { label: 'このカードを特殊召喚する' },
-  destroy: { label: '相手フィールドのカードを1枚破壊する' },
-  banish: { label: '相手フィールドのカードを1枚除外する' },
-  bounce: { label: '相手フィールドのカードを1枚手札に戻す' },
+  destroy: { label: '相手フィールドのカードを1枚破壊する', area: true },
+  destroyall: { label: '相手フィールドのカードを全て破壊する', area: true },
+  banish: { label: '相手フィールドのカードを1枚除外する', area: true },
+  bounce: { label: '相手フィールドのカードを1枚手札に戻す', area: true },
   damage: { label: '相手にダメージを与える', n: [100, 4000, 100] },
   recover: { label: '自分のLPを回復する', n: [100, 4000, 100] },
   atkup: { label: '自分のモンスター1体の攻撃力を上げる', n: [100, 3000, 100] },
@@ -92,7 +104,8 @@ const whatOk = (d, when, what) => {
   const w = CUSTOM_WHAT[what];
   if (!w) return false;
   if (w.chain && !isChainWhen(when)) return false;
-  if (what === 'self') return when === 'handss' || when === 'tograve';   // 手札・墓地にあるこのカードを出す
+  if (what === 'self') return when === 'handss' || when === 'tograve' || when === 'handattack';   // 手札・墓地にあるこのカードを出す
+  if (when === 'handattack') return false;   // 手札での攻撃宣言時は「このカードを特殊召喚する」だけ
   return true;
 };
 // 1枚のカードに入れられる効果の数（通常・速攻魔法、通常・カウンター罠は発動の効果1つ）
@@ -116,27 +129,39 @@ const zen = s => String(s).replace(/[0-9]/g, ch => String.fromCharCode(ch.charCo
 function filtText(f, d, mon, cnt) {
   f = f || {};
   const parts = [];
+  // 本物のカードの順：レベル・攻守 →「の」→ 属性 → 種族 →「テーマ」→ 種類（例：レベル４以下の闇属性戦士族「〇〇」モンスター）
+  const stats = [];
+  if (f.lv) stats.push(`レベル${zen(f.lv)}${{ ge: '以上', eq: '' }[f.lvMode] ?? '以下'}`);
+  if (f.atkGe) stats.push(`攻撃力${zen(f.atkGe)}以上`);
+  if (f.atkLe != null && f.atkLe !== '') stats.push(`攻撃力${zen(f.atkLe)}以下`);
+  if (f.defGe) stats.push(`守備力${zen(f.defGe)}以上`);
+  if (f.defLe != null && f.defLe !== '') stats.push(`守備力${zen(f.defLe)}以下`);
   const th = filtThemes(f, d);
-  if (th.length) parts.push(th.map(themeLabel).join('または'));   // 「A」または「B」モンスター
-  if (f.lv) parts.push(`レベル${zen(f.lv)}以下の`);
-  if (f.attr) parts.push(`${ATTR[f.attr]}属性`);
-  if (f.race) parts.push(RACE[f.race]);
+  const tail = [f.attr ? `${ATTR[f.attr]}属性` : '', f.race ? RACE[f.race] : '', th.map(themeLabel).join('または')].join('');
+  // 「レベル４モンスター」のように、ちょうどのレベルだけで後ろに何も無いときは「の」を付けない
+  if (stats.length) parts.push(stats.join('で') + (tail || !(f.lvMode === 'eq' && stats.length === 1) ? 'の' : ''));
+  parts.push(tail);
   const kind = mon || f.kind === 'monster' ? 'モンスター' : f.kind === 'spell' ? '魔法カード' : f.kind === 'trap' ? '罠カード' : 'カード';
   return parts.join('') + kind + zen(cnt || 1) + (kind === 'モンスター' ? '体' : '枚');
 }
 // 効果1つの文。tgt：対象にするもの（あれば「〜を対象として発動できる」）／rest：処理
 function customWhatText(x, d) {
   const n = zen(x.n || 1);
+  const area = CUSTOM_AREAS[x.area] ? x.area : 'card';
+  const one = area === 'monster' ? '相手フィールドのモンスター１体' : area === 'st' ? '相手フィールドの魔法・罠カード１枚' : '相手フィールドのカード１枚';
+  const that = area === 'monster' ? 'そのモンスター' : 'そのカード';
   switch (x.what) {
-    case 'draw': return { rest: `自分はデッキから${n}枚ドローする` };
+    case 'draw': return { rest: `自分は${n}枚ドローする` };
     case 'search': return { rest: `デッキから${filtText(x.filt, d, false, effCount(x))}を手札に加える` };
     case 'send': return { rest: `デッキから${filtText(x.filt, d, false, effCount(x))}を墓地へ送る` };
     case 'deckss': return { rest: `デッキから${filtText(x.filt, d, true, effCount(x))}を特殊召喚する` };
+    case 'handsp': return { rest: `手札から${filtText(x.filt, d, true, effCount(x))}を特殊召喚する` };
     case 'gyss': return { rest: `自分の墓地から${filtText(x.filt, d, true, effCount(x))}を選んで特殊召喚する` };
-    case 'self': return { rest: 'このカードを特殊召喚する' };
-    case 'destroy': return { tgt: '相手フィールドのカード１枚', rest: 'そのカードを破壊する' };
-    case 'banish': return { tgt: '相手フィールドのカード１枚', rest: 'そのカードを除外する' };
-    case 'bounce': return { tgt: '相手フィールドのカード１枚', rest: 'そのカードを持ち主の手札に戻す' };
+    case 'self': return { rest: x.when === 'handattack' ? 'このカードを手札から特殊召喚する' : 'このカードを特殊召喚する' };
+    case 'destroy': return { tgt: one, rest: `${that}を破壊する` };
+    case 'destroyall': return { rest: `相手フィールドの${{ monster: 'モンスター', st: '魔法・罠カード', card: 'カード' }[area]}を全て破壊する` };
+    case 'banish': return { tgt: one, rest: `${that}を除外する` };
+    case 'bounce': return { tgt: one, rest: `${that}を持ち主の手札に戻す` };
     case 'damage': return { rest: `相手に${n}ダメージを与える` };
     case 'recover': return { rest: `自分は${n}LP回復する` };
     case 'atkup': return { tgt: '自分フィールドの表側表示モンスター１体', rest: `そのモンスターの攻撃力はターン終了時まで${n}アップする` };
@@ -155,7 +180,7 @@ function customText(d) {
   }
   if (d.kind === 'monster' && d.mtype === 'normal') return [...lines, d.flavor || ''].filter(Boolean).join('\n');
   if (d.useSrc && (d.src || '').trim()) return [...lines, d.src.trim()].join('\n');   // 自分の書いた文をそのまま出す
-  const single = effs.length === 1 && CUSTOM_WHEN[effs[0].when].card;   // 魔法・罠の発動の効果だけ：①を付けない
+  const single = effs.length === 1 && CUSTOM_WHEN[effs[0].when].card;   // 魔法・罠の発動の効果だけ（今のカードと同じく①は付ける）
   const opt = effs.map((x, i) => (optOf(x) === 'name' ? CIRCLED[i] : null)).filter(Boolean);
   if (single && opt.length) lines.push('このカード名のカードは１ターンに１枚しか発動できない。');
   else if (opt.length) lines.push(`このカード名の${opt.join('')}の効果は${opt.length > 1 ? 'それぞれ' : ''}１ターンに１度しか使用できない。`);
@@ -163,11 +188,15 @@ function customText(d) {
     const w = CUSTOM_WHEN[x.when];
     const { tgt, rest } = customWhatText(x, d);
     // ターン1（このカード1枚ごと）は文の頭に「１ターンに１度、」
-    const head = (single ? '' : `${CIRCLED[i]}：`) + (!single && optOf(x) === 'soft' ? '１ターンに１度、' : '');
+    const head = `${CIRCLED[i]}：` + (!single && optOf(x) === 'soft' ? '１ターンに１度、' : '');
+    // コスト：あとに「〜を対象として」が続くときは「捨て、」「払い、」、続かなければ「捨てて」「払って」
+    const ct = costOk(x.when) && x.cost === 'discard' ? (tgt ? '手札を１枚捨て、' : '手札を１枚捨てて')
+      : costOk(x.when) && x.cost === 'lp' ? `ＬＰを${zen(Math.max(100, +x.lp || 1000))}${tgt ? '払い、' : '払って'}` : '';
+    const must = w.trig && x.must;   // 強制効果は「発動する」
     let s;
-    if (w.card && !w.pre) s = tgt ? `${tgt}を対象として発動できる。${rest}。` : `${rest}。`;   // 魔法・罠の発動
-    else s = `${w.pre ? w.pre + (tgt || w.cost ? '、' : 'に') : ''}${w.cost}${tgt ? tgt + 'を対象として' : ''}発動できる。${rest}。${w.quick ? 'この効果は相手ターンでも発動できる。' : ''}`;
-    lines.push(head + s);
+    if (w.card && !w.pre && !tgt && !ct) s = `${rest}。`;   // 魔法・罠の発動（条件・対象・コストなし）
+    else s = `${w.pre ? w.pre + (tgt || w.cost || ct ? '、' : 'に') : ''}${w.cost}${w.cost && (tgt || ct) ? '、' : ''}${ct}${tgt ? tgt + 'を対象として' : ''}${must ? '発動する' : '発動できる'}。${rest}。${w.quick ? 'この効果は相手ターンでも発動できる。' : ''}`;
+    lines.push(head + s.replace('捨てて、', '捨て、'));
   });
   if (d.memo) lines.push(d.memo);
   return lines.join('\n');
@@ -235,7 +264,11 @@ const LUA_FILTER = (x, d, mon, id) => {
   else if (f.kind === 'trap') cond.push('c:IsType(TYPE_TRAP)');
   if (f.race) cond.push(`c:IsRace(${+f.race})`);
   if (f.attr) cond.push(`c:IsAttribute(${+f.attr})`);
-  if (f.lv) cond.push(`c:IsLevelBelow(${+f.lv})`);
+  if (f.lv) cond.push(f.lvMode === 'ge' ? `c:IsLevelAbove(${+f.lv})` : f.lvMode === 'eq' ? `c:IsLevel(${+f.lv})` : `c:IsLevelBelow(${+f.lv})`);
+  if (f.atkGe) cond.push(`c:IsAttackAbove(${+f.atkGe})`);
+  if (f.atkLe != null && f.atkLe !== '') cond.push(`c:IsAttackBelow(${+f.atkLe})`);
+  if (f.defGe) cond.push(`c:IsDefenseAbove(${+f.defGe})`);
+  if (f.defLe != null && f.defLe !== '') cond.push(`c:IsDefenseBelow(${+f.defLe})`);
   const th = [...new Set(filtThemes(f, d).map(t => themeCodes(t).edo).filter(Boolean))];
   if (th.length) cond.push('(' + th.map(s => `c:IsSetCard(${s})`).join(' or ') + ')');
   return cond.join(' and ');
@@ -261,14 +294,18 @@ ${opHead}
 	if #g>0 then ${act} end
 end`,
   });
+  // 相手フィールドのどのカードか（モンスター／魔法・罠／カード）
+  const area = CUSTOM_AREAS[x.area] ? x.area : 'card';
+  const AREA_LOC = { monster: 'LOCATION_MZONE', st: 'LOCATION_SZONE', card: 'LOCATION_ONFIELD' }[area];
+  const AREA_OK = { monster: '', st: ' and c:IsSpellTrap()', card: '' }[area];
   const targetOpp = (cat, able, hint, act) => ({
     cat, tgt: true,
-    code: `function ${F}(c) return ${able} end
+    code: `function ${F}(c) return ${able}${AREA_OK} end
 ${head}
-	if chkc then return chkc:IsOnField() and chkc:IsControler(1-tp) and ${F}(chkc) end
-	if chk==0 then return Duel.IsExistingTarget(${F},tp,0,LOCATION_ONFIELD,1,nil) end
+	if chkc then return chkc:IsLocation(${AREA_LOC}) and chkc:IsControler(1-tp) and ${F}(chkc) end
+	if chk==0 then return Duel.IsExistingTarget(${F},tp,0,${AREA_LOC},1,nil) end
 	Duel.Hint(HINT_SELECTMSG,tp,${hint})
-	local g=Duel.SelectTarget(tp,${F},tp,0,LOCATION_ONFIELD,1,1,nil)
+	local g=Duel.SelectTarget(tp,${F},tp,0,${AREA_LOC},1,1,nil)
 	Duel.SetOperationInfo(0,${cat},g,1,0,0)
 end
 ${opHead}
@@ -296,6 +333,20 @@ end`,
     case 'search': return fromDeck('LOCATION_DECK', 'CATEGORY_TOHAND+CATEGORY_SEARCH', 'c:IsAbleToHand()', 'HINTMSG_ATOHAND', 'Duel.SendtoHand(g,nil,REASON_EFFECT) Duel.ConfirmCards(1-tp,g)');
     case 'send': return fromDeck('LOCATION_DECK', 'CATEGORY_TOGRAVE', 'c:IsAbleToGrave()', 'HINTMSG_TOGRAVE', 'Duel.SendtoGrave(g,REASON_EFFECT)');
     case 'deckss': return fromDeck('LOCATION_DECK', 'CATEGORY_SPECIAL_SUMMON', 'c:IsCanBeSpecialSummoned(e,0,tp,false,false)', 'HINTMSG_SPSUMMON', 'Duel.SpecialSummon(g,0,tp,tp,false,false,POS_FACEUP)', true);
+    case 'handsp': return fromDeck('LOCATION_HAND', 'CATEGORY_SPECIAL_SUMMON', 'c:IsCanBeSpecialSummoned(e,0,tp,false,false)', 'HINTMSG_SPSUMMON', 'Duel.SpecialSummon(g,0,tp,tp,false,false,POS_FACEUP)', true);
+    case 'destroyall': return {
+      cat: 'CATEGORY_DESTROY', tgt: false,
+      code: `function ${F}(c) return true${AREA_OK} end
+${head}
+	if chk==0 then return Duel.IsExistingMatchingCard(${F},tp,0,${AREA_LOC},1,nil) end
+	local g=Duel.GetMatchingGroup(${F},tp,0,${AREA_LOC},nil)
+	Duel.SetOperationInfo(0,CATEGORY_DESTROY,g,#g,0,0)
+end
+${opHead}
+	local g=Duel.GetMatchingGroup(${F},tp,0,${AREA_LOC},nil)
+	if #g>0 then Duel.Destroy(g,REASON_EFFECT) end
+end`,
+    };
     case 'gyss': return fromDeck('LOCATION_GRAVE', 'CATEGORY_SPECIAL_SUMMON', 'c:IsCanBeSpecialSummoned(e,0,tp,false,false)', 'HINTMSG_SPSUMMON', 'Duel.SpecialSummon(g,0,tp,tp,false,false,POS_FACEUP)', true);
     case 'destroy': return targetOpp('CATEGORY_DESTROY', 'true', 'HINTMSG_DESTROY', 'Duel.Destroy(tc,REASON_EFFECT)');
     case 'banish': return targetOpp('CATEGORY_REMOVE', 'c:IsAbleToRemove()', 'HINTMSG_REMOVE', 'Duel.Remove(tc,POS_FACEUP,REASON_EFFECT)');
@@ -358,10 +409,14 @@ function luaRegister(x, d, i, act) {
     if (code) lines.push(`	e${i}:SetCode(${code})`);
     if (range) lines.push(`	e${i}:SetRange(${range})`);
   };
+  const TRIG = `EFFECT_TYPE_SINGLE+EFFECT_TYPE_TRIGGER_${x.must ? 'F' : 'O'}`;   // 強制効果は TRIGGER_F
   switch (w) {
     case 'ignition': set('EFFECT_TYPE_IGNITION', null, zone); break;
-    case 'summon': set('EFFECT_TYPE_SINGLE+EFFECT_TYPE_TRIGGER_O', 'EVENT_SUMMON_SUCCESS'); props.push('EFFECT_FLAG_DELAY'); break;
-    case 'tograve': set('EFFECT_TYPE_SINGLE+EFFECT_TYPE_TRIGGER_O', 'EVENT_TO_GRAVE'); props.push('EFFECT_FLAG_DELAY'); break;
+    case 'summon': case 'nsummon': set(TRIG, 'EVENT_SUMMON_SUCCESS'); props.push('EFFECT_FLAG_DELAY'); break;
+    case 'spsummon': set(TRIG, 'EVENT_SPSUMMON_SUCCESS'); props.push('EFFECT_FLAG_DELAY'); break;
+    case 'tograve': set(TRIG, 'EVENT_TO_GRAVE'); props.push('EFFECT_FLAG_DELAY'); break;
+    case 'handattack': set('EFFECT_TYPE_QUICK_O', 'EVENT_ATTACK_ANNOUNCE', 'LOCATION_HAND'); break;
+    case 'attack': set('EFFECT_TYPE_ACTIVATE', 'EVENT_ATTACK_ANNOUNCE'); break;
     case 'quick': set('EFFECT_TYPE_QUICK_O', 'EVENT_FREE_CHAIN', zone); break;
     case 'chain': set('EFFECT_TYPE_QUICK_O', 'EVENT_CHAINING', zone); break;
     case 'handquick': set('EFFECT_TYPE_QUICK_O', 'EVENT_FREE_CHAIN', 'LOCATION_HAND'); break;
@@ -377,6 +432,10 @@ function luaRegister(x, d, i, act) {
   if (isChainWhen(w)) lines.push(`	e${i}:SetCondition(s.chaincon${x.what === 'negate' ? 'neg' : ''})`);
   if (w === 'handquick' || w === 'handchain') lines.push(`	e${i}:SetCost(s.discost)`);
   if (w === 'gyban') lines.push(`	e${i}:SetCost(s.bancost)`);
+  if (w === 'attack' || w === 'handattack') lines.push(`	e${i}:SetCondition(s.atkcon)`);
+  // 自分で決めたコスト（手札を1枚捨てる・LPを払う）
+  if (costOk(w) && x.cost === 'discard') lines.push(`	e${i}:SetCost(s.handcost)`);
+  if (costOk(w) && x.cost === 'lp') lines.push(`	e${i}:SetCost(s.lpcost(${Math.max(100, +x.lp || 1000)}))`);
   lines.push(`	e${i}:SetTarget(s.tg${i})`, `	e${i}:SetOperation(s.op${i})`, `	c:RegisterEffect(e${i})`);
   // 召喚した場合：特殊召喚した場合も同じ効果
   if (w === 'summon') lines.push(`	local e${i}b=e${i}:Clone()`, `	e${i}b:SetCode(EVENT_SPSUMMON_SUCCESS)`, `	c:RegisterEffect(e${i}b)`);
@@ -417,6 +476,17 @@ function s.bancost(e,tp,eg,ep,ev,re,r,rp,chk)
 	if chk==0 then return e:GetHandler():IsAbleToRemoveAsCost() end
 	Duel.Remove(e:GetHandler(),POS_FACEUP,REASON_COST)
 end
+function s.handcost(e,tp,eg,ep,ev,re,r,rp,chk)
+	if chk==0 then return Duel.IsExistingMatchingCard(Card.IsDiscardable,tp,LOCATION_HAND,0,1,e:GetHandler()) end
+	Duel.DiscardHand(tp,Card.IsDiscardable,1,1,REASON_COST+REASON_DISCARD,e:GetHandler())
+end
+function s.lpcost(n)
+	return function(e,tp,eg,ep,ev,re,r,rp,chk)
+		if chk==0 then return Duel.CheckLPCost(tp,n) end
+		Duel.PayLPCost(tp,n)
+	end
+end
+function s.atkcon(e,tp,eg,ep,ev,re,r,rp) return Duel.GetAttacker():IsControler(1-tp) end
 ${funcs.join('\n')}
 `;
 }
@@ -464,60 +534,117 @@ function parseEffectText(text, d) {
   const effects = [];
   segs.forEach((seg, i) => {
     const body = seg.replace(/^[①②③④⑤][:：]?/, '');
-    const cut = body.search(/発動(でき|する)/);
+    const no = CIRCLED[i] || `${i + 1}つ目`;
+    const cutM = body.match(/発動(できる|する)。?/);
+    const cut = cutM ? cutM.index : -1;
     const pre = cut >= 0 ? body.slice(0, cut) : '';
-    const act = cut >= 0 ? body.slice(cut) : body;
+    const act = cut >= 0 ? body.slice(cut + cutM[0].length) : body;
+    // 処理の中心は、「発動できる。」のあとの最初の文（「この効果で特殊召喚したモンスターの効果は無効化される」のような後ろの文で決めない）
+    const sentences = act.split(/(?<=。)/).filter(Boolean);
+    const main = (sentences[0] || '').replace(/。$/, '');
+    const rest = sentences.slice(1).join('').replace(/この効果は相手ターンでも発動できる。?/, '');
+    // 対象にするもの（「〜を対象として」の前）
+    const tgtM = pre.match(/([^、。]*)を対象として/);
+    const tgt = tgtM ? tgtM[1] : '';
+    const scope = tgt + main;
+    // 発動しない効果（「〜する限り」「このカードの攻撃力は〜」など、ずっと続く効果）は作れない
+    if (!cutM && /限り|この(カード|モンスター)の(攻撃力|守備力)は|では破壊されない|通常召喚できない|特殊召喚できる。?$/.test(body)) { notes.push(`読み取れなかった文（発動しない効果は作れません）：${seg}`); return; }
     // 「このカード名の①の効果は1ターンに1度」→ 名称ターン1、文の中の「1ターンに1度、」→ ターン1
     const x = { when: '', what: '', n: 1, cnt: 1, optType: allOpt || optNums.has(i) ? 'name' : /1ターンに1度/.test(body) ? 'soft' : 'none', filt: {} };
+    const discardSelf = /このカードを手札から(捨て|墓地へ送[っり])/.test(pre);
     // いつ
-    const oppAct = /相手が.*発動した(時|とき)|相手の.*発動した(時|とき)/.test(pre || body);
-    if (/手札から(捨て|墓地へ送っ)/.test(pre)) x.when = oppAct ? 'handchain' : 'handquick';
+    const oppAct = /相手が.*発動した(時|とき)|相手の.*発動した(時|とき)|効果が発動した(時|とき)/.test(pre || body);
+    const attackDecl = /攻撃宣言時/.test(pre || body);
+    if (discardSelf) x.when = oppAct ? 'handchain' : 'handquick';
     else if (/墓地の(この)?カードを除外|墓地から(この)?カードを除外|墓地から除外して/.test(pre)) x.when = 'gyban';
+    else if (attackDecl) x.when = d.kind === 'monster' ? 'handattack' : 'attack';
     else if (/手札に(存在|ある)/.test(pre)) x.when = 'handss';
     else if (/墓地へ送られた/.test(pre)) x.when = 'tograve';
-    else if (/召喚(に成功)?した(場合|時|とき)/.test(pre)) x.when = 'summon';
+    else if (/召喚・(反転召喚・)?特殊召喚(に成功)?した/.test(pre)) x.when = 'summon';
+    else if (/特殊召喚(に成功)?した(場合|時|とき)/.test(pre)) x.when = 'spsummon';
+    else if (/召喚(に成功)?した(場合|時|とき)/.test(pre)) x.when = 'nsummon';
     else if (oppAct) x.when = d.kind === 'monster' ? 'chain' : 'achain';
-    else if (/相手ターンでも|フリーチェーン/.test(body)) x.when = d.kind === 'monster' || isZoneST(d) ? 'quick' : 'activate';
+    else if (/相手ターンでも|フリーチェーン|自分・相手ターン/.test(body)) x.when = d.kind === 'monster' || isZoneST(d) ? 'quick' : 'activate';
     else x.when = d.kind === 'monster' || isZoneST(d) ? 'ignition' : 'activate';
-    // 何をする（コストの部分は除いて、処理の部分から探す）
-    const a = act;
-    if (/無効/.test(a)) x.what = 'negate';
-    else if (/ドロー/.test(a)) { x.what = 'draw'; x.n = Math.min(3, num(a, /(\d+)枚ドロー/, 1)); }
-    else if (/このカードを(守備表示で)?特殊召喚/.test(a)) x.what = 'self';
-    else if (/墓地.*特殊召喚/.test(a)) x.what = 'gyss';
-    else if (/デッキ.*特殊召喚/.test(a)) x.what = 'deckss';
-    else if (/デッキ.*墓地へ送/.test(a)) x.what = 'send';
-    else if (/手札に加え/.test(a)) x.what = 'search';
-    else if (/手札に戻/.test(a)) x.what = 'bounce';
-    else if (/除外/.test(a)) x.what = 'banish';
-    else if (/破壊/.test(a)) x.what = 'destroy';
-    else if (/ダメージ/.test(a)) { x.what = 'damage'; x.n = num(a, /(\d+)(ポイントの)?ダメージ/, 500); }
-    else if (/回復/.test(a)) { x.what = 'recover'; x.n = num(a, /(\d+)(LP|ライフ)?(ポイント)?回復/, 500); }
-    else if (/攻撃力/.test(a) && /(アップ|上げ|上がる)/.test(a)) { x.what = 'atkup'; x.n = num(a, /(\d+)(アップ|上げ|上がる)/, 500); }
+    if (cutM && cutM[1] === 'する' && CUSTOM_WHEN[x.when] && CUSTOM_WHEN[x.when].trig) x.must = true;   // 「発動する」＝強制効果
+    // コスト（「このカードを手札から捨てて」以外の、手札を捨てる・LPを払う）
+    if (!discardSelf && /手札(から[^、]*?|を\d+枚)(捨て|墓地へ送[っり])/.test(pre)) {
+      x.cost = 'discard';
+      if (/手札から[^、]*?(モンスター|魔法|罠)/.test(pre)) notes.push(`${no}：捨てるカードの種類は選べないので「手札を１枚捨てて」にしました`);
+    }
+    const lp = pre.match(/(?:LP|ＬＰ|ライフポイント)を(\d+)払/) || pre.match(/(\d+)(?:LP|ＬＰ|ライフポイント)を払/);
+    if (lp) { x.cost = 'lp'; x.lp = Math.max(100, Math.round(+lp[1] / 100) * 100); }
+    else if (/(LP|ＬＰ)を半分払/.test(pre)) notes.push(`${no}：「LPを半分払う」は作れないので、コストは入れていません`);
+    // 何をする：処理の文の中で、いちばん前に出てくる言葉で決める
+    // 相手フィールドのカードに対してだけ「破壊・除外・手札に戻す」と読む（墓地・デッキのカードの除外などは作れない）
+    const opp = (/相手/.test(scope) || /フィールド/.test(scope)) && !/自分フィールド/.test(scope) && !/墓地|デッキ/.test(scope.replace(/墓地へ送/g, ""));
+    const at = re => { const m = main.search(re); return m < 0 ? Infinity : m; };
+    const cands = [
+      ['negate', at(/その(発動|効果)を無効/)],
+      ['draw', at(/\d+枚ドロー/)],
+      ['self', at(/このカードを(手札から)?(守備表示で|攻撃表示で)?特殊召喚/)],
+      ['sp', at(/特殊召喚する/)],
+      ['send', /デッキ/.test(main) ? at(/墓地へ送/) : Infinity],
+      ['search', at(/手札に加え/)],
+      ['bounce', opp ? at(/手札に戻/) : Infinity],
+      ['destroyall', at(/全て破壊/)],
+      ['banish', opp ? at(/除外/) : Infinity],
+      ['destroy', opp ? at(/破壊/) : Infinity],
+      ['damage', at(/ダメージを与え/)],
+      ['recover', at(/回復/)],
+      ['atkup', /攻撃力/.test(main) ? at(/(アップ|上げ|上がる)/) : Infinity],
+    ].filter(c => c[1] < Infinity).sort((p, q) => p[1] - q[1]);
+    let what = cands.length ? cands[0][0] : '';
+    if (what === 'sp') {
+      // どこから特殊召喚するか
+      const src = tgt + main.slice(0, main.search(/特殊召喚する/));
+      if (/墓地/.test(src)) { what = 'gyss'; if (/相手の墓地|自分か相手|自分または相手/.test(src)) notes.push(`${no}：相手の墓地からは出せないので、自分の墓地から出す効果にしました`); }
+      else if (/デッキ/.test(src)) { what = 'deckss'; if (/手札・デッキ|手札またはデッキ/.test(src)) notes.push(`${no}：「手札・デッキから」は「デッキから」にしました`); }
+      else if (/手札/.test(src)) what = 'handsp';
+      else what = '';
+    }
+    if (what === 'negate' && !/その発動を無効/.test(main)) notes.push(`${no}：効果の無効は「その発動を無効にし破壊する」にしました`);
+    x.what = what;
     if (!x.what) { notes.push(`読み取れなかった文：${seg}`); return; }
+    if (x.what === 'draw') x.n = Math.min(3, num(main, /(\d+)枚ドロー/, 1));
+    if (x.what === 'damage') x.n = num(main, /(\d+)(ポイントの)?ダメージ/, 500);
+    if (x.what === 'recover') x.n = num(main, /(\d+)(LP|ＬＰ|ライフ)?(ポイント)?回復/, 500);
+    if (x.what === 'atkup') x.n = num(main, /(\d+)(アップ|上げ|上がる)/, 500);
     if (x.n > 4000) x.n = 4000;
     if (['damage', 'recover', 'atkup'].includes(x.what)) x.n = Math.max(100, Math.round(x.n / 100) * 100);
+    if (x.what === 'destroyall' && /(攻撃|守備)表示/.test(main)) notes.push(`${no}：「攻撃表示の」などの条件は付けられないので、表示形式に関係なく破壊します`);
+    // 相手フィールドのどのカードか
+    if (CUSTOM_WHAT[x.what].area) x.area = /魔法・罠/.test(scope) ? 'st' : /モンスター/.test(scope) ? 'monster' : 'card';
     // 条件と数（手札に加える・墓地へ送る・特殊召喚）
     if (CUSTOM_WHAT[x.what].filt) {
       const f = x.filt;
-      const tm = a.match(/「([^」]+)」/);
+      const fs = scope;
       // 「A」または「B」のように複数書かれていれば、すべて
-      const tms = [...a.matchAll(/「([^」]+)」/g)].map(m => themeByLooseName(m[1]));
+      const tms = [...fs.matchAll(/「([^」]+)」/g)].map(m => themeByLooseName(m[1]));
       if (tms.length) { f.themes = [...new Set(tms)]; themes.push(...f.themes); }
-      const lv = a.match(/レベル(\d+)以下/); if (lv) f.lv = Math.min(12, +lv[1]);
-      for (const [k, v] of Object.entries(ATTR)) if (a.includes(v + '属性')) f.attr = +k;
-      for (const [k, v] of Object.entries(RACE)) if (a.includes(v)) f.race = +k;
-      if (!CUSTOM_WHAT[x.what].mon) f.kind = /モンスター/.test(a) ? 'monster' : /魔法/.test(a) && !/罠/.test(a) ? 'spell' : /罠/.test(a) && !/魔法/.test(a) ? 'trap' : '';
-      x.cnt = Math.max(1, Math.min(5, num(a, /(\d+)(枚|体)/, 1)));
+      const lv = fs.match(/レベル(\d+)(以下|以上)?/);
+      if (lv) { f.lv = Math.min(12, +lv[1]); f.lvMode = lv[2] === '以上' ? 'ge' : lv[2] === '以下' ? 'le' : 'eq'; }
+      const atk = [...fs.matchAll(/攻撃力(\d+)(以下|以上)/g)], df = [...fs.matchAll(/守備力(\d+)(以下|以上)/g)];
+      for (const m of atk) f[m[2] === '以上' ? 'atkGe' : 'atkLe'] = +m[1];
+      for (const m of df) f[m[2] === '以上' ? 'defGe' : 'defLe'] = +m[1];
+      for (const [k, v] of Object.entries(ATTR)) if (fs.includes(v + '属性')) f.attr = +k;
+      for (const [k, v] of Object.entries(RACE)) if (fs.includes(v)) f.race = +k;
+      if (!CUSTOM_WHAT[x.what].mon) f.kind = /モンスター/.test(fs) ? 'monster' : /魔法/.test(fs) && !/罠/.test(fs) ? 'spell' : /罠/.test(fs) && !/魔法/.test(fs) ? 'trap' : '';
+      x.cnt = Math.max(1, Math.min(5, num(fs, /(\d+)(枚|体)/, 1)));
     }
+    // 処理に入れなかった後ろの文・「その後」の処理を知らせる
+    if (/その後|さらに/.test(main)) notes.push(`${no}：「その後」から先の処理は入れていません`);
+    if (rest) notes.push(`${no}：処理に入れていない文：${rest}`);
     // 選んだ効果と合わないタイミングを直す
     if (!CUSTOM_WHEN[x.when].ok(d)) x.when = Object.keys(CUSTOM_WHEN).find(w => CUSTOM_WHEN[w].ok(d)) || 'ignition';
     if (x.what === 'negate' && !isChainWhen(x.when)) {
       x.when = d.kind === 'monster' ? (x.when.startsWith('hand') ? 'handchain' : 'chain') : 'achain';
       if (!CUSTOM_WHEN[x.when].ok(d)) { notes.push(`このカードの種類では「無効にする」効果は作れません：${seg}`); return; }
     }
-    if (x.what === 'self' && !['handss', 'tograve'].includes(x.when)) x.when = d.kind === 'monster' && !isExtraMtype(d) ? 'handss' : 'tograve';
+    if (x.what === 'self' && !['handss', 'tograve', 'handattack'].includes(x.when)) x.when = d.kind === 'monster' && !isExtraMtype(d) ? 'handss' : 'tograve';
+    if (x.when === 'handattack' && x.what !== 'self') x.when = 'quick';
     if (!whatOk(d, x.when, x.what)) { notes.push(`このカードでは使えない組み合わせです：${seg}`); return; }
+    if (!costOk(x.when)) delete x.cost;
     effects.push(x);
   });
   const max = maxEffects(d);
@@ -788,7 +915,11 @@ function openCustomEditor(src, onSaved) {
       if (w.mon || f.kind === 'monster') {
         fr.append(field('属性', sel({ '': 'どれでも', ...ATTR }, f.attr || '', v => { f.attr = v ? +v : 0; redrawPreview(); })),
           field('種族', sel({ '': 'どれでも', ...RACE }, f.race || '', v => { f.race = v ? +v : 0; redrawPreview(); })),
-          field('レベル以下', num(f.lv || '', 1, 12, 1, v => { f.lv = v || 0; redrawPreview(); })));
+          field('レベル', num(f.lv || '', 1, 12, 1, v => { f.lv = v || 0; redrawPreview(); })),
+          field('レベルの条件', sel({ le: '以下', ge: '以上', eq: 'ちょうど' }, f.lvMode || 'le', v => { f.lvMode = v; redrawPreview(); })));
+        // 攻撃力・守備力（空欄＝条件なし）
+        const stat = (key, label) => field(label, num(f[key] ?? '', 0, 5000, 100, v => { if (v === '') delete f[key]; else f[key] = v; redrawPreview(); }));
+        fr.append(stat('atkGe', '攻撃力〜以上'), stat('atkLe', '攻撃力〜以下'), stat('defGe', '守備力〜以上'), stat('defLe', '守備力〜以下'));
       }
       const ts = customThemes(d);
       if (ts.length) {
@@ -810,6 +941,21 @@ function openCustomEditor(src, onSaved) {
       x.cnt = effCount(x);
       row.append(field(w.mon ? '体数' : '枚数', num(x.cnt, 1, 5, 1, v => { x.cnt = v === '' ? 1 : Math.max(1, Math.min(5, v)); redrawPreview(); })));
     }
+    // 相手フィールドのどのカードか
+    if (w && w.area) row.append(field('相手フィールドの', sel(CUSTOM_AREAS, CUSTOM_AREAS[x.area] ? x.area : 'card', v => { x.area = v; redrawPreview(); })));
+    // コスト（手札から捨てる・墓地から除外するタイミング以外）
+    if (costOk(x.when)) {
+      const cr = el('div', { class: 'custom-row' });
+      cr.append(field('コスト', sel(CUSTOM_COSTS, x.cost || '', v => { x.cost = v; render(); })));
+      if (x.cost === 'lp') { x.lp = x.lp || 1000; cr.append(field('払うLP', num(x.lp, 100, 8000, 100, v => { x.lp = v || 1000; redrawPreview(); }))); }
+      row.append(cr);
+    } else delete x.cost;
+    // 誘発効果：強制（必ず発動する）にできる
+    if (CUSTOM_WHEN[x.when] && CUSTOM_WHEN[x.when].trig) {
+      const m = el('input', { type: 'checkbox', checked: !!x.must });
+      m.addEventListener('change', () => { x.must = m.checked; redrawPreview(); });
+      row.append(el('label', { class: 'check' }, m, ' 強制効果（「発動する」。条件を満たすと必ず発動する）'));
+    } else delete x.must;
     // 1ターンに使える回数（効果ごと）。魔法・罠の発動だけのカードは「名称ターン1」か「制限なし」
     const single = maxEffects(d) === 1 && CUSTOM_WHEN[x.when] && CUSTOM_WHEN[x.when].card;
     const opts = single ? { none: '制限なし', name: '名称ターン1（このカード名のカードは1ターンに1枚しか発動できない）' } : OPT_TYPES;
