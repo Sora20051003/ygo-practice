@@ -1687,3 +1687,6 @@ body:has(.ap-sheet:not([hidden])) .draw-tap, body:has(#modal-root .modal-back) .
 body.detail-on-field #board-detail .cardface.jp.hieratic .jp-desc, body.detail-on-field #board-detail .cardface.jp.hieratic .jp-type,
 body.detail-on-field #m-preview .cardface.jp.hieratic .jp-desc, body.detail-on-field #m-preview .cardface.jp.hieratic .jp-type,
 body.detail-on-field .detail-sheet .cardface.jp.hieratic .jp-desc, body.detail-on-field .detail-sheet .cardface.jp.hieratic .jp-type { visibility: visible; }
+/* 英語のカード（オベリスク・オシリスの神の色の枠） */
+.cardface.jp .jp-name.en { font-family: 'Times New Roman', serif; letter-spacing: 0; }
+.cardface.jp.god-obelisk .jp-desc, .cardface.jp.god-slifer .jp-desc, .cardface.jp.god-obelisk .jp-type, .cardface.jp.god-slifer .jp-type { font-family: 'Times New Roman', serif; word-break: normal; overflow-wrap: break-word; line-break: auto; text-align: justify; }

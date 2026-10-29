@@ -340,6 +340,11 @@ const GOD_FACES = {
   10000020: { cls: 'god-slifer', opts: { god: '神の色の枠（赤）' } },
   10000010: { cls: 'god-ra', opts: { god: '神の色の枠（金）', hieratic: 'ヒエラティックテキスト' } },
 };
+// 神の色の枠のオベリスク・オシリスは、名前・種族・効果文がすべて英語のカード
+const GOD_EN = {
+  10000000: { name: 'Obelisk the Tormentor', type: '[Divine-Beast/Effect]', text: 'Requires 3 Tributes to Normal Summon (cannot be Normal Set). This card\'s Normal Summon cannot be negated. When Normal Summoned, cards and effects cannot be activated. Neither player can target this card with card effects. Once per turn, during the End Phase, if this card was Special Summoned: Send it to the GY. You can Tribute 2 monsters; destroy all monsters your opponent controls. This card cannot declare an attack the turn this effect is activated.' },
+  10000020: { name: 'Slifer the Sky Dragon', type: '[Divine-Beast/Effect]', text: 'Requires 3 Tributes to Normal Summon (cannot be Normal Set). This card\'s Normal Summon cannot be negated. When Normal Summoned, cards and effects cannot be activated. Once per turn, during the End Phase, if this card was Special Summoned: Send it to the GY. Gains 1000 ATK/DEF for each card in your hand. If a monster(s) is Normal or Special Summoned to your opponent\'s field in Attack Position: That monster(s) loses 2000 ATK, then if its ATK has been reduced to 0 as a result, destroy it.' },
+};
 const godBaseId = c => (c && (c.animeBase || c.id)) || 0;
 function faceOf(c) {
   const g = GOD_FACES[godBaseId(c)];
@@ -361,6 +366,7 @@ function hieraticize(s) {
 function jpCard(c, big = false) {
   const face = faceOf(c);
   const hier = face && face.kind === 'hieratic';
+  const eng = face && face.kind === 'god' ? GOD_EN[godBaseId(c)] : null;   // 英語のカード（オベリスク・オシリスの神の色の枠）
   const mon = isMonster(c);
   const spell = has(c, T.SPELL);
   const pend = has(c, T.PENDULUM);
@@ -394,8 +400,8 @@ function jpCard(c, big = false) {
   const atk = c.atk < 0 ? '?' : c.atk;
   const def = c.def < 0 ? '?' : c.def;
   const box = el('div', { class: 'jp-box' },
-    mon ? el('div', { class: 'jp-type', text: hier ? `【${hieraticize(typeLine(c))}】` : `【${typeLine(c)}】` }) : null,
-    fitLater(el('div', { class: 'jp-desc' + (flavor ? ' flavor' : ''), text: hier ? hieraticize(main) : main }), descSize(main.length)),
+    mon ? el('div', { class: 'jp-type', text: eng ? eng.type : hier ? `【${hieraticize(typeLine(c))}】` : `【${typeLine(c)}】` }) : null,
+    fitLater(el('div', { class: 'jp-desc' + (flavor ? ' flavor' : ''), text: eng ? eng.text : hier ? hieraticize(main) : main }), eng ? 2.7 : descSize(main.length)),
     mon ? el('div', { class: 'jp-stat' },
       el('span', { text: `ATK/${String(atk).padStart(4, ' ')}` }),
       el('span', { text: has(c, T.LINK) ? `LINK-${c.level}` : `DEF/${String(def).padStart(4, ' ')}` })) : null);
@@ -410,7 +416,7 @@ function jpCard(c, big = false) {
   return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}${face ? ' ' + face.cls : ''}`, title: c.name },
     el('div', { class: 'jp-head' },
       // ヒエラティックテキスト版：名前だけ英語（THE SUN OF GOD DRAGON）、ほかは神官文字
-      ((nm) => el('div', { class: 'jp-name' + (hier ? ' en' : ''), style: `font-size:max(${jpNameSize(nm)}cqw, 7px)`, text: nm }))(hier ? 'THE SUN OF GOD DRAGON' : c.name),
+      ((nm) => el('div', { class: 'jp-name' + (hier || eng ? ' en' : ''), style: `font-size:max(${jpNameSize(nm)}cqw, 7px)`, text: nm }))(hier ? 'THE SUN OF GOD DRAGON' : eng ? eng.name : c.name),
       el('div', { class: 'jp-attr ' + attr.cls, text: attr.label })),
     sub, art, pbox, box,
     c.id ? el('div', { class: 'jp-pass', text: String(c.id).padStart(8, '0') }) : null);
