@@ -127,7 +127,7 @@ function withPreCards(cards) {
 // ANIME_CARDS.d[id] = [base, tag, en, ja, type, lv, race, attr, atk, def, setcodes, alias, jaText, enText, strs]
 //   base：同じ名前の今のカード（あればアニメ版。無ければ 0＝アニメだけのカード）／tag：「アニメ」「漫画」など
 // アニメ版（今のカードと同じ名前）は検索に出さず、デッキ作成のカードの説明で「アニメの効果」に切り替える
-const ANIME_FILE = 'data/anime-cards.js?v=3';
+const ANIME_FILE = 'data/anime-cards.js?v=4';
 async function loadAnimeCards() {
   if (typeof ANIME_CARDS !== 'undefined') return;
   try { await loadScript(ANIME_FILE); } catch (e) { console.warn('アニメのカードを読めませんでした', e); }
@@ -166,6 +166,9 @@ function withAnimeCards(cards) {
     };
     const text = jaText || enText || '';
     if (text) { c.jaText = text; c.tkey = normalizeText(text); }
+    // 機皇帝のパーツ（ワイゼルＴ など）：「機皇帝」「トップ」などでも探せるようにする
+    const mk = c.name.match(/^(ワイゼル|スキエル|グランエル)([ＴＡＧＣTAGC])/);
+    if (mk) c.ruby = `機皇帝${mk[1]}のパーツ ${mk[1]}${{ Ｔ: 'トップ', T: 'トップ', Ａ: 'アタック', A: 'アタック', Ｇ: 'ガード', G: 'ガード', Ｃ: 'キャリア', C: 'キャリア' }[mk[2]]}`;
     if (b) { if (!DB.animeOf.has(base)) DB.animeOf.set(base, []); DB.animeOf.get(base).push(c); }
     else {
       if (dupOf) {
