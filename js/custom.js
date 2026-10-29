@@ -20,7 +20,22 @@ function customSetcode(theme) {
 }
 // テーマ名は「、」などで区切って3つまで（カテゴリ番号は 16bit ずつ詰めるので、JS の数で正しく持てる3つまで）
 const customThemes = d => [...new Set(String((d && d.theme) || '').split(/[、,，\/／]+/).map(s => s.trim()).filter(Boolean))].slice(0, 3);
-const customSetcodes = d => [...new Set(customThemes(d).map(customSetcode).filter(Boolean))];
+// 公式のテーマ（data/setnames.js）：名前 → { edo：エンジンの番号, own：アプリのテーマ分けの番号 }
+let officialThemeMap = null;
+function officialThemes() {
+  if (!officialThemeMap) officialThemeMap = new Map((typeof SETNAMES !== 'undefined' ? SETNAMES : []).map(([edo, own, name, n]) => [name, { edo, own, name, n }]));
+  return officialThemeMap;
+}
+// テーマ名の番号。公式のテーマならその番号（公式のカードと同じテーマになる）、ほかはオリジナルのテーマ
+const themeCodes = name => { const o = officialThemes().get(name); if (o) return o; const h = customSetcode(name); return { edo: h, own: h }; };
+// 文に書かれたテーマ名を、公式のテーマ名にそろえる（全角・半角や読みの違いは同じとみなす）。無ければそのまま
+function themeByLooseName(s) {
+  const k = normalizeText(s);
+  for (const name of officialThemes().keys()) if (normalizeText(name) === k || normalizeText(name.replace(/（[^）]*）$/, "")) === k) return name;
+  return s;
+}
+const customSetcodes = d => [...new Set(customThemes(d).map(t => themeCodes(t).own).filter(Boolean))];
+const customEdoSetcodes = d => [...new Set(customThemes(d).map(t => themeCodes(t).edo).filter(Boolean))];
 // 効果の「テーマのカードだけ」が指すテーマ名（前の形 true は1つ目のテーマ）
 const filtTheme = (f, d) => {
   const ts = customThemes(d);
@@ -98,7 +113,7 @@ function filtText(f, d, mon, cnt) {
   f = f || {};
   const parts = [];
   const th = filtTheme(f, d);
-  if (th) parts.push(`「${th}」`);
+  if (th) parts.push(`「${th.replace(/（[^）]*）$/, "")}」`);   // 公式のテーマ名の読み（「古代の機械（アンティーク・ギア）」など）は文に入れない
   if (f.lv) parts.push(`レベル${zen(f.lv)}以下の`);
   if (f.attr) parts.push(`${ATTR[f.attr]}属性`);
   if (f.race) parts.push(RACE[f.race]);
@@ -164,6 +179,7 @@ function customToCard(d) {
     race: d.kind === 'monster' ? +d.race || 1 : 0, attr: d.kind === 'monster' ? +d.attr || 1 : 0,
     setcode: customSetcodes(d).reduce((a, s, i) => a + s * 65536 ** i, 0), desc: '', pdesc: '', md: false, noJp: false,
     custom: true, def0: d,
+    edoSet: customEdoSetcodes(d),   // エンジンに渡すテーマの番号（公式のテーマは EDOPro の番号）
   };
   c.jaText = customText(d);
   c.tkey = normalizeText(c.jaText);
@@ -216,7 +232,8 @@ const LUA_FILTER = (x, d, mon, id) => {
   if (f.race) cond.push(`c:IsRace(${+f.race})`);
   if (f.attr) cond.push(`c:IsAttribute(${+f.attr})`);
   if (f.lv) cond.push(`c:IsLevelBelow(${+f.lv})`);
-  const th = customSetcode(filtTheme(f, d));
+  const tn = filtTheme(f, d);
+  const th = tn ? themeCodes(tn).edo : 0;
   if (th) cond.push(`c:IsSetCard(${th})`);
   return cond.join(' and ');
 };
@@ -481,7 +498,7 @@ function parseEffectText(text, d) {
     if (CUSTOM_WHAT[x.what].filt) {
       const f = x.filt;
       const tm = a.match(/「([^」]+)」/);
-      if (tm) { f.theme = tm[1]; themes.push(tm[1]); }
+      if (tm) { const nm = themeByLooseName(tm[1]); f.theme = nm; themes.push(nm); }
       const lv = a.match(/レベル(\d+)以下/); if (lv) f.lv = Math.min(12, +lv[1]);
       for (const [k, v] of Object.entries(ATTR)) if (a.includes(v + '属性')) f.attr = +k;
       for (const [k, v] of Object.entries(RACE)) if (a.includes(v)) f.race = +k;
@@ -573,6 +590,51 @@ function openCustomEditor(src, onSaved) {
     return i;
   };
   const field = (label, ...ctl) => el('label', { class: 'custom-field' }, el('span', { class: 'muted', text: label }), ...ctl);
+  // 所属テーマ：チェックを付けて選ぶ（3つまで）。公式のテーマと、自分で作ったテーマ
+  let themeQuery = '';
+  const themePicker = () => {
+    const wrap = el('div', { class: 'custom-field custom-themes' });
+    const sel0 = customThemes(d);
+    const setThemes = list => { d.theme = list.join('、'); render(); };
+    const toggle = (name, on) => {
+      const cur = customThemes(d).filter(t => t !== name);
+      if (on) { if (cur.length >= 3) { toast('テーマは3つまでです'); render(); return; } cur.push(name); }
+      setThemes(cur);
+    };
+    const row = (name, note) => {
+      const on = sel0.includes(name);
+      const cb = el('input', { type: 'checkbox', checked: on, disabled: !on && sel0.length >= 3 });
+      cb.addEventListener('change', () => toggle(name, cb.checked));
+      return el('label', { class: 'check theme-opt' + (on ? ' on' : '') }, cb, ' ' + name, note ? el('small', { class: 'muted', text: ' ' + note }) : null);
+    };
+    const list = el('div', { class: 'theme-list' });
+    const drawList = () => {
+      list.innerHTML = '';
+      const q = normalizeText(themeQuery);
+      const hit = name => !q || normalizeText(name).includes(q);
+      // 自分のテーマ（ほかのオリジナルカードで使ったもの・このカードで作ったもの）
+      const mine = [...new Set([...customList().flatMap(customThemes), ...sel0])].filter(t => !officialThemes().has(t) && hit(t));
+      if (mine.length) list.append(el('div', { class: 'theme-head', text: '自分で作ったテーマ' }), ...mine.map(t => row(t, 'オリジナル')));
+      const off = [...officialThemes().values()].filter(o => hit(o.name));
+      const shown = (q ? off : off.slice(0, 40));
+      // 選んでいる公式のテーマは、検索に当てはまらなくても上に出す
+      const picked = sel0.filter(t => officialThemes().has(t) && !shown.some(o => o.name === t)).map(t => officialThemes().get(t));
+      list.append(el('div', { class: 'theme-head', text: q ? `公式のテーマ（${off.length}件）` : '公式のテーマ（カードが多い順。名前で探せます）' }),
+        ...[...picked, ...shown.slice(0, 120)].map(o => row(o.name, `${o.n}枚`)));
+      if (!off.length && !mine.length) list.append(el('div', { class: 'muted small-note', text: '見つかりません。下の欄から新しいテーマとして作れます' }));
+    };
+    const search = el('input', { type: 'search', class: 'full', placeholder: 'テーマを名前で探す（例：ブラック・マジシャン）', value: themeQuery });
+    search.addEventListener('input', () => { themeQuery = search.value; drawList(); });
+    const newName = el('input', { type: 'text', placeholder: '新しいテーマの名前', maxlength: 20 });
+    const add = () => { const v = newName.value.trim(); if (!v) return; if (!customThemes(d).includes(v)) toggle(v, true); };
+    newName.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    drawList();
+    wrap.append(el('span', { class: 'muted', text: '所属テーマ（チェックを付けたテーマのカードとして扱います。3つまで）' }),
+      el('div', { class: 'theme-chips' }, sel0.length ? sel0.map(t => el('span', { class: 'theme-chip' }, `「${t}」`, el('button', { type: 'button', title: '外す', text: '✕', onclick: () => toggle(t, false) }))) : el('span', { class: 'muted small-note', text: 'テーマなし' })),
+      search, list,
+      el('div', { class: 'row' }, newName, el('button', { type: 'button', class: 'btn small', text: '＋ 新しいテーマを作って付ける', onclick: add })));
+    return wrap;
+  };
   // リンクマーカーを選ぶ 3×3 のボタン
   const markerGrid = () => {
     const grid = el('div', { class: 'custom-arrows' });
@@ -623,11 +685,7 @@ function openCustomEditor(src, onSaved) {
       form.append(el('label', { class: 'check' }, lk, ' リンクマーカーを持つ'));
       if (d.stLink) form.append(field('リンクマーカー（魔法＆罠ゾーンから、マーカーの先のモンスターゾーンを指します）', markerGrid()));
     }
-    const theme = el('input', { type: 'text', value: d.theme || '', class: 'full', placeholder: '例：ドラゴン騎士、蒼炎（空欄＝テーマなし）', maxlength: 60 });
-    theme.addEventListener('input', () => { d.theme = theme.value; redrawPreview(); });
-    // 打ち終わったら、効果の「テーマのカードだけ」の選び肢を作り直す
-    theme.addEventListener('change', () => render());
-    form.append(field('テーマ名（「、」で区切ると3つまで入れられる。同じテーマ名のオリジナルカードどうしで「テーマのカード」として扱う）', theme));
+    form.append(themePicker());
 
     // 絵
     const file = el('input', { type: 'file', accept: 'image/*' });

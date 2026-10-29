@@ -720,7 +720,8 @@ function engineCardData(code) {
   const c = DB.byId.get(code);
   if (!c) return null;
   const setcodes = [];
-  for (let s = c.setcode || 0; s > 0; s = Math.floor(s / 65536)) setcodes.push(s % 65536);
+  if (c.edoSet) setcodes.push(...c.edoSet);   // オリジナルカード：エンジン用のテーマの番号
+  else for (let s = c.setcode || 0; s > 0; s = Math.floor(s / 65536)) setcodes.push(s % 65536);
   const link = has(c, T.LINK);
   return {
     code, alias: c.alias || 0, setcodes, type: c.type, level: c.level, attribute: c.attr, race: BigInt(c.race),
