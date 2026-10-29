@@ -121,7 +121,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') hideMenu(); 
 const CARD_STYLES = { jp: '日本語版カード', image: 'カード画像（英語版）', art: 'イラスト＋日本語名', text: '文字のみ' };
 let cardStyle = store.get('ygo.cardStyle3', 'jp');
 // 画像の番号：発売前の仮の番号のままのカードなどは、正式な番号の画像も試す（IMG_IDS：data/alt-arts.js。まずそのカードの番号、無ければ正式な番号）
-const imgIdOf = id => (typeof IMG_IDS !== 'undefined' && IMG_IDS[id]) || id;
+// アニメ版のカードは、今のカード（同じ名前）の絵を使う
+const imgIdOf = id => (typeof IMG_IDS !== 'undefined' && IMG_IDS[id]) || (typeof DB !== 'undefined' && DB.byId && (DB.byId.get(id) || {}).animeBase) || id;
 const IMG_URL = {
   art: id => `https://images.ygoprodeck.com/images/cards_cropped/${id}.jpg`,
   small: id => `https://images.ygoprodeck.com/images/cards_small/${id}.jpg`,
@@ -421,6 +422,8 @@ const cardTextCache = new Map();
 function fetchCardTexts(c) {
   const key = 'text:' + c.id;
   if (cardTextCache.has(key)) return cardTextCache.get(key);
+  // アニメのカード：文はカードのデータに入っている（日本語が無ければ英語）
+  if (c.anime) { const r = Promise.resolve({ ja: c.jaText || '', jaP: '', en: c.enText || '' }); cardTextCache.set(key, r); return r; }
   const p = (async () => {
     try {
       const saved = await idbGet(key);

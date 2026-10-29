@@ -94,6 +94,8 @@ function engineLoad(onStatus) {
     onStatus && onStatus('自動処理の準備中…（共通スクリプトを読み込んでいます）');
     const texts = await Promise.all(CORE_SCRIPTS.map(n => fetchScript(n, n)));
     CORE_SCRIPTS.forEach((n, i) => { if (texts[i]) Engine.scripts.set(n, texts[i]); });
+    // アニメのカード用の共通の処理（utility.lua が最後に読み込む。EDOPro では unofficial フォルダにある）
+    { const t = await fetchScript('proc_unofficial.lua', 'unofficial/proc_unofficial.lua'); if (t) Engine.scripts.set('proc_unofficial.lua', t); }
     if (!Engine.scripts.has('utility.lua')) throw new Error('共通スクリプトを読み込めませんでした');
     await loadSystemStrings();
   })();
@@ -162,6 +164,8 @@ async function loadCardScripts(codes, onStatus, errata = 'post') {
     if (!text) text = await fetchScript(name, `pre-release/${name}`);
     // OCG でエラッタ（効果の変更）があったカードの一部は、今の OCG 版が pre-errata フォルダにある（レッドアイズ・ダークネスメタルドラゴンなど）
     if (!text) text = await fetchScript(name, `pre-errata/${name}`);
+    // アニメ・漫画のカード（と、それが使う共通の処理 c420.lua など）は unofficial フォルダにある
+    if (!text) text = await fetchScript(name, `unofficial/${name}`);
     // アプリのカードデータでは仮の番号のカード：EDOPro の発売前のデータの番号・正式な番号のスクリプトを使う
     for (const alt of engineAltCodes(code)) {
       if (text) break;
@@ -175,7 +179,7 @@ async function loadCardScripts(codes, onStatus, errata = 'post') {
       if (Engine.scripts.has(n)) continue;
       const cm = n.match(/^c(\d+)\.lua$/);
       if (cm) await one(+cm[1]);
-      else { Engine.scripts.set(n, ''); const t = await fetchScript(n, n); Engine.scripts.set(n, t || ''); }
+      else { Engine.scripts.set(n, ''); const t = (await fetchScript(n, n)) || (await fetchScript(n, `unofficial/${n}`)); Engine.scripts.set(n, t || ''); }
     }
   };
   // 同時に取りすぎないよう 8 件ずつ
@@ -295,6 +299,7 @@ function descText(desc) {
   if (code) {
     const c = DB.byId.get(code);
     if (c && c.custom) return (c.jaStrs || [])[idx] || `「${c.name}」の効果${idx + 1}`;   // オリジナルカード
+    if (c && c.anime) return (c.strs || [])[idx] || `「${c.name}」の効果${idx + 1}`;   // アニメのカード（説明は英語）
     // EDOPro の番号順の説明があればそれを使う（YGOPro 用の日本語の説明は番号の並びが違うことが多く、別の効果の説明になってしまう）
     const s = typeof EDO_STRS !== 'undefined' ? (EDO_STRS[code] || [])[idx] : (c && c.jaStrs && c.jaStrs[idx]);
     return s || `「${cardName(code)}」の効果${idx + 1}`;
@@ -700,7 +705,9 @@ const engineAltCodes = code => [typeof PRE_MAP !== 'undefined' && PRE_MAP[code],
 function engineCardData(code) {
   if (code === TOOL_CODE) return { code, alias: 0, setcodes: [], type: 0x2, level: 0, attribute: 0, race: 0n, attack: 0, defense: 0, lscale: 0, rscale: 0, link_marker: 0 };   // 練習ツール（魔法カードとして扱う）
   const has0 = typeof EDO_CARDS !== 'undefined';
-  const e = has0 && (EDO_CARDS.d[code] || engineAltCodes(code).map(a => EDO_CARDS.d[a]).find(Boolean));
+  // アニメのカード（data/anime-cards.js）は、そのデータに EDOPro の値が入っている
+  const ac = DB.byId.get(code);
+  const e = (has0 && (EDO_CARDS.d[code] || engineAltCodes(code).map(a => EDO_CARDS.d[a]).find(Boolean))) || (ac && ac.anime && ac.edo);
   if (e) {
     const [alias, setcodes, type, lv, race, attribute, atk, def] = e;
     const link = (type & T.LINK) !== 0;

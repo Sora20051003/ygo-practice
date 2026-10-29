@@ -122,8 +122,53 @@ function withPreCards(cards) {
   return add.length ? [...cards, ...add] : cards;
 }
 
+// ---------- アニメのカード ----------
+// data/anime-cards.js（EDOPro の cards-unofficial.cdb のアニメ・漫画のカード＋Yugipedia の日本語名・日本語の文）。
+// ANIME_CARDS.d[id] = [base, tag, en, ja, type, lv, race, attr, atk, def, setcodes, alias, jaText, enText, strs]
+//   base：同じ名前の今のカード（あればアニメ版。無ければ 0＝アニメだけのカード）／tag：「アニメ」「漫画」など
+// アニメ版（今のカードと同じ名前）は検索に出さず、デッキ作成のカードの説明で「アニメの効果」に切り替える
+const ANIME_FILE = 'data/anime-cards.js?v=1';
+async function loadAnimeCards() {
+  if (typeof ANIME_CARDS !== 'undefined') return;
+  try { await loadScript(ANIME_FILE); } catch (e) { console.warn('アニメのカードを読めませんでした', e); }
+}
+DB.animeOf = new Map();   // 今のカード → そのアニメ版の一覧
+function withAnimeCards(cards) {
+  DB.animeOf = new Map();
+  if (typeof ANIME_CARDS === 'undefined') return cards;
+  const byId = new Map(cards.map(c => [c.id, c]));
+  const add = [];
+  for (const [k, a] of Object.entries(ANIME_CARDS.d)) {
+    const id = +k;
+    if (byId.has(id)) continue;   // 番号がほかのカードとぶつかるものは入れない
+    const [base, tag, en, ja, type, lv, race, attr, atk, def, sc, alias, jaText, enText, strs] = a;
+    const b = base ? byId.get(base) : null;
+    const c = {
+      id, cid: 0, name: b ? `${b.name}（${tag}）` : (ja || en), noJp: !b && !ja, md: false, ruby: b ? b.ruby : '', en, type, atk, def,
+      level: lv & 0xff, ls: (lv >>> 24) & 0xff, rs: (lv >>> 16) & 0xff, race, setcode: b ? b.setcode : 0, attr,
+      desc: '', pdesc: '', anime: true, animeTag: tag, animeBase: b ? base : 0,
+      edo: [alias, sc, type, lv, race, attr, atk, def], strs: strs || [], enText: enText || '',
+    };
+    const text = jaText || enText || '';
+    if (text) { c.jaText = text; c.tkey = normalizeText(text); }
+    if (b) { if (!DB.animeOf.has(base)) DB.animeOf.set(base, []); DB.animeOf.get(base).push(c); }
+    // アニメだけのカードは絵が無い（枠だけ描く）。無い絵を取りに行かないようにする
+    else if (typeof missingImages !== 'undefined') for (const k of ['art', 'small', 'full']) missingImages.add(id + k);
+    add.push(c);
+  }
+  return add.length ? [...cards, ...add] : cards;
+}
+// 今のカードとアニメ版をまとめた一覧（切り替え用。先頭が今のカード）
+function animeFamily(c) {
+  const baseId = c.animeBase || c.id;
+  const base = DB.byId.get(baseId);
+  const list = DB.animeOf.get(baseId) || [];
+  return base && list.length ? [base, ...list] : [];
+}
+
 function indexCards(cards) {
   cards = withPreCards(cards);
+  cards = withAnimeCards(cards);
   if (typeof withCustomCards === 'function') cards = withCustomCards(cards);   // オリジナルカード（custom.js）
   DB.cards = cards;
   DB.byId = new Map();
@@ -148,6 +193,7 @@ async function downloadCards(onStatus) {
   onStatus && onStatus('カードデータを展開中…');
   const raw = await unzipJson(buf);
   const cards = Object.values(raw).map(convertCard).filter(Boolean);
+  await loadAnimeCards();
   const meta = { md5: md5.replace(/"/g, '').trim(), date: new Date().toISOString(), count: cards.length, version: DATA_VERSION };
   await idbSet('cards', cards);
   await idbSet('meta', meta);
@@ -160,7 +206,7 @@ async function loadCards(onStatus) {
     const meta = await idbGet('meta');
     if (meta && meta.version === DATA_VERSION) {
       const cards = await idbGet('cards');
-      if (cards && cards.length) { DB.meta = meta; indexCards(cards); return; }
+      if (cards && cards.length) { await loadAnimeCards(); DB.meta = meta; indexCards(cards); return; }
     }
   } catch (e) { console.warn('保存済みデータを読めませんでした', e); }
   await downloadCards(onStatus);
@@ -478,7 +524,7 @@ function limitIn(c, ctx) {
 const limitOf = (c, fmt) => limitIn(c, { fmt, vector: DB.banlists[fmt] });   // 最新のリストで
 const LIMIT_LABEL = { 0: '禁止', 1: '制限', 2: '準制限' };
 const limitLabel = (c, ctx) => (isUnreleased(c, ctx) ? '未発売（禁止扱い）' : ctx.event && eventBlock(ctx.event, c) ? `イベントのルールで使えない：${eventBlock(ctx.event, c)}` : LIMIT_LABEL[limitIn(c, ctx)]);
-const cardAllowed = (c, fmt) => !!c.custom || (FORMATS[fmt] || FORMATS.ocg).allowed(c);   // オリジナルカードはどのルールでも使える
+const cardAllowed = (c, fmt) => !!c.custom || !!c.anime || (FORMATS[fmt] || FORMATS.ocg).allowed(c);   // オリジナルカード・アニメのカードはどのルールでも使える
 
 // ---------- 日本語の効果文（テキスト検索用） ----------
 // 取得元: mycard/ygopro-database の日本語カードDB（SQLite）。sql.js で読んで id→効果文 の形で保存する。
@@ -600,8 +646,11 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
   const markerOk = c => has(c, T.LINK) && (markerMode === 'and' ? markers.every(b => c.def & b) : markers.some(b => c.def & b));
   const starOk = c => isMonster(c) && stars[levelKind(c)].includes(c.level);
   const out = [];
+  const showAnime = store.get('ygo.showAnime', true);
   for (const c of DB.cards) {
     if (isToken(c)) continue;
+    // アニメ版（今のカードと同じ名前）は出さない（カードの説明で切り替える）。アニメだけのカードは設定で出す・出さない
+    if (c.anime && (c.animeBase || !showAnime)) continue;
     if (format && !cardAllowed(c, format)) continue;   // そのルールで使えないカードは出さない
     if (kind && !KIND_FILTERS[kind](c)) continue;
     if (subs.length && !subOk(c)) continue;

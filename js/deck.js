@@ -303,6 +303,25 @@ function artChoice(deck, c) {
       el('div', { class: 'art-thumb' }, cardImg(v, 'art', img => img.remove(), '', true)),
       el('small', { text: labels.get(v) })))));
 }
+// アニメ版があるカード：このデッキで今の効果・アニメの効果のどちらを使うか。デッキに入っている同じ名前のカードをまとめて入れ替える
+function animeChoice(deck, c) {
+  const fam = typeof animeFamily === 'function' ? animeFamily(c) : [];
+  if (!fam.length) return null;
+  const ids = new Set(fam.map(x => x.id));
+  const set = v => {
+    let n = 0;
+    for (const sec of ['main', 'extra', 'side']) deck[sec] = deck[sec].map(id => (ids.has(id) && id !== v.id ? (n++, v.id) : id));
+    Decks.save();
+    renderDeck();
+    if (isMobile()) closeAllModals();
+    showDeckCard(v);
+    toast(n ? `このデッキの「${fam[0].name}」${n}枚を${v.anime ? `${v.animeTag}の効果` : '今の効果'}にしました` : `${v.anime ? `${v.animeTag}の効果` : '今の効果'}のカードを表示しています（「＋」でデッキに入ります）`);
+  };
+  const label = x => (x.anime ? `${x.animeTag}の効果` : '今の効果（OCG）');
+  return el('div', { class: 'd-errata d-anime' },
+    el('div', { class: 'small-note muted', text: 'アニメ・漫画で使われた効果があるカードです。このデッキで使う効果（デッキに入っている分をまとめて入れ替えます）' }),
+    el('div', { class: 'seg full' }, fam.map(x => el('button', { class: x.id === c.id ? 'on' : '', text: label(x), onclick: () => set(x) }))));
+}
 function deckCardBar(c) {
   const bar = el('div', { class: 'd-addbar' });
   const draw = () => {
@@ -331,7 +350,7 @@ function deckCardBar(c) {
         el('button', { class: 'btn small side-btn', text: '− サイドから1枚減らす', disabled: !nSide, onclick: () => removeOne('side') })),
       el('div', { class: 'd-addbtns' },
         el('button', { class: 'btn small', text: '🔍 関連カードを検索', onclick: () => showRelated(c) })),
-      ...[errataChoice(deck, c, draw), artChoice(deck, c)].filter(Boolean));
+      ...[animeChoice(deck, c), errataChoice(deck, c, draw), artChoice(deck, c)].filter(Boolean));
   };
   draw();
   return bar;
@@ -385,6 +404,10 @@ function setupSearch() {
   hide.addEventListener('change', () => { store.set('ygo.hideUnrel', hide.checked); run(); });
   // 絵違いがあるカードだけ
   $('#f-alt').addEventListener('change', run);
+  // アニメのカードも出す（data.js の searchCards が ygo.showAnime を見る）
+  const an = $('#f-anime');
+  an.checked = store.get('ygo.showAnime', true);
+  an.addEventListener('change', () => { store.set('ygo.showAnime', an.checked); run(); });
   // 検索の条件を全部消す
   $('#f-clear').addEventListener('click', () => {
     $('#f-alt').checked = false;
