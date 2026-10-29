@@ -1736,3 +1736,7 @@ body.land .modal.wide:has(.big-detail) { width: calc(var(--lw) - 16px); max-heig
 .big-detail > .d-type, .big-detail > .d-stats { order: 1; }
 .big-detail > .ja-text { order: 2; }
 .big-detail .d-ruby, .big-detail .d-en { display: none; }
+
+/* アニメ版のカードの警告と、デッキの欄の「アニメ」の印 */
+#deck-warn .anime-warn { color: #ffb347; }
+.tile-anime { position: absolute; right: 2px; bottom: 2px; padding: 0 4px; border-radius: 6px; background: #c2185b; color: #fff; font-size: 10px; font-weight: 800; line-height: 16px; pointer-events: none; box-shadow: 0 1px 3px rgba(0,0,0,.5); }

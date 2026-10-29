@@ -52,7 +52,7 @@ function deckProblems(deck, ctx = regContext(deck)) {
     const g = groups.get(k);
     g.n++; if (!g.names.has(c.name)) { g.names.add(c.name); g.cards.push(c); }
   }
-  const notAllowed = [], over = [];
+  const notAllowed = [], over = [], anime = [];   // anime：アニメ版（アニメ・漫画だけのカードや、アニメの効果を選んだカード）。公式のデュエルでは使えない
   for (const { c, n } of counts.values()) {
     const l = limitIn(c, ctx);
     if (!cardAllowed(c, ctx.fmt)) notAllowed.push(c.name);
@@ -64,7 +64,14 @@ function deckProblems(deck, ctx = regContext(deck)) {
     const l = Math.min(MAX_COPIES, ...g.cards.filter(c => cardAllowed(c, ctx.fmt)).map(c => limitIn(c, ctx)), ...(rc ? [limitIn(rc, ctx)] : []));
     if (g.n > l) over.push(`${[...g.names].join('・')}（ルール上同じ名前として扱うので、合わせて${l}枚まで）`);
   }
-  return { notAllowed, over };
+  const seenAnime = new Set();
+  for (const sec of ["main", "extra", "side"]) for (const id of deck[sec]) {
+    const c = DB.byId.get(id);
+    if (!c || !c.anime || seenAnime.has(id)) continue;
+    seenAnime.add(id);
+    anime.push(/（[^）]*）$/.test(c.name) ? c.name : `${c.name}（${c.animeTag && c.animeTag !== "アニメ" ? c.animeTag : "アニメ"}版）`);   // 名前に「（アニメ）」が付いているものはそのまま
+  }
+  return { notAllowed, over, anime };
 }
 
 // 禁止・制限の小さな印（未発売は「未」）
@@ -844,13 +851,14 @@ function renderDeck() {
   // ルールの切り替えボタンと、ルール違反の警告
   const fmt = deckFormat(deck);
   $$('#deck-format button').forEach(b => b.classList.toggle('on', b.dataset.format === fmt));
-  const { notAllowed, over } = deckProblems(deck);
+  const { notAllowed, over, anime } = deckProblems(deck);
   const bad = new Set([...notAllowed, ...over.map(s => s.replace(/（.*$/, ''))]);
   const warn = $('#deck-warn');
   warn.innerHTML = '';
-  warn.hidden = !notAllowed.length && !over.length;
+  warn.hidden = !notAllowed.length && !over.length && !anime.length;
   if (notAllowed.length) warn.append(el('div', { text: `⚠ ${FORMATS[fmt].label}で使えないカード：${notAllowed.join('、')}` }));
   if (over.length) warn.append(el('div', { text: `⚠ 禁止・制限の枚数オーバー：${over.join('、')}` }));
+  if (anime.length) warn.append(el('div', { class: 'anime-warn', text: `⚠ アニメ版のカードが入っています（公式のデュエルでは使えません）：${anime.join('、')}` }));
   // レギュレーション（禁止・制限リスト）の選択
   const ctx = regContext(deck);
   renderRegSelect(deck);
@@ -886,6 +894,7 @@ function renderDeck() {
         badge ? el('div', { class: 'tile-lim' }, badge) : null,
         (r => (r ? el('div', { class: 'tile-rar' }, r) : null))(mdRarityBadge(c, ctx)),
         deckErrata(deck, id) === 'pre' ? el('div', { class: 'tile-errata', title: 'エラッタ前の効果で処理', text: '旧' }) : null,
+        c.anime ? el('div', { class: 'tile-anime', title: 'アニメ版のカード（公式のデュエルでは使えません）', text: c.animeTag && c.animeTag !== 'アニメ' ? c.animeTag : 'アニメ' }) : null,
         first && cnt > 1 ? el('div', { class: 'tile-count', title: `${cnt}枚入っています`, text: `×${cnt}` }) : null,
         el('button', { class: 'tile-add', title: '1枚増やす', text: '＋', onclick: e => { e.stopPropagation(); addToDeck(c, sec); } }),
         el('button', { class: 'tile-remove', title: '1枚減らす', text: '−', onclick: e => { e.stopPropagation(); removeFromDeck(sec, i); } }));
