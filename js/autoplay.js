@@ -20,7 +20,7 @@ function autoState() {
     m: Array(5).fill(null), emz: [null, null], s: Array(5).fill(null), f: [null],
   };
   const mk = (c, loc, seq, forceUp) => {
-    if (!c || !c.code || c.code === TOOL_CODE) return null;   // 練習ツールは盤面に出さない
+    if (!c || !c.code || isToolCode(c.code)) return null;   // 練習ツールは盤面に出さない
     return {
       uid: autoKey(me, loc, seq), id: c.code,
       faceUp: forceUp || !!(c.position & 5), pos: (loc === LOC.MZONE && c.position & 12) ? 'def' : 'atk',
@@ -386,7 +386,7 @@ async function autoStart(handIds) {
     try { await autoPrepare(opp, errata); } catch (e) { showError('相手のデッキを準備できませんでした', e); return; }
   }
   Auto.redoLog = null;
-  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: false, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), errata });
+  Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: false, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), speed: speedMode(), errata });
   Auto.deckId = deck.id;
   Auto.duel.drawTap = true;   // 自分のドローフェイズは、画面をタッチするまでドローしない
   Auto.duel.vsCpu = oppMode() === 'cpu';   // CPU との対戦（デッキで対戦）：時間切れで負け
@@ -417,7 +417,7 @@ function autoSave() {
   const items = d.history();
   try {
     store.set('ygo.autoBoard', JSON.parse(JSON.stringify({
-      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, items, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode, autoTrigger: d.autoTrigger, firstDraw: d.firstDraw, tools: d.tools, rule: d.rule, errata: d.errata, sv: d.sv,
+      main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed, items, deckId: Auto.deckId, opp: d.opp, chainMode: d.chainMode, autoTrigger: d.autoTrigger, firstDraw: d.firstDraw, tools: d.tools, rule: d.rule, speed: d.speed, errata: d.errata, sv: d.sv,
     }, bigReplacer)));
   } catch { /* 保存できなくても続けられる */ }
 }
@@ -428,7 +428,7 @@ async function autoResume() {
   try { await autoPrepare(saved, saved.errata); if (saved.opp) await autoPrepare(saved.opp, saved.errata); const placed = saved.items.filter(x => x.res && x.res.type === RES.ANNOUNCE_CARD).map(x => x.res.card); if (placed.length) await loadCardScripts(placed, null, saved.errata); } catch { return; }
   // 読み込んでいる間に対戦が始まった・別の一人回しを始めたときは、前の一人回しで上書きしない
   if (Auto.net || (typeof Duel !== 'undefined' && Duel.active) || Auto.duel) return;
-  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: false, firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', errata: saved.errata, sv: saved.sv === 2 ? 2 : 1 });   // sv が無い＝前の版の混ぜ方で保存した盤面
+  const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: false, firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', speed: saved.speed || '', errata: saved.errata, sv: saved.sv === 2 ? 2 : 1 });   // sv が無い＝前の版の混ぜ方で保存した盤面
   d.drawTap = true;
   d.vsCpu = oppMode() === 'cpu';
   Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;

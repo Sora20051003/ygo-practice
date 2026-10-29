@@ -96,6 +96,8 @@ function engineLoad(onStatus) {
     CORE_SCRIPTS.forEach((n, i) => { if (texts[i]) Engine.scripts.set(n, texts[i]); });
     // アニメのカード用の共通の処理（utility.lua が最後に読み込む。EDOPro では unofficial フォルダにある）
     { const t = await fetchScript('proc_unofficial.lua', 'unofficial/proc_unofficial.lua'); if (t) Engine.scripts.set('proc_unofficial.lua', t); }
+    // ライディングデュエルで使うスクリプト（対戦の途中で作られるカードもあるので、先に読んでおく）
+    try { await loadCardScripts(SPEED_CODES, null, 'post', true); } catch (e) { console.warn('ライディングデュエルのスクリプトを読めませんでした', e); }
     if (!Engine.scripts.has('utility.lua')) throw new Error('共通スクリプトを読み込めませんでした');
     await loadSystemStrings();
   })();
@@ -144,7 +146,7 @@ function scriptFor(name, errata) {
 }
 
 // デッキのカードのスクリプトを読み込む。スクリプト内で読み込む別スクリプトも追いかける
-async function loadCardScripts(codes, onStatus, errata = 'post') {
+async function loadCardScripts(codes, onStatus, errata = 'post', quiet = false) {
   // エラッタ前の効果で遊ぶときは、そのカードの「エラッタ前」のスクリプトも読む（'pre:c番号.lua' に入れる）
   const spec = errataSpec(errata);
   {
@@ -190,7 +192,7 @@ async function loadCardScripts(codes, onStatus, errata = 'post') {
     const c = DB.byId.get(code);
     return c && !(isMonster(c) && has(c, T.NORMAL) && !has(c, T.EFFECT)) && !isToken(c);
   });
-  if (missing.length && typeof toast === 'function') {
+  if (!quiet && missing.length && typeof toast === 'function') {
     const names = missing.slice(0, 5).map(cardName).join('、') + (missing.length > 5 ? ` ほか${missing.length - 5}枚` : '');
     setTimeout(() => toast(`効果の処理が見つからなかったカード：${names}（このカードの効果は自動処理されません）`), 1500);
   }
@@ -290,12 +292,60 @@ function s.oppop(e,tp)
 	end
 end
 `;
-const isToolCode = code => code === TOOL_CODE;
-const cardName = code => { if (code === TOOL_CODE) return '練習ツール'; const c = DB.byId.get(code); return c ? c.name : `カード${code}`; };
+// ---------- ライディングデュエル（アニメのルール） ----------
+// 5D's：両方のフィールドゾーンに「スピード・ワールド２（アニメ）」（EDOPro の「ライディングデュエル」のルールカードの処理を、聞かずに使う）
+// ARC-V：アクションデュエルとして、両方のフィールドゾーンにアクションフィールド「クロス・オーバー・アクセル」
+// 対戦の初めに、見えないルール用のカード（除外ゾーン）が準備をする
+const RULE_CODE = 999990002;
+const SPEED_MODES = { '': '通常のデュエル', turbo: "ライディングデュエル（5D's：スピード・ワールド２）", action: 'ライディングデュエル（ARC-V：クロス・オーバー・アクセル）' };
+const SPEED_WORLD2 = 511600374, CROSSOVER_ACCEL = 151000013;
+const SPEED_FIELDS = new Set([511600371, 511600372, 511600373, 511600374, 151000013]);
+// アクションデュエルの処理（c151000000）の説明の文
+const ACTION_LABELS = { 0: 'アクションカードを拾う', 1: 'アクションカードを取り合う（じゃんけん）', 2: 'アクションカードを見つけられなかった', 7: '手札のアクション魔法を発動する' };
+// 前もって読み込んでおくスクリプト（ルールカード・フィールド・アクションカード）
+const SPEED_CODES = [110000000, 511600371, 511600372, 511600373, SPEED_WORLD2, 151000000, CROSSOVER_ACCEL,
+  150000001, 150000005, 150000020, 150000021, 150000022, 150000024, 150000068, 150000033, 150000047, 150000042, 150000011, 150000044];
+const ruleLua = mode => `local s,id=GetID()
+function s.initial_effect(c)
+	local e1=Effect.CreateEffect(c)
+	e1:SetType(EFFECT_TYPE_FIELD+EFFECT_TYPE_CONTINUOUS)
+	e1:SetCode(EVENT_ADJUST)
+	e1:SetRange(LOCATION_REMOVED)
+	e1:SetProperty(EFFECT_FLAG_UNCOPYABLE+EFFECT_FLAG_CANNOT_DISABLE)
+	e1:SetOperation(s.op)
+	c:RegisterEffect(e1)
+end
+function s.op(e,tp)
+	local c=e:GetHandler()
+	e:Reset()
+${mode === 'turbo' ? `	-- EDOPro の「ライディングデュエル」の処理で、2人とも「スピード・ワールド２（アニメ）」を選んだことにする
+	local turbo=Duel.LoadCardScript("c110000000.lua")
+	local yn,rnd=Duel.SelectYesNo,Duel.GetRandomNumber
+	Duel.SelectYesNo=function() return false end
+	Duel.GetRandomNumber=function() return 4 end
+	turbo.op(c)
+	Duel.SelectYesNo,Duel.GetRandomNumber=yn,rnd` : `	-- アクションデュエル：アクションフィールドに「クロス・オーバー・アクセル」を選んだことにする
+	Duel.LoadCardScript("c151000000.lua")
+	local orig=ActionDuel.op
+	ActionDuel.op=function(...)
+		local yn,ann=Duel.SelectYesNo,Duel.AnnounceCard
+		local asked=false
+		Duel.SelectYesNo=function() if asked then return false end asked=true return true end
+		Duel.AnnounceCard=function() return ${CROSSOVER_ACCEL} end
+		orig(...)
+		Duel.SelectYesNo,Duel.AnnounceCard=yn,ann
+		ActionDuel.op=orig
+	end
+	ActionDuel.Start()`}
+end
+`;
+const isToolCode = code => code === TOOL_CODE || code === RULE_CODE;
+const cardName = code => { if (code === TOOL_CODE) return '練習ツール'; if (code === RULE_CODE) return 'ルール'; const c = DB.byId.get(code); return c ? c.name : `カード${code}`; };
 function descText(desc) {
   const d = BigInt(desc || 0);
   const code = Number(d >> 20n), idx = Number(d & 0xfffffn);
   if (code === TOOL_CODE) return TOOL_LABELS[idx] || '練習ツール';
+  if (code === 151000000) return ACTION_LABELS[idx] || 'アクションデュエル';
   if (code) {
     const c = DB.byId.get(code);
     if (c && c.custom) return (c.jaStrs || [])[idx] || `「${c.name}」の効果${idx + 1}`;   // オリジナルカード
@@ -318,7 +368,8 @@ const placeText = (con, loc, seq) => {
 // main/extra：自分のデッキ（カードid）。handIds：初手に入れるカード（省略時はランダムに引く）
 // opp：相手のデッキ {main, extra}（省略時は何もしない相手）。chainMode：チェーン確認（'auto' / 'always' / 'off'）
 class AutoDuel {
-  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false, rule = 'mr5', errata = 'post', sv = 2 }) {
+  constructor({ main, extra, handIds, handSize = 5, seed, opp = null, chainMode = 'auto', autoTrigger = false, firstDraw = false, net = null, tools = false, rule = 'mr5', speed = '', errata = 'post', sv = 2 }) {
+    this.speed = SPEED_MODES[speed] && speed ? speed : '';   // ライディングデュエル（'turbo'＝5D's／'action'＝ARC-V）
     // デッキの混ぜ方の版：2＝プレイヤーごとに別の乱数で混ぜる。1＝前の版（2人のデッキを1つの乱数で続けて混ぜる。前に保存した盤面・記録用）
     this.sv = sv === 1 ? 1 : 2;
     this.errata = errataSpec(errata);   // エラッタのあったカードを、エラッタ前の効果で処理するか（全体の設定とカードごとの設定）
@@ -371,6 +422,7 @@ class AutoDuel {
     for (const id of this.deckShuffler(me, shared)(rest)) add(me, id, LOC.DECK);
     for (const id of ruleExtra(this.extra, this.rule)) add(me, id, LOC.EXTRA);
     if (this.tools) { Engine.scripts.set(`c${TOOL_CODE}.lua`, TOOL_LUA); add(me, TOOL_CODE, LOC.REMOVED, POS.FU_ATK); }
+    if (this.speed) { Engine.scripts.set(`c${RULE_CODE}.lua`, ruleLua(this.speed)); add(0, RULE_CODE, LOC.REMOVED, POS.FU_ATK); }
     if (this.opp) {
       const rest = [...this.opp.main];
       // 相手の初手を指定したとき（誘発練習）：そのカードを手札に置き、残りを引く
@@ -392,7 +444,7 @@ class AutoDuel {
   }
 
   probeActivate(index) {
-    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net, tools: this.tools, rule: this.rule, errata: this.errata, sv: this.sv });
+    const t = new AutoDuel({ main: this.main, extra: this.extra, handIds: this.handIds, handSize: this.handSize, seed: this.seed, opp: this.opp, chainMode: 'off', autoTrigger: true, net: this.net, tools: this.tools, rule: this.rule, speed: this.speed, errata: this.errata, sv: this.sv });
     try {
       t.create();
       t.run(this.history());
@@ -449,6 +501,7 @@ class AutoDuel {
       for (const code of this.deckShuffler(p, shared)([...main])) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.DECK, sequence: 2, position: POS.FD_ATK });
       for (const code of ruleExtra(extra, this.rule)) L.duelNewCard(this.h, { team: p, duelist: 0, code, controller: p, location: LOC.EXTRA, sequence: 2, position: POS.FD_ATK });
     });
+    if (this.speed) { Engine.scripts.set(`c${RULE_CODE}.lua`, ruleLua(this.speed)); L.duelNewCard(this.h, { team: 0, duelist: 0, code: RULE_CODE, controller: 0, location: LOC.REMOVED, sequence: 2, position: POS.FU_ATK }); }
     L.startDuel(this.h);
   }
   // 対戦：相手の画面から届いた返答を流す（相手が選ぶ番のときだけ）
@@ -643,7 +696,7 @@ class AutoDuel {
         this.justMoved.add(`${m.to.controller}-${m.to.location}-c${code}`);   // 手札などは位置の番号がずれるので、カードの種類でも覚える
         this.events.push({ t: 'move', code, from: { con: m.from.controller, loc: m.from.location, seq: m.from.sequence }, to: { con: m.to.controller, loc: m.to.location, seq: m.to.sequence }, faceUp: !!(m.to.position & 5) });
         const secret = m.to.controller !== this.me && !(m.to.position & 5) && (m.to.location & (LOC.ONFIELD_ALL | LOC.HAND | LOC.DECK));   // 相手が裏向きにしたカードは名前を伏せる
-        this.addLog(m.from.location ? `${secret ? 'カード' : cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}` : `${secret ? 'カード' : cardName(code)}を${placeText(m.to.controller, m.to.location, m.to.sequence)}に置いた（練習の操作）`);
+        this.addLog(m.from.location ? `${secret ? 'カード' : cardName(code)}：${placeText(m.from.controller, m.from.location, m.from.sequence)} → ${placeText(m.to.controller, m.to.location, m.to.sequence)}` : `${secret ? 'カード' : cardName(code)}を${placeText(m.to.controller, m.to.location, m.to.sequence)}に置いた${SPEED_FIELDS.has(code) ? "（ライディングデュエルのルール）" : "（練習の操作）"}`);
         break;
       }
       case MSG.DAMAGE: this.addLog(`${m.player === this.me ? '自分' : '相手'}に ${m.amount} ダメージ`); this.events.push({ t: 'damage', player: m.player, amount: m.amount, battle: !!this.attacking }); break;
@@ -703,7 +756,7 @@ class AutoDuel {
 // アプリのカードデータの仮の番号に対応する、EDOPro の番号（発売前のデータの番号 PRE_MAP・正式な番号 IMG_IDS）
 const engineAltCodes = code => [typeof PRE_MAP !== 'undefined' && PRE_MAP[code], typeof IMG_IDS !== 'undefined' && IMG_IDS[code]].filter(x => x && x !== code);
 function engineCardData(code) {
-  if (code === TOOL_CODE) return { code, alias: 0, setcodes: [], type: 0x2, level: 0, attribute: 0, race: 0n, attack: 0, defense: 0, lscale: 0, rscale: 0, link_marker: 0 };   // 練習ツール（魔法カードとして扱う）
+  if (code === TOOL_CODE || code === RULE_CODE) return { code, alias: 0, setcodes: [], type: 0x2, level: 0, attribute: 0, race: 0n, attack: 0, defense: 0, lscale: 0, rscale: 0, link_marker: 0 };   // 練習ツール（魔法カードとして扱う）
   const has0 = typeof EDO_CARDS !== 'undefined';
   // アニメのカード（data/anime-cards.js）は、そのデータに EDOPro の値が入っている
   const ac = DB.byId.get(code);
@@ -1058,7 +1111,7 @@ function cpuThink(m, duel, kind) {
   const hist = duel.history();
   // 手順 path を打ったあとの複製（CPU が次の手を選ぶ場面、または相手の番まで進めたもの）
   const play = path => {
-    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata, sv: duel.sv });
+    const t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, speed: duel.speed, errata: duel.errata, sv: duel.sv });
     t.noThink = true;
     t.create();
     t.stopAtCpu = true;   // 流し直したあと、今の判断の場面（CPU の番）で止める
@@ -1120,7 +1173,7 @@ function cpuChainThink(m, duel) {
     if (performance.now() - t0 > 3500) break;   // 考えすぎない
     let t = null;
     try {
-      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata, sv: duel.sv });
+      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, speed: duel.speed, errata: duel.errata, sv: duel.sv });
       t.noThink = true;
       t.create();
       t.stopAtCpu = true;
@@ -1162,7 +1215,7 @@ function cpuChoiceThink(m, duel, answers) {
     if (performance.now() - t0 > CPU_CHOICE_TIME) break;   // 考えすぎない
     let t = null;
     try {
-      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, errata: duel.errata, sv: duel.sv });
+      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, speed: duel.speed, errata: duel.errata, sv: duel.sv });
       t.noThink = true;
       t.create();
       t.stopAtCpu = true;

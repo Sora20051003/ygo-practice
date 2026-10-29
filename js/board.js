@@ -827,6 +827,16 @@ function setupBoardView() {
   for (const [k, r] of Object.entries(MASTER_RULES)) $('#b-rule').append(el('option', { value: k, text: r.label }));
   $('#b-rule').value = masterRule();
   $('#b-rule').onchange = e => { store.set('ygo.masterRule', e.target.value); toast(MASTER_RULES[e.target.value].note + '（次に開始したときから。効果を自動処理）'); };
+  // ライディングデュエル（アニメのルール）
+  if ($('#b-speed')) {
+    $('#b-speed').innerHTML = '';
+    for (const [k, t] of Object.entries(SPEED_MODES)) $('#b-speed').append(el('option', { value: k, text: t }));
+    $('#b-speed').value = speedMode();
+    $('#b-speed').onchange = e => {
+      store.set('ygo.speedMode', e.target.value);
+      toast({ '': '通常のデュエルにします', turbo: "ライディングデュエル（5D's）：両方のフィールドゾーンに「スピード・ワールド２」が置かれます。「Sp」以外の魔法を発動すると2000ダメージ", action: 'ライディングデュエル（ARC-V）：両方のフィールドゾーンに「クロス・オーバー・アクセル」が置かれ、アクションカードを拾えます' }[e.target.value] + '（次に開始したときから。効果を自動処理）');
+    };
+  }
   $('#b-errata').value = errataMode();
   $('#b-records').onclick = () => { closePause(); openRecords(); };
   $('#b-errata').onchange = e => { store.set('ygo.errata', e.target.value); toast((e.target.value === 'pre' ? 'エラッタのあったカード（' + Object.keys(ERRATA).length + '種類）をエラッタ前の効果で処理します' : 'エラッタ後の今の効果で処理します') + '（次に開始したときから。効果を自動処理）'); };
@@ -1389,6 +1399,7 @@ function endTurn() {
 const firstTurnDraw = () => store.get('ygo.firstDraw', false);
 // マスタールール（効果を自動処理するとき）：mr5＝今のルール／mr3＝EXモンスターゾーンなし・ペンデュラムゾーンは両端
 const masterRule = () => { const r = store.get('ygo.masterRule', 'mr5'); return MASTER_RULES[r] ? r : 'mr5'; };
+const speedMode = () => { const s = store.get('ygo.speedMode', ''); return SPEED_MODES[s] ? s : ''; };
 // エラッタ（効果の変更）があったカードを、エラッタ前の効果で処理するか（'pre'）。ふだんはエラッタ後（'post'）
 const errataMode = () => (store.get('ygo.errata', 'post') === 'pre' ? 'pre' : 'post');
 // そのルールに EXモンスターゾーンがあるか（手動モードなど、ルールの決まりが無い盤面は今のルール）

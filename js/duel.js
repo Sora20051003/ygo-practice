@@ -1449,7 +1449,7 @@ async function beginNetDuel() {
     await loadCardScripts([...decks[0][0], ...decks[0][1], ...decks[1][0], ...decks[1][1], OPP_FILLER], showLoading, netErrata);
   } catch (e) { showLoading(null); showError('自動処理を準備できませんでした', e); return; }
   showLoading(null);
-  const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5', errata: netErrata,
+  const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5', speed: r.speed || '', errata: netErrata,
     chainMode: $('#ap-chain').value, autoTrigger: false, firstDraw: !!r.firstDraw });
   d.drawTap = true;   // 自分のドローフェイズは、画面をタッチするまでドローしない
   noteLinkRemoved(decks[idx][1], r.rule || 'mr5');
@@ -1528,12 +1528,17 @@ function netGameOver(result, reason) {
 function duelRuleSetting(r) {
   const rule = MASTER_RULES[r && r.rule] ? r.rule : 'mr5';
   const isHost = r && r.host === Duel.me.uid;
-  if (!isHost) return el('p', { class: 'muted', text: `ルール：${MASTER_RULES[rule].label}（部屋を作った人が決めます）` });
+  const speed = SPEED_MODES[r && r.speed] ? r.speed : '';
+  if (!isHost) return el('p', { class: 'muted', text: `ルール：${MASTER_RULES[rule].label}・${SPEED_MODES[speed]}（部屋を作った人が決めます）` });
   const sel = el('select', { class: 'full' }, Object.entries(MASTER_RULES).map(([k, x]) => el('option', { value: k, text: x.label, selected: k === rule })));
   // 変えたら2人とも準備OKをやり直す
   sel.addEventListener('change', () => Duel.t.updateRoom({ rule: sel.value, ready: {} }));
+  // ライディングデュエル（アニメのルール）
+  const sp = el('select', { class: 'full' }, Object.entries(SPEED_MODES).map(([k, t]) => el('option', { value: k, text: t, selected: k === speed })));
+  sp.addEventListener('change', () => Duel.t.updateRoom({ speed: sp.value, ready: {} }));
   return el('div', { class: 'duel-time' }, el('label', { class: 'muted', text: 'ルール（マスタールール）' }), sel,
-    el('p', { class: 'muted small-note', text: MASTER_RULES[rule].note }));
+    el('p', { class: 'muted small-note', text: MASTER_RULES[rule].note }),
+    el('label', { class: 'muted', text: 'デュエルの種類' }), sp);
 }
 // エラッタ（効果の変更）があったカードの効果：部屋を作った人が決める（2人で同じにしないと処理がずれる）
 function duelErrataSetting(r) {

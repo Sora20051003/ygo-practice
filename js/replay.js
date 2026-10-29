@@ -51,7 +51,7 @@ function currentRecord() {
   const deckName = (boardDeck() || {}).name || '';
   if (Auto.duel && (Auto.on || Auto.net) && (Auto.net || !(typeof Duel !== 'undefined' && Duel.active))) {
     const d = Auto.duel;
-    const p = { main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed.map(String), opp: d.opp, firstDraw: d.firstDraw, tools: d.tools, rule: d.rule, errata: d.errata, sv: d.sv };
+    const p = { main: d.main, extra: d.extra, handIds: d.handIds, handSize: d.handSize, seed: d.seed.map(String), opp: d.opp, firstDraw: d.firstDraw, tools: d.tools, rule: d.rule, speed: d.speed, errata: d.errata, sv: d.sv };
     if (d.net) p.net = { me: d.net.me, decks: d.net.decks };
     return {
       kind: 'auto', p, items: JSON.parse(JSON.stringify(d.history(), bigReplacer)), deckName,
@@ -250,7 +250,7 @@ async function startReplay(rec, title, shared) {
     } catch (e) { showLoading(null); showError('再生の準備ができませんでした', e); return; }
     showLoading(null);
     const p = rec.p;
-    const d = new AutoDuel({ main: p.main, extra: p.extra, handIds: p.handIds, handSize: p.handSize, seed: p.seed.map(s => BigInt(s)), opp: p.opp, chainMode: 'off', autoTrigger: false, firstDraw: p.firstDraw, tools: p.tools, rule: p.rule, errata: p.errata, sv: p.sv === 2 ? 2 : 1, net: p.net || null });
+    const d = new AutoDuel({ main: p.main, extra: p.extra, handIds: p.handIds, handSize: p.handSize, seed: p.seed.map(s => BigInt(s)), opp: p.opp, chainMode: 'off', autoTrigger: false, firstDraw: p.firstDraw, tools: p.tools, rule: p.rule, speed: p.speed, errata: p.errata, sv: p.sv === 2 ? 2 : 1, net: p.net || null });
     d.replayOnly = true;   // 記録の返答が終わったら、そこで止まる（CPU も自分では動かない）
     Rep.duel = d;
     Rep.items = JSON.parse(JSON.stringify(rec.items), bigReviver);
