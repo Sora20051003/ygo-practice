@@ -1701,3 +1701,8 @@ body.detail-on-field .detail-sheet .cardface.jp.hieratic .jp-desc, body.detail-o
 .nolock-bar { position: fixed; left: 50%; top: 8px; transform: translateX(-50%); z-index: 9999; display: flex; align-items: center; gap: 8px;
   padding: 6px 10px; border-radius: 10px; background: #ffd34d; color: #222; font-size: 13px; font-weight: 700; box-shadow: 0 4px 16px rgba(0,0,0,.35); white-space: nowrap; }
 .nolock-bar .btn { padding: 3px 10px; font-size: 13px; }
+
+/* チェーンの表示は見るだけ。タップは下の盤面（相手の場など）へ通す。横画面では小さく、説明の行は出さない */
+.ap-chainbox { pointer-events: none; }
+body.land #view-board .ap-chainbox { padding: 4px 8px; font-size: 11px; gap: 1px; max-width: 190px; background: rgba(0,0,0,.55); }
+body.land #view-board .ap-chainbox .small-note { display: none; }
