@@ -137,12 +137,27 @@ function withAnimeCards(cards) {
   DB.animeOf = new Map();
   if (typeof ANIME_CARDS === 'undefined') return cards;
   const byId = new Map(cards.map(c => [c.id, c]));
+  // 同じ名前のカード：今のカード（日本語名・英語名）と、先に入れたアニメだけのカード
+  const nameKey = s => normalizeText(s || '');
+  const byName = new Map();
+  for (const c of cards) { if (c.name && !byName.has(nameKey(c.name))) byName.set(nameKey(c.name), c); if (c.en && !byName.has('en:' + nameKey(c.en))) byName.set('en:' + nameKey(c.en), c); }
+  const animeByName = new Map();
   const add = [];
   for (const [k, a] of Object.entries(ANIME_CARDS.d)) {
     const id = +k;
     if (byId.has(id)) continue;   // 番号がほかのカードとぶつかるものは入れない
-    const [base, tag, en, ja, type, lv, race, attr, atk, def, sc, alias, jaText, enText, strs, ruby] = a;
-    const b = base ? byId.get(base) : null;
+    const [base0, tag, en, ja, type, lv, race, attr, atk, def, sc, alias, jaText, enText, strs, ruby] = a;
+    let base = base0;
+    let b = base ? byId.get(base) : null;
+    // 今のカードと同じ名前なのに、つながっていないもの → そのカードのアニメ版にする
+    if (!b) { b = (ja && byName.get(nameKey(ja))) || byName.get('en:' + nameKey(en)) || null; base = b ? b.id : 0; }
+    // アニメだけのカードで、同じ名前のものが前にある（同じカードの別の版） → 前のもののもう1つの版にする（検索には1枚だけ出す）
+    let dupOf = null;
+    if (!b) {
+      const key = nameKey(ja || en);
+      dupOf = animeByName.get(key) || null;
+      if (!dupOf) animeByName.set(key, null);   // 下で自分を入れる
+    }
     const c = {
       id, cid: 0, name: b ? `${b.name}（${tag}）` : (ja || en), noJp: !b && !ja, md: false, ruby: b ? b.ruby : (ruby || ''), en, type, atk, def,
       level: lv & 0xff, ls: (lv >>> 24) & 0xff, rs: (lv >>> 16) & 0xff, race, setcode: b ? b.setcode : 0, attr,
@@ -152,8 +167,16 @@ function withAnimeCards(cards) {
     const text = jaText || enText || '';
     if (text) { c.jaText = text; c.tkey = normalizeText(text); }
     if (b) { if (!DB.animeOf.has(base)) DB.animeOf.set(base, []); DB.animeOf.get(base).push(c); }
-    // アニメだけのカードは絵が無い（枠だけ描く）。無い絵を取りに行かないようにする
-    else if (typeof missingImages !== 'undefined') for (const k of ['art', 'small', 'full']) missingImages.add(id + k);
+    else {
+      if (dupOf) {
+        // 同じ名前のアニメだけのカードの別の版：最初の1枚にまとめる（検索には出さず、カードの説明で切り替える）
+        c.animeBase = dupOf.id; c.name = `${c.name}（別の版）`;
+        if (!DB.animeOf.has(dupOf.id)) DB.animeOf.set(dupOf.id, []);
+        DB.animeOf.get(dupOf.id).push(c);
+      } else animeByName.set(nameKey(ja || en), c);
+      // アニメだけのカードは絵が無い（枠だけ描く）。無い絵を取りに行かないようにする
+      if (typeof missingImages !== 'undefined') for (const k of ['art', 'small', 'full']) missingImages.add(id + k);
+    }
     add.push(c);
   }
   return add.length ? [...cards, ...add] : cards;
