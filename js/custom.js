@@ -74,7 +74,38 @@ const CUSTOM_WHEN = {
   attack: { label: '相手モンスターの攻撃宣言時（カードの発動）', pre: '相手モンスターの攻撃宣言時', cost: '', card: true, ok: d => (d.kind === 'trap' || (d.kind === 'spell' && d.stype === 'quick')) && !isZoneST(d) },
 };
 // 発動のコスト（自分で決める分）。手札から捨てる・墓地から除外するタイミングには付けない
-const CUSTOM_COSTS = { '': 'なし', discard: '手札を１枚捨てる', lp: 'LPを払う' };
+const CUSTOM_COSTS = { '': 'なし', discard: '手札を１枚捨てる', lp: 'LPを払う', tribute: 'このカードをリリースする', tribother: '自分フィールドのほかのモンスター１体をリリースする', selfgy: 'このカードを墓地へ送る', banishgy: '自分の墓地のカード１枚を除外する' };
+// コストの文。te：あとに「発動できる」が続くとき／ren：あとに「〜を対象として」が続くとき
+const COST_WORDS = {
+  discard: ['手札を１枚捨てて', '手札を１枚捨て、'],
+  tribute: ['このカードをリリースして', 'このカードをリリースし、'],
+  tribother: ['自分フィールドのモンスター１体をリリースして', '自分フィールドのモンスター１体をリリースし、'],
+  selfgy: ['このカードを墓地へ送って', 'このカードを墓地へ送り、'],
+  banishgy: ['自分の墓地のカード１枚を除外して', '自分の墓地のカード１枚を除外し、'],
+};
+// このカードがフィールドにある時に使う効果か（「このカードをリリース」「墓地へ送る」が選べる）
+const onFieldWhen = (d, when) => ['ignition', 'quick', 'chain'].includes(when) && (d.kind === 'monster' || isZoneST(d));
+const costAllowed = (d, when, cost) => {
+  if (!costOk(when)) return false;
+  if (cost === 'tribute') return d.kind === 'monster' && onFieldWhen(d, when);
+  if (cost === 'selfgy') return onFieldWhen(d, when);
+  return !!CUSTOM_COSTS[cost];
+};
+function costPhrase(x, d, tgt) {
+  if (!x.cost || !costAllowed(d, x.when, x.cost)) return '';
+  if (x.cost === 'lp') return `ＬＰを${zen(Math.max(100, +x.lp || 1000))}${tgt ? '払い、' : '払って'}`;
+  const w = COST_WORDS[x.cost];
+  return w ? w[tgt ? 1 : 0] : '';
+}
+// 発動の条件。full：「〜場合」の前／stem：ほかの条件の前につなぐ形。o：「他の」（このカードがフィールドにいるとき）
+const CUSTOM_CONDS = {
+  nomon: { label: '自分フィールドに（他の）モンスターが存在しない', full: o => `自分フィールドに${o}モンスターが存在しない`, stem: o => `自分フィールドに${o}モンスターが存在せず` },
+  oppmon: { label: '相手フィールドにモンスターが存在する', full: () => '相手フィールドにモンスターが存在する', stem: () => '相手フィールドにモンスターが存在し' },
+  oppmore: { label: '相手フィールドのモンスターが自分フィールドより多い', full: () => '相手フィールドのモンスターの数が自分フィールドのモンスターより多い', stem: () => '相手フィールドのモンスターの数が自分フィールドのモンスターより多く' },
+  lpless: { label: '自分のLPが相手より少ない', full: () => '自分のLPが相手より少ない', stem: () => '自分のLPが相手より少なく' },
+  gy5: { label: '自分の墓地にモンスターが５体以上存在する', full: () => '自分の墓地にモンスターが５体以上存在する', stem: () => '自分の墓地にモンスターが５体以上存在し' },
+};
+const condOk = (d, when) => !['handattack', 'attack'].includes(when);
 const costOk = when => !CUSTOM_WHEN[when] || !CUSTOM_WHEN[when].cost;
 // 相手フィールドのどのカードか（破壊・除外・手札に戻す）
 const CUSTOM_AREAS = { card: 'カード', monster: 'モンスター', st: '魔法・罠カード' };
@@ -180,18 +211,45 @@ function customWhatText(x, d) {
     default: return { rest: '' };
   }
 }
-// 縛りの文（「ターン終了時まで自分は「A」、「B」カードの効果しか発動できない」など）
+// ---------- 縛り ----------
+// lk = { kind, timing, themes, attr, race, mtype, extra }
+//  kind：act＝〜の効果しか発動できない／ss＝〜しか特殊召喚できない（条件なし＝特殊召喚できない）
+//        atk＝〜でしか攻撃宣言できない（条件なし＝攻撃宣言できない）／nosummon＝通常召喚できない
+//  timing：after＝発動後、ターン終了時まで／turn＝発動するターン（先にほかのカードを使っていたら発動できない）
+const LOCK_KINDS = { act: '決めたカードの効果しか発動できない', ss: '決めたモンスターしか特殊召喚できない（決めなければ特殊召喚できない）', atk: '決めたモンスターでしか攻撃宣言できない（決めなければ攻撃できない）', nosummon: '通常召喚できない' };
+const LOCK_TIMINGS = { after: '発動後、ターン終了時まで', turn: '発動するターン（先に縛りに合わないことをしていたら発動できない）' };
+const LOCK_MTYPES = { fusion: '融合', synchro: 'シンクロ', xyz: 'エクシーズ', link: 'リンク', ritual: '儀式', pendulum: 'ペンデュラム' };
+const LOCK_MTYPE_BITS = { fusion: 'TYPE_FUSION', synchro: 'TYPE_SYNCHRO', xyz: 'TYPE_XYZ', link: 'TYPE_LINK', ritual: 'TYPE_RITUAL', pendulum: 'TYPE_PENDULUM' };
+const lockHasCond = lk => !!((lk.themes || []).length || lk.attr || lk.race || LOCK_MTYPES[lk.mtype]);
+const lockOk = lk => !!(lk && LOCK_KINDS[lk.kind] && (lk.kind !== 'act' || lockHasCond(lk)));
+// 効果の縛り（前の形 x.lock も読む。2つまで）
+const locksOf = x => (!x ? [] : Array.isArray(x.locks) ? x.locks : x.lock ? [x.lock] : []).filter(lockOk).slice(0, 2);
 function lockWhoText(lk) {
   const th = (lk.themes || []).map(themeLabel).join('、');
-  return `${th}${lk.attr && ATTR[lk.attr] ? ATTR[lk.attr] + '属性' : ''}${lk.race && RACE[lk.race] ? RACE[lk.race] : ''}`;
+  return `${th}${lk.attr && ATTR[lk.attr] ? ATTR[lk.attr] + '属性' : ''}${lk.race && RACE[lk.race] ? RACE[lk.race] : ''}${LOCK_MTYPES[lk.mtype] || ''}`;
 }
-function lockText(lk) {
-  if (!lk) return '';
-  const who = lockWhoText(lk), mon = lk.attr || lk.race;
-  return lk.kind === 'ss' ? `ターン終了時まで自分は${lk.extra ? 'エクストラデッキから' : ''}${who}モンスターしか特殊召喚できない`
-    : `ターン終了時まで自分は${who}${mon ? 'モンスター' : 'カード'}の効果しか発動できない`;
+// 「自分は」のあとの文（「〜しか特殊召喚できない」）
+function lockClause(lk) {
+  const who = lockWhoText(lk), cond = lockHasCond(lk), mon = lk.attr || lk.race || LOCK_MTYPES[lk.mtype];
+  const ex = lk.extra ? 'エクストラデッキから' : '';
+  switch (lk.kind) {
+    case 'ss': return cond ? `${ex}${who}モンスターしか特殊召喚できない` : `${ex}モンスターを特殊召喚できない`;
+    case 'act': return `${who}${mon ? 'モンスター' : 'カード'}の効果しか発動できない`;
+    case 'atk': return cond ? `${who}モンスターでしか攻撃宣言できない` : 'モンスターで攻撃宣言できない';
+    case 'nosummon': return 'モンスターを通常召喚できない';
+  }
+  return '';
 }
-const lockOk = lk => !!(lk && (lk.kind === 'act' || lk.kind === 'ss') && ((lk.themes || []).length || lk.attr || lk.race));
+// 縛りの文。label：「この効果」「このカード」「このカードの効果」
+function lockSentences(locks, label) {
+  const join = ls => ls.map((lk, k) => (k < ls.length - 1 ? lockClause(lk).replace(/できない$/, 'できず') : lockClause(lk))).join('、');
+  const out = [];
+  const turn = locks.filter(l => l.timing === 'turn'), after = locks.filter(l => l.timing !== 'turn');
+  if (turn.length) out.push(`${label}を発動するターン、自分は${join(turn)}`);
+  if (after.length) out.push(`${label}の発動後、ターン終了時まで自分は${join(after)}`);
+  return out.join('。');
+}
+const lockText = lk => (lk ? lockSentences([lk], 'この効果') : '');
 // 効果文（本物のカードに近い書き方）
 function customText(d) {
   const effs = (d.effects || []).slice(0, maxEffects(d)).filter(x => CUSTOM_WHEN[x.when] && CUSTOM_WHAT[x.what]);
@@ -207,25 +265,28 @@ function customText(d) {
   const opt = effs.map((x, i) => (optOf(x) === 'name' ? CIRCLED[i] : null)).filter(Boolean);
   if (single && opt.length) lines.push('このカード名のカードは１ターンに１枚しか発動できない。');
   else if (opt.length) lines.push(`このカード名の${opt.join('')}の効果は${opt.length > 1 ? 'それぞれ' : ''}１ターンに１度しか使用できない。`);
-  // 縛り：全部の効果に同じ縛りがあれば最後に1回（「このカードの効果の発動後、」）、ほかは効果ごと（「この効果の発動後、」）
-  const lks = effs.map(x => (lockOk(x.lock) ? lockText(x.lock) : ''));
-  const cardLock = effs.length > 1 && lks[0] && lks.every(t => t === lks[0]) ? lks[0] : '';
+  // 縛り：全部の効果に同じ縛りがあれば最後に1回（「このカードの効果の」）、ほかは効果ごと（「この効果の」）
+  const lockKey = x => JSON.stringify(locksOf(x).map(l => [l.timing === 'turn', lockClause(l)]));
+  const cardLock = effs.length > 1 && locksOf(effs[0]).length && effs.every(x => lockKey(x) === lockKey(effs[0]));
   effs.forEach((x, i) => {
     const w = CUSTOM_WHEN[x.when];
     let { tgt, rest } = customWhatText(x, d);
-    if (lks[i] && !cardLock) rest += `。${single ? 'このカードの発動後' : 'この効果の発動後'}、${lks[i]}`;
+    if (locksOf(x).length && !cardLock) rest += '。' + lockSentences(locksOf(x), single ? 'このカード' : 'この効果');
     // ターン1（このカード1枚ごと）は文の頭に「１ターンに１度、」
     const head = `${CIRCLED[i]}：` + (!single && optOf(x) === 'soft' ? '１ターンに１度、' : '');
     // コスト：あとに「〜を対象として」が続くときは「捨て、」「払い、」、続かなければ「捨てて」「払って」
-    const ct = costOk(x.when) && x.cost === 'discard' ? (tgt ? '手札を１枚捨て、' : '手札を１枚捨てて')
-      : costOk(x.when) && x.cost === 'lp' ? `ＬＰを${zen(Math.max(100, +x.lp || 1000))}${tgt ? '払い、' : '払って'}` : '';
+    const ct = costPhrase(x, d, !!tgt);
+    // 発動の条件（「相手フィールドにモンスターが存在する場合」など）
+    const cd = CUSTOM_CONDS[x.cond] && condOk(d, x.when) ? CUSTOM_CONDS[x.cond] : null;
+    const other = d.kind === 'monster' && onFieldWhen(d, x.when) ? '他の' : '';
+    const pre = cd ? (w.pre ? `${cd.stem(other)}、${w.pre}` : `${cd.full(other)}場合`) : w.pre;
     const must = w.trig && x.must;   // 強制効果は「発動する」
     let s;
-    if (w.card && !w.pre && !tgt && !ct) s = `${rest}。`;   // 魔法・罠の発動（条件・対象・コストなし）
-    else s = `${w.pre ? w.pre + (tgt || w.cost || ct ? '、' : 'に') : ''}${w.cost}${w.cost && (tgt || ct) ? '、' : ''}${ct}${tgt ? tgt + 'を対象として' : ''}${must ? '発動する' : '発動できる'}。${rest}。${w.quick ? 'この効果は相手ターンでも発動できる。' : ''}`;
+    if (w.card && !pre && !tgt && !ct) s = `${rest}。`;   // 魔法・罠の発動（条件・対象・コストなし）
+    else s = `${pre ? pre + (tgt || w.cost || ct ? '、' : 'に') : ''}${w.cost}${w.cost && (tgt || ct) ? '、' : ''}${ct}${tgt ? tgt + 'を対象として' : ''}${must ? '発動する' : '発動できる'}。${rest}。${w.quick ? 'この効果は相手ターンでも発動できる。' : ''}`;
     lines.push(head + s.replace('捨てて、', '捨て、'));
   });
-  if (cardLock) lines.push(`このカードの効果の発動後、${cardLock}。`);
+  if (cardLock) lines.push(lockSentences(locksOf(effs[0]), 'このカードの効果') + '。');
   if (d.memo) lines.push(d.memo);
   return lines.join('\n');
 }
@@ -246,7 +307,7 @@ function customToCard(d) {
   c.tkey = normalizeText(c.jaText);
   c.jaStrs = (d.effects || []).map(x => (CUSTOM_WHAT[x.what] ? CUSTOM_WHAT[x.what].label : '効果'));
   // 8番から：縛りの表示（エンジンの「制限が付いた」の文）
-  (d.effects || []).forEach((x, i) => { if (lockOk(x.lock)) c.jaStrs[8 + i] = lockText(x.lock).replace(/^ターン終了時まで/, ''); });
+  (d.effects || []).forEach((x, i) => locksOf(x).forEach((lk, j) => { c.jaStrs[8 + i * 2 + j] = '自分は' + lockClause(lk); }));
   c.key = normalizeText(c.name) + '||';
   c.nkey = normalizeText(c.name);
   return c;
@@ -496,43 +557,99 @@ function luaRegister(x, d, i, act) {
   if (props.length) lines.push(`	e${i}:SetProperty(${props.join('+')})`);
   if (optOf(x) === 'name') lines.push(`	e${i}:SetCountLimit(1,{id,${i}})`);
   else if (optOf(x) === 'soft') lines.push(`	e${i}:SetCountLimit(1)`);
-  if (isChainWhen(w)) lines.push(`	e${i}:SetCondition(s.chaincon${x.what === 'negate' ? 'neg' : ''})`);
-  if (w === 'handquick' || w === 'handchain') lines.push(`	e${i}:SetCost(s.discost)`);
-  if (w === 'gyban') lines.push(`	e${i}:SetCost(s.bancost)`);
-  if (w === 'attack' || w === 'handattack') lines.push(`	e${i}:SetCondition(s.atkcon)`);
-  // 自分で決めたコスト（手札を1枚捨てる・LPを払う）
-  if (costOk(w) && x.cost === 'discard') lines.push(`	e${i}:SetCost(s.handcost)`);
-  if (costOk(w) && x.cost === 'lp') lines.push(`	e${i}:SetCost(s.lpcost(${Math.max(100, +x.lp || 1000)}))`);
+  // 発動の条件（相手の発動に対して・攻撃宣言時・自分で決めた条件）
+  const conds = [];
+  if (isChainWhen(w)) conds.push(`s.chaincon${x.what === 'negate' ? 'neg' : ''}`);
+  if (w === 'attack' || w === 'handattack') conds.push('s.atkcon');
+  if (CUSTOM_CONDS[x.cond] && condOk(d, w)) conds.push(`s.cd_${x.cond}`);
+  if (conds.length) lines.push(`	e${i}:SetCondition(${conds.length > 1 ? `s.condw(${conds.join(',')})` : conds[0]})`);
+  // コスト（タイミングで決まる分・自分で決めた分）
+  let cost = w === 'handquick' || w === 'handchain' ? 's.discost' : w === 'gyban' ? 's.bancost' : null;
+  if (x.cost && costAllowed(d, w, x.cost)) cost = { discard: 's.handcost', lp: `s.lpcost(${Math.max(100, +x.lp || 1000)})`, tribute: 's.relcost', tribother: 's.relothercost', selfgy: 's.selfgycost', banishgy: 's.gybancost' }[x.cost] || cost;
+  // 縛り：「発動するターン」は、先に縛りに合わないことをしていたら発動できない
+  const locks = locksOf(x);
+  if (locks.some(l => l.timing === 'turn')) cost = `s.costw(${cost || 'nil'},s.lockchk${i})`;
+  if (cost) lines.push(`	e${i}:SetCost(${cost})`);
   // 縛り：発動したときに付ける（効果が無効になっても付く）
-  const tg = lockOk(x.lock) ? `s.tgw(s.tg${i},s.lock${i})` : `s.tg${i}`;
+  const tg = locks.length ? `s.tgw(s.tg${i},s.lock${i})` : `s.tg${i}`;
   lines.push(`	e${i}:SetTarget(${tg})`, `	e${i}:SetOperation(s.op${i})`, `	c:RegisterEffect(e${i})`);
   // 召喚した場合：特殊召喚した場合も同じ効果
   if (w === 'summon') lines.push(`	local e${i}b=e${i}:Clone()`, `	e${i}b:SetCode(EVENT_SPSUMMON_SUCCESS)`, `	c:RegisterEffect(e${i}b)`);
   return lines.join('\n');
 }
-// 縛り：ターン終了時まで、自分は条件に合うカードの効果しか発動できない／条件に合うモンスターしか特殊召喚できない
-function luaLock(lk, i) {
+// 縛りの条件に合うカード c か（Lua の式）
+function lockLuaCond(lk) {
   const cond = [];
   const th = [...new Set((lk.themes || []).map(t => themeCodes(t).edo).filter(Boolean))];
   if (th.length) cond.push('(' + th.map(s => `c:IsSetCard(${s})`).join(' or ') + ')');
   if (lk.attr) cond.push(`c:IsAttribute(${+lk.attr})`);
   if (lk.race) cond.push(`c:IsRace(${+lk.race})`);
-  if ((lk.attr || lk.race) && lk.kind === 'act') cond.push('c:IsType(TYPE_MONSTER)');
-  const ok = cond.join(' and ') || 'true';
-  const body = lk.kind === 'ss' ? `	e1:SetCode(EFFECT_CANNOT_SPECIAL_SUMMON)
-	e1:SetTarget(function(_,c,sump,sumtype,sumpos,targetp,se) return not (${ok})${lk.extra ? ' and c:IsLocation(LOCATION_EXTRA)' : ''} end)`
-    : `	e1:SetCode(EFFECT_CANNOT_ACTIVATE)
-	e1:SetValue(function(_,re,tp) local c=re:GetHandler() return not (${ok}) end)`;
-  return `function s.lock${i}(e,tp)
-	local e1=Effect.CreateEffect(e:GetHandler())
-	e1:SetDescription(aux.Stringid(id,${8 + i}))
-	e1:SetType(EFFECT_TYPE_FIELD)
-	e1:SetProperty(EFFECT_FLAG_PLAYER_TARGET+EFFECT_FLAG_CLIENT_HINT)
-	e1:SetTargetRange(1,0)
-${body}
-	e1:SetReset(RESET_PHASE+PHASE_END)
-	Duel.RegisterEffect(e1,tp)
-end`;
+  if (LOCK_MTYPE_BITS[lk.mtype]) cond.push(`c:IsType(${LOCK_MTYPE_BITS[lk.mtype]})`);
+  else if ((lk.attr || lk.race) && lk.kind === 'act') cond.push('c:IsType(TYPE_MONSTER)');
+  return cond.join(' and ');
+}
+// 効果 i の縛り：s.lock{i}（発動したときに付ける）、s.lockchk{i}（「発動するターン」の確認）、init（数える仕組み。initial_effect に入れる）
+function luaLocks(locks, i) {
+  const regs = [], chks = [], init = [];
+  locks.forEach((lk, j) => {
+    const K = i * 2 + j, ok = lockLuaCond(lk), has = !!ok, ctr = `id+${K + 1}`;
+    const add = (code, extra) => regs.push(`	local e${j}${code[1]}=Effect.CreateEffect(e:GetHandler())
+	e${j}${code[1]}:SetType(EFFECT_TYPE_FIELD)
+	e${j}${code[1]}:SetCode(${code[0]})
+${extra.map(l => `	e${j}${code[1]}:${l}`).join('\n')}
+	e${j}${code[1]}:SetReset(RESET_PHASE+PHASE_END)
+	Duel.RegisterEffect(e${j}${code[1]},tp)`);
+    const P = ['SetProperty(EFFECT_FLAG_PLAYER_TARGET)', 'SetTargetRange(1,0)'];
+    switch (lk.kind) {
+      case 'ss': {
+        const bad = (has ? `not (${ok})` : 'true') + (lk.extra ? ' and c:IsLocation(LOCATION_EXTRA)' : '');
+        add(['EFFECT_CANNOT_SPECIAL_SUMMON', 'a'], [...P, `SetTarget(function(_,c) return ${bad} end)`]);
+        if (lk.timing === 'turn') {
+          if (!has && !lk.extra) chks.push('Duel.GetActivityCount(tp,ACTIVITY_SPSUMMON)==0');
+          else {
+            init.push(`	Duel.AddCustomActivityCounter(${ctr},ACTIVITY_SPSUMMON,function(c) return ${has ? ok : 'false'}${lk.extra ? ' or not c:IsSummonLocation(LOCATION_EXTRA)' : ''} end)`);
+            chks.push(`Duel.GetCustomActivityCount(${ctr},tp,ACTIVITY_SPSUMMON)==0`);
+          }
+        }
+        break;
+      }
+      case 'act':
+        add(['EFFECT_CANNOT_ACTIVATE', 'a'], [...P, `SetValue(function(_,re,tp) local c=re:GetHandler() return not (${ok || 'true'}) end)`]);
+        if (lk.timing === 'turn') {
+          init.push(`	Duel.AddCustomActivityCounter(${ctr},ACTIVITY_CHAIN,function(re,tp,cid) local c=re:GetHandler() return ${ok || 'true'} end)`);
+          chks.push(`Duel.GetCustomActivityCount(${ctr},tp,ACTIVITY_CHAIN)==0`);
+        }
+        break;
+      case 'atk':
+        add(['EFFECT_CANNOT_ATTACK_ANNOUNCE', 'a'], ['SetTargetRange(LOCATION_MZONE,0)', `SetTarget(function(_,c) return ${has ? `not (${ok})` : 'true'} end)`]);
+        if (lk.timing === 'turn') {
+          if (!has) chks.push('Duel.GetActivityCount(tp,ACTIVITY_ATTACK)==0');
+          else {
+            init.push(`	Duel.AddCustomActivityCounter(${ctr},ACTIVITY_ATTACK,function(c) return ${ok} end)`);
+            chks.push(`Duel.GetCustomActivityCount(${ctr},tp,ACTIVITY_ATTACK)==0`);
+          }
+        }
+        break;
+      case 'nosummon':
+        add(['EFFECT_CANNOT_SUMMON', 'a'], P);
+        add(['EFFECT_CANNOT_MSET', 'b'], P);
+        if (lk.timing === 'turn') chks.push('Duel.GetActivityCount(tp,ACTIVITY_NORMALSUMMON)==0');
+        break;
+    }
+    // 画面に「制限が付いた」と出す
+    regs.push(`	local h${j}=Effect.CreateEffect(e:GetHandler())
+	h${j}:SetDescription(aux.Stringid(id,${8 + K}))
+	h${j}:SetType(EFFECT_TYPE_FIELD)
+	h${j}:SetProperty(EFFECT_FLAG_PLAYER_TARGET+EFFECT_FLAG_CLIENT_HINT)
+	h${j}:SetTargetRange(1,0)
+	h${j}:SetReset(RESET_PHASE+PHASE_END)
+	Duel.RegisterEffect(h${j},tp)`);
+  });
+  const code = `function s.lock${i}(e,tp)
+${regs.join('\n')}
+end${chks.length ? `
+function s.lockchk${i}(e,tp) return ${chks.join(' and ')} end` : ''}`;
+  return { code, init };
 }
 function customLua(d) {
   const init = [];
@@ -554,7 +671,7 @@ function customLua(d) {
     if (!act) return;
     init.push(luaRegister(x, d, i, act));
     funcs.push(act.code);
-    if (lockOk(x.lock)) funcs.push(luaLock(x.lock, i));
+    if (locksOf(x).length) { const L = luaLocks(locksOf(x), i); funcs.push(L.code); init.push(...L.init); }
   });
   return `local s,id=GetID()
 function s.initial_effect(c)
@@ -566,6 +683,44 @@ function s.tgw(tg,lk)
 		tg(e,tp,eg,ep,ev,re,r,rp,chk,chkc)
 		lk(e,tp)
 	end
+end
+function s.costw(cost,lockchk)
+	return function(e,tp,eg,ep,ev,re,r,rp,chk)
+		if chk==0 then return lockchk(e,tp) and (not cost or cost(e,tp,eg,ep,ev,re,r,rp,0)) end
+		if cost then cost(e,tp,eg,ep,ev,re,r,rp,chk) end
+	end
+end
+function s.condw(...)
+	local fs={...}
+	return function(...)
+		for _,f in ipairs(fs) do if not f(...) then return false end end
+		return true
+	end
+end
+function s.cd_nomon(e,tp) return Duel.GetMatchingGroupCount(nil,tp,LOCATION_MZONE,0,e:GetHandler())==0 end
+function s.cd_oppmon(e,tp) return Duel.GetFieldGroupCount(tp,0,LOCATION_MZONE)>0 end
+function s.cd_oppmore(e,tp) return Duel.GetFieldGroupCount(tp,0,LOCATION_MZONE)>Duel.GetFieldGroupCount(tp,LOCATION_MZONE,0) end
+function s.cd_lpless(e,tp) return Duel.GetLP(tp)<Duel.GetLP(1-tp) end
+function s.cd_gy5(e,tp) return Duel.GetMatchingGroupCount(function(c) return c:IsType(TYPE_MONSTER) end,tp,LOCATION_GRAVE,0,nil)>=5 end
+function s.relcost(e,tp,eg,ep,ev,re,r,rp,chk)
+	if chk==0 then return e:GetHandler():IsReleasable() end
+	Duel.Release(e:GetHandler(),REASON_COST)
+end
+function s.relothercost(e,tp,eg,ep,ev,re,r,rp,chk)
+	if chk==0 then return Duel.IsExistingMatchingCard(Card.IsReleasable,tp,LOCATION_MZONE,0,1,e:GetHandler()) end
+	Duel.Hint(HINT_SELECTMSG,tp,HINTMSG_RELEASE)
+	local g=Duel.SelectMatchingCard(tp,Card.IsReleasable,tp,LOCATION_MZONE,0,1,1,e:GetHandler())
+	Duel.Release(g,REASON_COST)
+end
+function s.selfgycost(e,tp,eg,ep,ev,re,r,rp,chk)
+	if chk==0 then return e:GetHandler():IsAbleToGraveAsCost() end
+	Duel.SendtoGrave(e:GetHandler(),REASON_COST)
+end
+function s.gybancost(e,tp,eg,ep,ev,re,r,rp,chk)
+	if chk==0 then return Duel.IsExistingMatchingCard(Card.IsAbleToRemoveAsCost,tp,LOCATION_GRAVE,0,1,nil) end
+	Duel.Hint(HINT_SELECTMSG,tp,HINTMSG_REMOVE)
+	local g=Duel.SelectMatchingCard(tp,Card.IsAbleToRemoveAsCost,tp,LOCATION_GRAVE,0,1,1,nil)
+	Duel.Remove(g,POS_FACEUP,REASON_COST)
 end
 function s.chaincon(e,tp,eg,ep,ev,re,r,rp) return rp==1-tp end
 function s.chainconneg(e,tp,eg,ep,ev,re,r,rp) return rp==1-tp and Duel.IsChainNegatable(ev) end
@@ -615,22 +770,36 @@ function normEffText(s) {
     .replace(/墓地に(存在する|ある)このカード/g, '墓地のこのカード')
     .replace(/。+/g, '。');
 }
-// 縛りの文（「自分は「A」、「B」カードの効果しか発動できない」「自分は「A」モンスターしか特殊召喚できない」）を読む
-const LOCK_RE = /しか(?:効果を)?(発動|特殊召喚)できない/;
+// 縛りの文（「自分は「A」、「B」カードの効果しか発動できない」「自分は「A」モンスターしか特殊召喚できない」
+// 「このカードを発動するターン、自分はモンスターを特殊召喚できない」など）を読む。返り値：縛りの配列（無ければ null）
+const LOCK_RE = /自分は.*(しか(効果を)?発動できない|特殊召喚できない|通常召喚できない|召喚・セットできない|攻撃宣言できない|攻撃できない|できず)/;
+function parseLockClause(cl, timing) {
+  const lk = { timing, themes: [] };
+  if (/しか(効果を)?発動でき/.test(cl)) lk.kind = 'act';
+  else if (/特殊召喚でき/.test(cl)) lk.kind = 'ss';
+  else if (/攻撃(宣言)?でき/.test(cl)) lk.kind = 'atk';
+  else if (/通常召喚でき|召喚・セットでき/.test(cl)) lk.kind = 'nosummon';
+  else return null;
+  if (lk.kind !== 'nosummon') {
+    const who = cl.replace(/(しか|でしか|を).*$/, '');
+    lk.themes = [...new Set([...who.matchAll(/「([^」]+)」/g)].map(x => themeByLooseName(x[1])))];
+    for (const [k, v] of Object.entries(ATTR)) if (who.includes(v + '属性')) lk.attr = +k;
+    let rl = 0;
+    for (const [k, v] of Object.entries(RACE)) if (who.includes(v) && v.length > rl) { lk.race = +k; rl = v.length; }
+    for (const [k, v] of Object.entries(LOCK_MTYPES)) if (who.includes(v + 'モンスター')) lk.mtype = k;
+    if (lk.kind === 'ss' && /エクストラデッキから/.test(cl)) lk.extra = true;
+    // 「しか」が無い：条件なし（特殊召喚できない・攻撃宣言できない）
+    if (!/しか/.test(cl)) { lk.themes = []; delete lk.attr; delete lk.race; delete lk.mtype; }
+  }
+  return lockOk(lk) ? lk : null;
+}
 function parseLockSentence(s) {
-  const m = s.match(LOCK_RE);
-  if (!m || /1ターンに1(度|回|枚)/.test(s)) return null;
-  const head = s.slice(0, m.index);
-  const lk = { kind: m[1] === '発動' ? 'act' : 'ss', themes: [] };
-  // 「自分は」より後ろの部分（「このカードの効果の発動後、ターン終了時まで自分は〜」）
-  const who = head.replace(/^.*自分は/, '');
-  lk.themes = [...new Set([...who.matchAll(/「([^」]+)」/g)].map(x => themeByLooseName(x[1])))];
-  for (const [k, v] of Object.entries(ATTR)) if (who.includes(v + '属性')) lk.attr = +k;
-  let rl = 0;
-  for (const [k, v] of Object.entries(RACE)) if (who.includes(v) && v.length > rl) { lk.race = +k; rl = v.length; }
-  if (lk.kind === 'ss' && /エクストラデッキから/.test(who)) lk.extra = true;
-  if (!lk.themes.length && !lk.attr && !lk.race) return null;
-  return lk;
+  if (!LOCK_RE.test(s) || /1ターンに1(度|回|枚)/.test(s)) return null;
+  if (!/このターン|発動後|発動する|発動した|ターン終了時まで/.test(s)) return null;   // 「このカードは通常召喚できない」などは縛りではない
+  const timing = /発動(する|した)ターン/.test(s) ? 'turn' : 'after';
+  const body = s.replace(/^.*?自分は/, '').replace(/。$/, '');
+  const locks = body.split(/(?<=できず)、?/).map(cl => parseLockClause(cl, timing)).filter(Boolean);
+  return locks.length ? locks : null;
 }
 function parseEffectText(text, d) {
   const notes = [], themes = [];
@@ -645,9 +814,9 @@ function parseEffectText(text, d) {
       const lk = LOCK_RE.test(s) ? parseLockSentence(s.replace(/^[①②③④⑤][:：]?/, '')) : null;
       if (!lk) { kept += s; continue; }
       if (/^[①②③④⑤]/.test(s)) kept += s.match(/^[①②③④⑤][:：]?/)[0];   // 番号だけは残す
-      if (cur >= 0 && !/このカード(の効果)?(の発動後|を発動)/.test(s)) (effLocks[cur] = effLocks[cur] || []).push(lk);
-      else cardLocks.push(lk);
-      themes.push(...lk.themes.filter(t => customThemes(d).includes(t)));
+      if (cur >= 0 && !/このカード(の効果)?(の発動後|を発動)/.test(s)) (effLocks[cur] = effLocks[cur] || []).push(...lk);
+      else cardLocks.push(...lk);
+      for (const l of lk) themes.push(...l.themes.filter(t => customThemes(d).includes(t)));
     }
     all = kept;
   }
@@ -735,6 +904,19 @@ function parseEffectText(text, d) {
     const lp = pre.match(/(?:LP|ＬＰ|ライフポイント)を(\d+)払/) || pre.match(/(\d+)(?:LP|ＬＰ|ライフポイント)を払/);
     if (lp) { x.cost = 'lp'; x.lp = Math.max(100, Math.round(+lp[1] / 100) * 100); }
     else if (/(LP|ＬＰ)を半分払/.test(pre)) notes.push(`${no}：「LPを半分払う」は作れないので、コストは入れていません`);
+    // ほかのコスト（リリース・墓地へ送る・墓地のカードを除外）
+    if (!x.cost && !discardSelf) {
+      if (/このカードをリリース/.test(pre)) x.cost = 'tribute';
+      else if (/モンスター(1体)?をリリース/.test(pre)) x.cost = 'tribother';
+      else if (/このカードを墓地へ送[っり]/.test(pre)) x.cost = 'selfgy';
+      else if (/自分の墓地の[^、。]*?を除外し/.test(pre)) x.cost = 'banishgy';
+    }
+    // 発動の条件
+    if (/自分フィールドに(他の)?モンスターが存在しない|自分フィールドに(他の)?モンスターが存在せず/.test(pre)) x.cond = 'nomon';
+    else if (/相手フィールドのモンスター(の数)?が自分フィールドのモンスター(の数)?より多/.test(pre)) x.cond = 'oppmore';
+    else if (/相手フィールドにモンスターが存在(する|し)/.test(pre)) x.cond = 'oppmon';
+    else if (/(LP|ＬＰ)が相手より少な/.test(pre)) x.cond = 'lpless';
+    else if (/墓地にモンスターが5体以上/.test(pre)) x.cond = 'gy5';
     // 何をする：処理の文の中で、いちばん前に出てくる言葉で決める
     // 相手フィールドのカードに対してだけ「破壊・除外・手札に戻す」と読む（墓地・デッキのカードの除外などは作れない）
     const opp = (/相手/.test(scope) || /フィールド/.test(scope)) && !/自分フィールド/.test(scope) && !/墓地|デッキ/.test(scope.replace(/墓地へ送/g, ""));
@@ -813,21 +995,20 @@ function parseEffectText(text, d) {
     if (x.what === 'self' && !['handss', 'tograve', 'handattack'].includes(x.when)) x.when = d.kind === 'monster' && !isExtraMtype(d) ? 'handss' : 'tograve';
     if (x.when === 'handattack' && x.what !== 'self') x.when = 'quick';
     if (!whatOk(d, x.when, x.what)) { notes.push(`このカードでは使えない組み合わせです：${seg}`); return; }
-    if (!costOk(x.when)) delete x.cost;
-    const lk = (effLocks[i] || [])[0];
-    if (lk) x.lock = lk;
-    if ((effLocks[i] || []).length > 1) notes.push(`${no}：縛りは1つだけ入れました`);
+    if (x.cost && !costAllowed(d, x.when, x.cost)) { if (costOk(x.when)) notes.push(`${no}：このタイミングでは「${CUSTOM_COSTS[x.cost]}」コストは使えないので入れていません`); delete x.cost; }
+    if (x.cond && !condOk(d, x.when)) delete x.cond;
+    const lks = effLocks[i] || [];
+    if (lks.length) x.locks = lks.slice(0, 2);
+    if (lks.length > 2) notes.push(`${no}：縛りは2つまで入れました`);
     effects.push(x);
   });
   // カード全体の縛り：全部の効果に付ける
   if (cardLocks.length) {
-    for (const x of effects) if (!x.lock) x.lock = { ...cardLocks[0], themes: [...cardLocks[0].themes] };
-    if (cardLocks.length > 1) notes.push('縛りは1つだけ入れました');
+    for (const x of effects) x.locks = [...(x.locks || []), ...cardLocks.map(l => ({ ...l, themes: [...l.themes] }))].slice(0, 2);
+    if (cardLocks.length > 2) notes.push('縛りは2つまで入れました');
   }
-  if (cardLocks.length || Object.keys(effLocks).length) {
-    const lk = cardLocks[0] || Object.values(effLocks)[0][0];
-    notes.push(`✓ 縛りを読み取りました：${lockText(lk)}`);
-  }
+  const allLocks = [...cardLocks, ...Object.values(effLocks).flat()];
+  if (allLocks.length) notes.push(`✓ 縛りを読み取りました：${allLocks.map(l => '自分は' + lockClause(l) + (l.timing === 'turn' ? '（発動するターン）' : '（発動後）')).join('／')}`);
   const max = maxEffects(d);
   if (effects.length > max) { notes.push(`このカードに入れられる効果は${max}つまでなので、${max + 1}つ目から先は入れていません`); effects.length = max; }
   return { effects, themes: [...new Set(themes)], notes };
@@ -1145,13 +1326,21 @@ function openCustomEditor(src, onSaved) {
     }
     // 相手フィールドのどのカードか
     if (w && w.area) row.append(field('相手フィールドの', sel(CUSTOM_AREAS, CUSTOM_AREAS[x.area] ? x.area : 'card', v => { x.area = v; redrawPreview(); })));
-    // コスト（手札から捨てる・墓地から除外するタイミング以外）
+    // コスト（手札から捨てる・墓地から除外するタイミング以外）。このタイミングで使えるものだけ
     if (costOk(x.when)) {
+      const cs = Object.fromEntries(Object.entries(CUSTOM_COSTS).filter(([k]) => !k || costAllowed(d, x.when, k)));
+      if (x.cost && !cs[x.cost]) delete x.cost;
       const cr = el('div', { class: 'custom-row' });
-      cr.append(field('コスト', sel(CUSTOM_COSTS, x.cost || '', v => { x.cost = v; render(); })));
+      cr.append(field('コスト', sel(cs, x.cost || '', v => { x.cost = v; render(); })));
       if (x.cost === 'lp') { x.lp = x.lp || 1000; cr.append(field('払うLP', num(x.lp, 100, 8000, 100, v => { x.lp = v || 1000; redrawPreview(); }))); }
       row.append(cr);
     } else delete x.cost;
+    // 発動の条件
+    if (condOk(d, x.when)) {
+      const other = d.kind === 'monster' && onFieldWhen(d, x.when);
+      const co = { '': 'なし', ...Object.fromEntries(Object.entries(CUSTOM_CONDS).map(([k, c]) => [k, c.full(other ? '他の' : '') + '場合'])) };
+      row.append(field('発動の条件', sel(co, CUSTOM_CONDS[x.cond] ? x.cond : '', v => { if (v) x.cond = v; else delete x.cond; redrawPreview(); })));
+    } else delete x.cond;
     // 誘発効果：強制（必ず発動する）にできる
     if (CUSTOM_WHEN[x.when] && CUSTOM_WHEN[x.when].trig) {
       const m = el('input', { type: 'checkbox', checked: !!x.must });
@@ -1164,27 +1353,33 @@ function openCustomEditor(src, onSaved) {
     x.optType = optOf(x); delete x.opt;
     if (!opts[x.optType]) x.optType = 'name';
     row.append(field('1ターンに使える回数', sel(opts, x.optType, v => { x.optType = v; redrawPreview(); })));
-    // 縛り（この効果の発動後、ターン終了時まで〜しか発動できない／特殊召喚できない）
-    const lk = x.lock || null;
-    const lr = el('div', { class: 'custom-row' });
-    lr.append(field('縛り（発動後、ターン終了時まで）', sel({ '': 'なし', act: '決めたカードの効果しか発動できない', ss: '決めたモンスターしか特殊召喚できない' }, lk ? lk.kind : '', v => {
-      if (!v) delete x.lock; else x.lock = { ...(x.lock || { themes: customThemes(d).slice(0, 1) }), kind: v };
-      render();
-    })));
-    if (lk) {
-      const ti = el('input', { type: 'text', value: (lk.themes || []).join('、'), placeholder: '例：オルフェゴール、星遺物' });
-      ti.addEventListener('input', () => { lk.themes = [...new Set(ti.value.split(/[、,，\/／]+/).map(s => s.replace(/[「」『』]/g, '').trim()).filter(Boolean).map(themeByLooseName))]; redrawPreview(); });
-      lr.append(field('テーマ名（「、」で区切る）', ti),
-        field('属性', sel({ '': 'どれでも', ...ATTR }, lk.attr || '', v => { lk.attr = v ? +v : 0; redrawPreview(); })),
-        field('種族', sel({ '': 'どれでも', ...RACE }, lk.race || '', v => { lk.race = v ? +v : 0; redrawPreview(); })));
+    // 縛り（2つまで）。「発動後、ターン終了時まで」か「発動するターン」
+    if (!Array.isArray(x.locks)) x.locks = x.lock ? [x.lock] : [];
+    delete x.lock;
+    const lockBox = el('div', { class: 'custom-field eff-themes' }, el('span', { class: 'muted', text: '縛り（2つまで）' }));
+    x.locks.forEach((lk, j) => {
+      const lr = el('div', { class: 'custom-row' });
+      lr.append(field(`縛り${j + 1}`, sel(LOCK_KINDS, lk.kind, v => { lk.kind = v; render(); })),
+        field('いつから', sel(LOCK_TIMINGS, lk.timing === 'turn' ? 'turn' : 'after', v => { lk.timing = v; redrawPreview(); })),
+        el('button', { type: 'button', class: 'btn small danger', text: '✕', title: 'この縛りを消す', onclick: () => { x.locks.splice(j, 1); render(); } }));
+      if (lk.kind !== 'nosummon') {
+        const ti = el('input', { type: 'text', value: (lk.themes || []).join('、'), placeholder: '例：オルフェゴール、星遺物' });
+        ti.addEventListener('input', () => { lk.themes = [...new Set(ti.value.split(/[、,，\/／]+/).map(s => s.replace(/[「」『』]/g, '').trim()).filter(Boolean).map(themeByLooseName))]; redrawPreview(); });
+        lr.append(field('テーマ名（「、」で区切る）', ti),
+          field('属性', sel({ '': 'どれでも', ...ATTR }, lk.attr || '', v => { lk.attr = v ? +v : 0; redrawPreview(); })),
+          field('種族', sel({ '': 'どれでも', ...RACE }, lk.race || '', v => { lk.race = v ? +v : 0; redrawPreview(); })),
+          field('種類（融合など）', sel({ '': 'どれでも', ...Object.fromEntries(Object.entries(LOCK_MTYPES).map(([k, v]) => [k, v + 'モンスター'])) }, lk.mtype || '', v => { if (v) lk.mtype = v; else delete lk.mtype; redrawPreview(); })));
+      }
       if (lk.kind === 'ss') {
         const ex = el('input', { type: 'checkbox', checked: !!lk.extra });
         ex.addEventListener('change', () => { lk.extra = ex.checked; redrawPreview(); });
         lr.append(el('label', { class: 'check' }, ex, ' エクストラデッキから特殊召喚するときだけ'));
       }
-      lr.append(el('span', { class: 'muted small-note', text: 'テーマ名・属性・種族のどれかを決めてください（決めないと縛りは付きません）' }));
-    }
-    row.append(lr);
+      if (lk.kind === 'act' && !lockHasCond(lk)) lr.append(el('span', { class: 'muted small-note warn', text: 'テーマ名・属性・種族・種類のどれかを決めてください（決めないとこの縛りは付きません）' }));
+      lockBox.append(lr);
+    });
+    if (x.locks.length < 2) lockBox.append(el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn small', text: '＋ 縛りを足す', onclick: () => { x.locks.push({ kind: 'ss', timing: 'after', themes: customThemes(d).slice(0, 1) }); render(); } })));
+    row.append(lockBox);
     return row;
   };
 
