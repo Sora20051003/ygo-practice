@@ -1660,3 +1660,4 @@ body:has(.ap-sheet:not([hidden])) .draw-tap, body:has(#modal-root .modal-back) .
 .custom-parse-note:empty { display: none; }
 .custom-parse-note > div { color: #7fd3a0; }
 .custom-parse-note > div.warn { color: #f0b35a; }
+.custom-effect.empty { display: flex; align-items: center; gap: 10px; opacity: .75; border-style: dashed; }

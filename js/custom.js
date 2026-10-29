@@ -77,7 +77,11 @@ const whatOk = (d, when, what) => {
   return true;
 };
 // 1枚のカードに入れられる効果の数（通常・速攻魔法、通常・カウンター罠は発動の効果1つ）
-const maxEffects = d => (d.kind === 'monster' ? (d.mtype === 'normal' ? 0 : 3) : isZoneST(d) ? 2 : 1);
+const maxEffects = d => (d.kind === 'monster' ? (d.mtype === 'normal' ? 0 : 5) : isZoneST(d) ? 5 : 1);
+// 1ターンに使える回数。name：このカード名で1ターンに1度（名称ターン1）／soft：このカード1枚ごとに1ターンに1度（ターン1）／none：制限なし
+// （前の形 opt: true は名称ターン1）
+const OPT_TYPES = { none: '制限なし', name: '名称ターン1（このカード名で1ターンに1度）', soft: 'ターン1（このカード1枚ごとに1ターンに1度）' };
+const optOf = x => (x && OPT_TYPES[x.optType] ? x.optType : x && x.opt ? 'name' : 'none');
 
 // ---------- カードのデータ（アプリの形） ----------
 function customType(d) {
@@ -88,7 +92,7 @@ function customType(d) {
   const eff = d.mtype === 'normal' ? T.NORMAL : (d.mtype === 'effect' || (d.effects || []).length ? T.EFFECT : 0);
   return T.MONSTER | ex | eff | (d.tuner && d.mtype !== 'link' && d.mtype !== 'xyz' ? T.TUNER : 0);
 }
-const CIRCLED = ['①', '②', '③', '④'];
+const CIRCLED = ['①', '②', '③', '④', '⑤'];
 const zen = s => String(s).replace(/[0-9]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0xFEE0));
 function filtText(f, d, mon, cnt) {
   f = f || {};
@@ -133,13 +137,14 @@ function customText(d) {
   if (d.kind === 'monster' && d.mtype === 'normal') return [...lines, d.flavor || ''].filter(Boolean).join('\n');
   if (d.useSrc && (d.src || '').trim()) return [...lines, d.src.trim()].join('\n');   // 自分の書いた文をそのまま出す
   const single = effs.length === 1 && CUSTOM_WHEN[effs[0].when].card;   // 魔法・罠の発動の効果だけ：①を付けない
-  const opt = effs.map((x, i) => (x.opt ? CIRCLED[i] : null)).filter(Boolean);
+  const opt = effs.map((x, i) => (optOf(x) === 'name' ? CIRCLED[i] : null)).filter(Boolean);
   if (single && opt.length) lines.push('このカード名のカードは１ターンに１枚しか発動できない。');
   else if (opt.length) lines.push(`このカード名の${opt.join('')}の効果は${opt.length > 1 ? 'それぞれ' : ''}１ターンに１度しか使用できない。`);
   effs.forEach((x, i) => {
     const w = CUSTOM_WHEN[x.when];
     const { tgt, rest } = customWhatText(x, d);
-    const head = single ? '' : `${CIRCLED[i]}：`;
+    // ターン1（このカード1枚ごと）は文の頭に「１ターンに１度、」
+    const head = (single ? '' : `${CIRCLED[i]}：`) + (!single && optOf(x) === 'soft' ? '１ターンに１度、' : '');
     let s;
     if (w.card && !w.pre) s = tgt ? `${tgt}を対象として発動できる。${rest}。` : `${rest}。`;   // 魔法・罠の発動
     else s = `${w.pre ? w.pre + (tgt || w.cost ? '、' : 'に') : ''}${w.cost}${tgt ? tgt + 'を対象として' : ''}発動できる。${rest}。${w.quick ? 'この効果は相手ターンでも発動できる。' : ''}`;
@@ -347,7 +352,8 @@ function luaRegister(x, d, i, act) {
     case 'achain': set('EFFECT_TYPE_ACTIVATE', 'EVENT_CHAINING'); break;
   }
   if (props.length) lines.push(`	e${i}:SetProperty(${props.join('+')})`);
-  if (x.opt) lines.push(`	e${i}:SetCountLimit(1,{id,${i}})`);
+  if (optOf(x) === 'name') lines.push(`	e${i}:SetCountLimit(1,{id,${i}})`);
+  else if (optOf(x) === 'soft') lines.push(`	e${i}:SetCountLimit(1)`);
   if (isChainWhen(w)) lines.push(`	e${i}:SetCondition(s.chaincon${x.what === 'negate' ? 'neg' : ''})`);
   if (w === 'handquick' || w === 'handchain') lines.push(`	e${i}:SetCost(s.discost)`);
   if (w === 'gyban') lines.push(`	e${i}:SetCost(s.bancost)`);
@@ -441,7 +447,8 @@ function parseEffectText(text, d) {
     const cut = body.search(/発動(でき|する)/);
     const pre = cut >= 0 ? body.slice(0, cut) : '';
     const act = cut >= 0 ? body.slice(cut) : body;
-    const x = { when: '', what: '', n: 1, cnt: 1, opt: allOpt || optNums.has(i) || /1ターンに1度/.test(body), filt: {} };
+    // 「このカード名の①の効果は1ターンに1度」→ 名称ターン1、文の中の「1ターンに1度、」→ ターン1
+    const x = { when: '', what: '', n: 1, cnt: 1, optType: allOpt || optNums.has(i) ? 'name' : /1ターンに1度/.test(body) ? 'soft' : 'none', filt: {} };
     // いつ
     const oppAct = /相手が.*発動した(時|とき)|相手の.*発動した(時|とき)/.test(pre || body);
     if (/手札から(捨て|墓地へ送っ)/.test(pre)) x.when = oppAct ? 'handchain' : 'handquick';
@@ -501,7 +508,7 @@ function newCustomDef() {
   const used = new Set(customList().map(d => d.id));
   let id;
   do id = CUSTOM_ID_MIN + Math.floor(Math.random() * CUSTOM_ID_SPAN); while (used.has(id) || (DB.byId && DB.byId.has(id)));
-  return { id, v: 1, name: '', kind: 'monster', mtype: 'effect', tuner: false, attr: 32, race: 2, level: 4, atk: 1500, def: 1000, markers: 0x22, stype: 'normal', ttype: 'normal', theme: '', img: '', flavor: '', memo: '', effects: [{ when: 'summon', what: 'draw', n: 1, opt: true, filt: {} }] };
+  return { id, v: 1, name: '', kind: 'monster', mtype: 'effect', tuner: false, attr: 32, race: 2, level: 4, atk: 1500, def: 1000, markers: 0x22, stype: 'normal', ttype: 'normal', theme: '', img: '', flavor: '', memo: '', effects: [{ when: 'summon', what: 'draw', n: 1, optType: 'name', filt: {} }] };
 }
 
 // 絵を小さくして保存する（対戦で相手に送るので、小さめの JPEG にする）
@@ -643,6 +650,11 @@ function openCustomEditor(src, onSaved) {
       const max = maxEffects(d);
       const box = el('div', { class: 'custom-effects' });
       d.effects.slice(0, max).forEach((x, i) => box.append(effectRow(x, i)));
+      // 空いている枠（①〜⑤）。押すとその枠に効果を作る
+      for (let i = d.effects.length; i < max; i++) {
+        box.append(el('div', { class: 'custom-effect empty' }, el('b', { text: CIRCLED[i] }),
+          el('button', { type: 'button', class: 'btn small', text: '＋ この枠に効果を作る', onclick: () => { d.effects.push(defaultEffect()); render(); } })));
+      }
       // 自由に書く → 読み取って下の効果に入れる → 下で直す
       const src = el('textarea', { rows: 4, class: 'full', placeholder: '例：①：このカードが召喚に成功した場合に発動できる。デッキから「蒼炎」モンスター1体を手札に加える。\n②：相手が効果を発動した時、このカードを手札から捨てて発動できる。その発動を無効にし破壊する。' }, d.src || '');
       src.addEventListener('input', () => { d.src = src.value; if (d.useSrc) redrawPreview(); });
@@ -668,8 +680,7 @@ function openCustomEditor(src, onSaved) {
         el('div', { class: 'muted small-note', text: '書いた文から「いつ・何をする・条件・数」を読み取って、下の効果に入れます。そのあと下で直せます（動くのは下の効果のとおりです）' }),
         src, el('div', { class: 'row' }, read), result,
         el('label', { class: 'check' }, useSrc, ' カードには自分の書いた文をそのまま表示する'));
-      form.append(el('h4', { text: `効果（${max}つまで）` }), box);
-      if (d.effects.length < max) form.append(el('button', { type: 'button', class: 'btn small', text: '＋ 効果を足す', onclick: () => { d.effects.push(defaultEffect()); render(); } }));
+      form.append(el('h4', { text: max > 1 ? `効果（${max}枠。効果ごとに「いつ・何をする・1ターンに使える回数」を決めます）` : '効果' }), box);
       const memo = el('textarea', { rows: 2, class: 'full', placeholder: '効果文の最後に足す文（表示だけ。処理はされません）' }, d.memo || '');
       memo.addEventListener('input', () => { d.memo = memo.value; redrawPreview(); });
       form.append(field('メモ（任意）', memo));
@@ -679,7 +690,7 @@ function openCustomEditor(src, onSaved) {
 
   const defaultEffect = () => {
     const when = Object.keys(CUSTOM_WHEN).find(w => CUSTOM_WHEN[w].ok(d)) || 'ignition';
-    return { when, what: 'draw', n: 1, opt: d.kind === 'monster', filt: {} };
+    return { when, what: 'draw', n: 1, optType: d.kind === 'monster' ? 'name' : 'none', filt: {} };
   };
   // 種類を変えたとき：選べなくなったタイミング・効果を直す
   const fixEffects = () => {
@@ -728,9 +739,12 @@ function openCustomEditor(src, onSaved) {
       x.cnt = effCount(x);
       row.append(field(w.mon ? '体数' : '枚数', num(x.cnt, 1, 5, 1, v => { x.cnt = v === '' ? 1 : Math.max(1, Math.min(5, v)); redrawPreview(); })));
     }
-    const opt = el('input', { type: 'checkbox', checked: !!x.opt });
-    opt.addEventListener('change', () => { x.opt = opt.checked; redrawPreview(); });
-    row.append(el('label', { class: 'check' }, opt, ' このカード名のこの効果は1ターンに1度'));
+    // 1ターンに使える回数（効果ごと）。魔法・罠の発動だけのカードは「名称ターン1」か「制限なし」
+    const single = maxEffects(d) === 1 && CUSTOM_WHEN[x.when] && CUSTOM_WHEN[x.when].card;
+    const opts = single ? { none: '制限なし', name: '名称ターン1（このカード名のカードは1ターンに1枚しか発動できない）' } : OPT_TYPES;
+    x.optType = optOf(x); delete x.opt;
+    if (!opts[x.optType]) x.optType = 'name';
+    row.append(field('1ターンに使える回数', sel(opts, x.optType, v => { x.optType = v; redrawPreview(); })));
     return row;
   };
 
