@@ -409,7 +409,8 @@ function jpCard(c, big = false) {
 
   return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}${face ? ' ' + face.cls : ''}`, title: c.name },
     el('div', { class: 'jp-head' },
-      el('div', { class: 'jp-name', style: `font-size:max(${jpNameSize(c.name)}cqw, 7px)`, text: hier ? hieraticize(c.name) : c.name }),
+      // ヒエラティックテキスト版：名前だけ英語（The Winged Dragon of Ra）、ほかは神官文字
+      ((nm) => el('div', { class: 'jp-name' + (hier ? ' en' : ''), style: `font-size:max(${jpNameSize(nm)}cqw, 7px)`, text: nm }))(hier ? ((DB.byId.get(godBaseId(c)) || {}).en || 'The Winged Dragon of Ra') : c.name),
       el('div', { class: 'jp-attr ' + attr.cls, text: attr.label })),
     sub, art, pbox, box,
     c.id ? el('div', { class: 'jp-pass', text: String(c.id).padStart(8, '0') }) : null);

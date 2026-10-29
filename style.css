@@ -1676,6 +1676,7 @@ body:has(.ap-sheet:not([hidden])) .draw-tap, body:has(#modal-root .modal-back) .
 .cardface.jp.god-ra { --fr1: #f6dc72; --fr2: #b8860b; }
 .cardface.jp.god-obelisk .jp-name, .cardface.jp.god-slifer .jp-name { color: #fff; text-shadow: 0 0 0.6cqw rgba(0, 0, 0, 0.7); }
 .cardface.jp.god-obelisk .jp-pass, .cardface.jp.god-slifer .jp-pass { color: #f2f2f2; }
-.cardface.jp.hieratic .jp-name, .cardface.jp.hieratic .jp-desc, .cardface.jp.hieratic .jp-type {
+.cardface.jp.hieratic .jp-name.en { font-family: 'Times New Roman', serif; letter-spacing: 0; }
+.cardface.jp.hieratic .jp-desc, .cardface.jp.hieratic .jp-type {
   font-family: 'Noto Sans Egyptian Hieroglyphs', 'Segoe UI Historic', serif; letter-spacing: 0.05em; word-break: break-all;
 }
