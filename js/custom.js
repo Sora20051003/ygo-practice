@@ -180,6 +180,18 @@ function customWhatText(x, d) {
     default: return { rest: '' };
   }
 }
+// 縛りの文（「ターン終了時まで自分は「A」、「B」カードの効果しか発動できない」など）
+function lockWhoText(lk) {
+  const th = (lk.themes || []).map(themeLabel).join('、');
+  return `${th}${lk.attr && ATTR[lk.attr] ? ATTR[lk.attr] + '属性' : ''}${lk.race && RACE[lk.race] ? RACE[lk.race] : ''}`;
+}
+function lockText(lk) {
+  if (!lk) return '';
+  const who = lockWhoText(lk), mon = lk.attr || lk.race;
+  return lk.kind === 'ss' ? `ターン終了時まで自分は${lk.extra ? 'エクストラデッキから' : ''}${who}モンスターしか特殊召喚できない`
+    : `ターン終了時まで自分は${who}${mon ? 'モンスター' : 'カード'}の効果しか発動できない`;
+}
+const lockOk = lk => !!(lk && (lk.kind === 'act' || lk.kind === 'ss') && ((lk.themes || []).length || lk.attr || lk.race));
 // 効果文（本物のカードに近い書き方）
 function customText(d) {
   const effs = (d.effects || []).slice(0, maxEffects(d)).filter(x => CUSTOM_WHEN[x.when] && CUSTOM_WHAT[x.what]);
@@ -195,9 +207,13 @@ function customText(d) {
   const opt = effs.map((x, i) => (optOf(x) === 'name' ? CIRCLED[i] : null)).filter(Boolean);
   if (single && opt.length) lines.push('このカード名のカードは１ターンに１枚しか発動できない。');
   else if (opt.length) lines.push(`このカード名の${opt.join('')}の効果は${opt.length > 1 ? 'それぞれ' : ''}１ターンに１度しか使用できない。`);
+  // 縛り：全部の効果に同じ縛りがあれば最後に1回（「このカードの効果の発動後、」）、ほかは効果ごと（「この効果の発動後、」）
+  const lks = effs.map(x => (lockOk(x.lock) ? lockText(x.lock) : ''));
+  const cardLock = effs.length > 1 && lks[0] && lks.every(t => t === lks[0]) ? lks[0] : '';
   effs.forEach((x, i) => {
     const w = CUSTOM_WHEN[x.when];
-    const { tgt, rest } = customWhatText(x, d);
+    let { tgt, rest } = customWhatText(x, d);
+    if (lks[i] && !cardLock) rest += `。${single ? 'このカードの発動後' : 'この効果の発動後'}、${lks[i]}`;
     // ターン1（このカード1枚ごと）は文の頭に「１ターンに１度、」
     const head = `${CIRCLED[i]}：` + (!single && optOf(x) === 'soft' ? '１ターンに１度、' : '');
     // コスト：あとに「〜を対象として」が続くときは「捨て、」「払い、」、続かなければ「捨てて」「払って」
@@ -209,6 +225,7 @@ function customText(d) {
     else s = `${w.pre ? w.pre + (tgt || w.cost || ct ? '、' : 'に') : ''}${w.cost}${w.cost && (tgt || ct) ? '、' : ''}${ct}${tgt ? tgt + 'を対象として' : ''}${must ? '発動する' : '発動できる'}。${rest}。${w.quick ? 'この効果は相手ターンでも発動できる。' : ''}`;
     lines.push(head + s.replace('捨てて、', '捨て、'));
   });
+  if (cardLock) lines.push(`このカードの効果の発動後、${cardLock}。`);
   if (d.memo) lines.push(d.memo);
   return lines.join('\n');
 }
@@ -228,6 +245,8 @@ function customToCard(d) {
   c.jaText = customText(d);
   c.tkey = normalizeText(c.jaText);
   c.jaStrs = (d.effects || []).map(x => (CUSTOM_WHAT[x.what] ? CUSTOM_WHAT[x.what].label : '効果'));
+  // 8番から：縛りの表示（エンジンの「制限が付いた」の文）
+  (d.effects || []).forEach((x, i) => { if (lockOk(x.lock)) c.jaStrs[8 + i] = lockText(x.lock).replace(/^ターン終了時まで/, ''); });
   c.key = normalizeText(c.name) + '||';
   c.nkey = normalizeText(c.name);
   return c;
@@ -484,10 +503,36 @@ function luaRegister(x, d, i, act) {
   // 自分で決めたコスト（手札を1枚捨てる・LPを払う）
   if (costOk(w) && x.cost === 'discard') lines.push(`	e${i}:SetCost(s.handcost)`);
   if (costOk(w) && x.cost === 'lp') lines.push(`	e${i}:SetCost(s.lpcost(${Math.max(100, +x.lp || 1000)}))`);
-  lines.push(`	e${i}:SetTarget(s.tg${i})`, `	e${i}:SetOperation(s.op${i})`, `	c:RegisterEffect(e${i})`);
+  // 縛り：発動したときに付ける（効果が無効になっても付く）
+  const tg = lockOk(x.lock) ? `s.tgw(s.tg${i},s.lock${i})` : `s.tg${i}`;
+  lines.push(`	e${i}:SetTarget(${tg})`, `	e${i}:SetOperation(s.op${i})`, `	c:RegisterEffect(e${i})`);
   // 召喚した場合：特殊召喚した場合も同じ効果
   if (w === 'summon') lines.push(`	local e${i}b=e${i}:Clone()`, `	e${i}b:SetCode(EVENT_SPSUMMON_SUCCESS)`, `	c:RegisterEffect(e${i}b)`);
   return lines.join('\n');
+}
+// 縛り：ターン終了時まで、自分は条件に合うカードの効果しか発動できない／条件に合うモンスターしか特殊召喚できない
+function luaLock(lk, i) {
+  const cond = [];
+  const th = [...new Set((lk.themes || []).map(t => themeCodes(t).edo).filter(Boolean))];
+  if (th.length) cond.push('(' + th.map(s => `c:IsSetCard(${s})`).join(' or ') + ')');
+  if (lk.attr) cond.push(`c:IsAttribute(${+lk.attr})`);
+  if (lk.race) cond.push(`c:IsRace(${+lk.race})`);
+  if ((lk.attr || lk.race) && lk.kind === 'act') cond.push('c:IsType(TYPE_MONSTER)');
+  const ok = cond.join(' and ') || 'true';
+  const body = lk.kind === 'ss' ? `	e1:SetCode(EFFECT_CANNOT_SPECIAL_SUMMON)
+	e1:SetTarget(function(_,c,sump,sumtype,sumpos,targetp,se) return not (${ok})${lk.extra ? ' and c:IsLocation(LOCATION_EXTRA)' : ''} end)`
+    : `	e1:SetCode(EFFECT_CANNOT_ACTIVATE)
+	e1:SetValue(function(_,re,tp) local c=re:GetHandler() return not (${ok}) end)`;
+  return `function s.lock${i}(e,tp)
+	local e1=Effect.CreateEffect(e:GetHandler())
+	e1:SetDescription(aux.Stringid(id,${8 + i}))
+	e1:SetType(EFFECT_TYPE_FIELD)
+	e1:SetProperty(EFFECT_FLAG_PLAYER_TARGET+EFFECT_FLAG_CLIENT_HINT)
+	e1:SetTargetRange(1,0)
+${body}
+	e1:SetReset(RESET_PHASE+PHASE_END)
+	Duel.RegisterEffect(e1,tp)
+end`;
 }
 function customLua(d) {
   const init = [];
@@ -509,10 +554,18 @@ function customLua(d) {
     if (!act) return;
     init.push(luaRegister(x, d, i, act));
     funcs.push(act.code);
+    if (lockOk(x.lock)) funcs.push(luaLock(x.lock, i));
   });
   return `local s,id=GetID()
 function s.initial_effect(c)
 ${init.join('\n')}
+end
+function s.tgw(tg,lk)
+	return function(e,tp,eg,ep,ev,re,r,rp,chk,chkc)
+		if chkc or chk==0 then return tg(e,tp,eg,ep,ev,re,r,rp,chk,chkc) end
+		tg(e,tp,eg,ep,ev,re,r,rp,chk,chkc)
+		lk(e,tp)
+	end
 end
 function s.chaincon(e,tp,eg,ep,ev,re,r,rp) return rp==1-tp end
 function s.chainconneg(e,tp,eg,ep,ev,re,r,rp) return rp==1-tp and Duel.IsChainNegatable(ev) end
@@ -562,10 +615,42 @@ function normEffText(s) {
     .replace(/墓地に(存在する|ある)このカード/g, '墓地のこのカード')
     .replace(/。+/g, '。');
 }
+// 縛りの文（「自分は「A」、「B」カードの効果しか発動できない」「自分は「A」モンスターしか特殊召喚できない」）を読む
+const LOCK_RE = /しか(?:効果を)?(発動|特殊召喚)できない/;
+function parseLockSentence(s) {
+  const m = s.match(LOCK_RE);
+  if (!m || /1ターンに1(度|回|枚)/.test(s)) return null;
+  const head = s.slice(0, m.index);
+  const lk = { kind: m[1] === '発動' ? 'act' : 'ss', themes: [] };
+  // 「自分は」より後ろの部分（「このカードの効果の発動後、ターン終了時まで自分は〜」）
+  const who = head.replace(/^.*自分は/, '');
+  lk.themes = [...new Set([...who.matchAll(/「([^」]+)」/g)].map(x => themeByLooseName(x[1])))];
+  for (const [k, v] of Object.entries(ATTR)) if (who.includes(v + '属性')) lk.attr = +k;
+  let rl = 0;
+  for (const [k, v] of Object.entries(RACE)) if (who.includes(v) && v.length > rl) { lk.race = +k; rl = v.length; }
+  if (lk.kind === 'ss' && /エクストラデッキから/.test(who)) lk.extra = true;
+  if (!lk.themes.length && !lk.attr && !lk.race) return null;
+  return lk;
+}
 function parseEffectText(text, d) {
   const notes = [], themes = [];
-  const all = normEffText(text);
+  let all = normEffText(text);
   if (!all) return { effects: [], themes, notes: ['文が空です'] };
+  // 縛りの文を先に抜き出す。「この効果の発動後」で①などの中にあればその効果だけ、ほかはカードの全部の効果に付ける
+  const cardLocks = [], effLocks = {};
+  {
+    let cur = -1, kept = '';
+    for (const s of all.split(/(?<=。)/).filter(Boolean)) {
+      if (/^[①②③④⑤](?![、・,，の①②③④⑤])/.test(s)) cur++;
+      const lk = LOCK_RE.test(s) ? parseLockSentence(s.replace(/^[①②③④⑤][:：]?/, '')) : null;
+      if (!lk) { kept += s; continue; }
+      if (/^[①②③④⑤]/.test(s)) kept += s.match(/^[①②③④⑤][:：]?/)[0];   // 番号だけは残す
+      if (cur >= 0 && !/このカード(の効果)?(の発動後|を発動)/.test(s)) (effLocks[cur] = effLocks[cur] || []).push(lk);
+      else cardLocks.push(lk);
+      themes.push(...lk.themes.filter(t => customThemes(d).includes(t)));
+    }
+    all = kept;
+  }
   // ①②…で分ける。無ければ「。」で文ごとにまとめて1つの効果として読む
   // 効果の頭の番号で分ける（「①：」「②」など。「①、②の効果は」「①②の効果は」の番号では分けない）
   const NUM_START = /(?=[①②③④⑤](?![、・,，の①②③④⑤]))/;
@@ -729,8 +814,20 @@ function parseEffectText(text, d) {
     if (x.when === 'handattack' && x.what !== 'self') x.when = 'quick';
     if (!whatOk(d, x.when, x.what)) { notes.push(`このカードでは使えない組み合わせです：${seg}`); return; }
     if (!costOk(x.when)) delete x.cost;
+    const lk = (effLocks[i] || [])[0];
+    if (lk) x.lock = lk;
+    if ((effLocks[i] || []).length > 1) notes.push(`${no}：縛りは1つだけ入れました`);
     effects.push(x);
   });
+  // カード全体の縛り：全部の効果に付ける
+  if (cardLocks.length) {
+    for (const x of effects) if (!x.lock) x.lock = { ...cardLocks[0], themes: [...cardLocks[0].themes] };
+    if (cardLocks.length > 1) notes.push('縛りは1つだけ入れました');
+  }
+  if (cardLocks.length || Object.keys(effLocks).length) {
+    const lk = cardLocks[0] || Object.values(effLocks)[0][0];
+    notes.push(`✓ 縛りを読み取りました：${lockText(lk)}`);
+  }
   const max = maxEffects(d);
   if (effects.length > max) { notes.push(`このカードに入れられる効果は${max}つまでなので、${max + 1}つ目から先は入れていません`); effects.length = max; }
   return { effects, themes: [...new Set(themes)], notes };
@@ -1067,6 +1164,27 @@ function openCustomEditor(src, onSaved) {
     x.optType = optOf(x); delete x.opt;
     if (!opts[x.optType]) x.optType = 'name';
     row.append(field('1ターンに使える回数', sel(opts, x.optType, v => { x.optType = v; redrawPreview(); })));
+    // 縛り（この効果の発動後、ターン終了時まで〜しか発動できない／特殊召喚できない）
+    const lk = x.lock || null;
+    const lr = el('div', { class: 'custom-row' });
+    lr.append(field('縛り（発動後、ターン終了時まで）', sel({ '': 'なし', act: '決めたカードの効果しか発動できない', ss: '決めたモンスターしか特殊召喚できない' }, lk ? lk.kind : '', v => {
+      if (!v) delete x.lock; else x.lock = { ...(x.lock || { themes: customThemes(d).slice(0, 1) }), kind: v };
+      render();
+    })));
+    if (lk) {
+      const ti = el('input', { type: 'text', value: (lk.themes || []).join('、'), placeholder: '例：オルフェゴール、星遺物' });
+      ti.addEventListener('input', () => { lk.themes = [...new Set(ti.value.split(/[、,，\/／]+/).map(s => s.replace(/[「」『』]/g, '').trim()).filter(Boolean).map(themeByLooseName))]; redrawPreview(); });
+      lr.append(field('テーマ名（「、」で区切る）', ti),
+        field('属性', sel({ '': 'どれでも', ...ATTR }, lk.attr || '', v => { lk.attr = v ? +v : 0; redrawPreview(); })),
+        field('種族', sel({ '': 'どれでも', ...RACE }, lk.race || '', v => { lk.race = v ? +v : 0; redrawPreview(); })));
+      if (lk.kind === 'ss') {
+        const ex = el('input', { type: 'checkbox', checked: !!lk.extra });
+        ex.addEventListener('change', () => { lk.extra = ex.checked; redrawPreview(); });
+        lr.append(el('label', { class: 'check' }, ex, ' エクストラデッキから特殊召喚するときだけ'));
+      }
+      lr.append(el('span', { class: 'muted small-note', text: 'テーマ名・属性・種族のどれかを決めてください（決めないと縛りは付きません）' }));
+    }
+    row.append(lr);
     return row;
   };
 
