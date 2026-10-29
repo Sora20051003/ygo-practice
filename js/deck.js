@@ -1826,7 +1826,7 @@ function sampleToDeck(s, fmt, reg) {
         if (cnt > room) { res.fixed.push(`${c.name}（${n}枚→${room}枚）`); cnt = room; }
         used.set(c.name, (used.get(c.name) || 0) + cnt);
       }
-      for (let i = 0; i < cnt; i++) res[isExtraType(c) ? 'extra' : sec].push(c.id);
+      for (let i = 0; i < cnt; i++) res[isExtraType(c) ? 'extra' : 'main'].push(c.id);   // 儀式ペンデュラムなど、EX側に書いてあってもメインのカードはメインへ
     }
   }
   return res;
