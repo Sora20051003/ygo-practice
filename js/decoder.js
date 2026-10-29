@@ -174,7 +174,7 @@ function decPool() {
     return ids.map(id => DB.byId.get(id)).filter(decUsable);
   }
   const f = (DEC_POOLS[p] || DEC_POOLS.all)[1];
-  return DB.cards.filter(c => decUsable(c) && c.cid && !c.pre && f(c));
+  return DB.cards.filter(c => decUsable(c) && (c.cid || c.special) && !c.pre && f(c));
 }
 function decStartRound() {
   const G = Dec.G;

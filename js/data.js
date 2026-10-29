@@ -122,6 +122,20 @@ function withPreCards(cards) {
   return add.length ? [...cards, ...add] : cards;
 }
 
+// 特別なカード（売られていないが実在するカード。カードデータに無いので、ここで足す）
+// デコピン：KONAMI が大谷翔平選手に贈ったカード（2025年6月に本人が紹介）。光属性・レベル1・獣族の通常モンスター、攻撃力・守備力50
+const SPECIAL_CARDS = [
+  { id: 999980001, name: 'デコピン', ruby: 'でこぴん', en: 'Decoy', type: T.MONSTER | T.NORMAL, level: 1, race: 0x4000, attr: 16, atk: 50, def: 50,
+    jaText: '（KONAMI が大谷翔平選手に贈った非売品のカード。カードの文はアプリには入っていません）' },
+];
+function withSpecialCards(cards) {
+  const ids = new Set(cards.map(c => c.id)), names = new Set(cards.map(c => normalizeText(c.name)));
+  const add = SPECIAL_CARDS.filter(s => !ids.has(s.id) && !names.has(normalizeText(s.name))).map(s => ({
+    cid: 0, noJp: false, md: false, ls: 0, rs: 0, setcode: 0, desc: '', pdesc: '', special: true, ...s, tkey: normalizeText(s.jaText || ''),
+  }));
+  return add.length ? [...cards, ...add] : cards;
+}
+
 // ---------- アニメのカード ----------
 // data/anime-cards.js（EDOPro の cards-unofficial.cdb のアニメ・漫画のカード＋Yugipedia の日本語名・日本語の文）。
 // ANIME_CARDS.d[id] = [base, tag, en, ja, type, lv, race, attr, atk, def, setcodes, alias, jaText, enText, strs]
@@ -329,6 +343,7 @@ function animeFamily(c) {
 
 function indexCards(cards) {
   cards = withPreCards(cards);
+  cards = withSpecialCards(cards);
   cards = withAnimeCards(cards);
   if (typeof withCustomCards === 'function') cards = withCustomCards(cards);   // オリジナルカード（custom.js）
   DB.cards = cards;

@@ -457,7 +457,7 @@ function fetchCardTexts(c) {
   const key = 'text:' + c.id;
   if (cardTextCache.has(key)) return cardTextCache.get(key);
   // アニメのカード：文はカードのデータに入っている（日本語が無ければ英語）
-  if (c.anime) { const r = Promise.resolve({ ja: c.jaText || '', jaP: '', en: c.enText || '' }); cardTextCache.set(key, r); return r; }
+  if (c.anime || c.special) { const r = Promise.resolve({ ja: c.jaText || '', jaP: '', en: c.enText || '' }); cardTextCache.set(key, r); return r; }   // special：特別なカード（data.js の SPECIAL_CARDS）
   const p = (async () => {
     try {
       const saved = await idbGet(key);
