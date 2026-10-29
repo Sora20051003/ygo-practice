@@ -318,7 +318,7 @@ function animeChoice(deck, c) {
     toast(n ? `このデッキの「${fam[0].name}」${n}枚を${v.anime ? `${v.animeTag}の効果` : '今の効果'}にしました` : `${v.anime ? `${v.animeTag}の効果` : '今の効果'}のカードを表示しています（「＋」でデッキに入ります）`);
   };
   // 同じ種類（アニメなど）が2つ以上あるときは番号を付ける
-  const label = x => { if (!x.anime) return '今の効果（OCG）'; const same = fam.filter(y => y.anime && y.animeTag === x.animeTag); return `${x.animeTag}の効果${same.length > 1 ? same.indexOf(x) + 1 : ''}`; };
+  const label = x => { if (!x.anime) return '今の効果（OCG）'; const same = fam.filter(y => y.anime && y.animeTag === x.animeTag); const n = same.length > 1 ? same.indexOf(x) + 1 : ''; return x.animeTag === 'ダークシンクロ' ? `ダークシンクロにする${n}` : `${x.animeTag}の効果${n}`; };
   return el('div', { class: 'd-errata d-anime' },
     el('div', { class: 'small-note muted', text: 'アニメ・漫画で使われた効果があるカードです。このデッキで使う効果（デッキに入っている分をまとめて入れ替えます）' }),
     el('div', { class: 'seg full' }, fam.map(x => el('button', { class: x.id === c.id ? 'on' : '', text: label(x), onclick: () => set(x) }))));
