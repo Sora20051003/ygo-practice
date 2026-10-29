@@ -143,7 +143,8 @@ function withAnimeCards(cards) {
   for (const c of cards) { if (c.name && !byName.has(nameKey(c.name))) byName.set(nameKey(c.name), c); if (c.en && !byName.has('en:' + nameKey(c.en))) byName.set('en:' + nameKey(c.en), c); }
   const animeByName = new Map();
   const add = [];
-  for (const [k, a] of Object.entries(ANIME_CARDS.d)) {
+  const extra = typeof EXTRA_ANIME !== "undefined" ? Object.entries(EXTRA_ANIME).map(([k, v]) => [k, v.a]) : [];
+  for (const [k, a] of [...Object.entries(ANIME_CARDS.d), ...extra]) {
     const id = +k;
     if (byId.has(id)) continue;   // 番号がほかのカードとぶつかるものは入れない
     const [base0, tag, en, ja, type, lv, race, attr, atk, def, sc, alias, jaText, enText, strs, ruby] = a;
@@ -164,6 +165,7 @@ function withAnimeCards(cards) {
       desc: '', pdesc: '', anime: true, animeTag: tag, animeBase: b ? base : 0,
       edo: [alias, sc, type, lv, race, attr, atk, def], strs: strs || [], enText: enText || '',
     };
+    if (typeof EXTRA_ANIME !== 'undefined' && EXTRA_ANIME[id]) c.luaInline = EXTRA_ANIME[id].lua;   // EDOPro に無いアニメ版のスクリプト
     const text = jaText || enText || '';
     if (text) { c.jaText = text; c.tkey = normalizeText(text); }
     // 機皇帝のパーツ（ワイゼルＴ など）：「機皇帝」「トップ」などでも探せるようにする
@@ -184,6 +186,49 @@ function withAnimeCards(cards) {
   }
   return add.length ? [...cards, ...add] : cards;
 }
+// EDOPro に無いアニメ版（効果のスクリプトもここで書く）
+// d[id] と同じ形＋lua（スクリプト）
+const EXTRA_ANIME = {
+  // オレイカルコスの結界（アニメ）：破壊されず・フィールドから離れず・ほかのカードの効果を受けない。自分のモンスターの攻撃力５００アップ
+  // （アニメの「魔法・罠ゾーンをモンスターゾーンとして使う」は、エンジンのゾーンの作りでは再現できないので入れていない）
+  919000001: {
+    a: [48179391, 'アニメ', 'The Seal of Orichalcos', '', 0x80002, 0, 0, 0, 0, 0, 0, 48179391,
+      '我が力を求めよ　さすれば\n大いなる力　汝に宿る\n宿るだろう\n我に贄を捧げよ　さすれば我は復活するだろう\n\n①：このカードは破壊されず、フィールドから離れない。このカードは他のカードの効果を受けない。\n②：自分フィールドのモンスターの攻撃力は５００アップする。', '', ['']],
+    lua: `local s,id=GetID()
+function s.initial_effect(c)
+	local e1=Effect.CreateEffect(c)
+	e1:SetType(EFFECT_TYPE_ACTIVATE)
+	e1:SetCode(EVENT_FREE_CHAIN)
+	e1:SetProperty(EFFECT_FLAG_CANNOT_DISABLE+EFFECT_FLAG_CANNOT_INACTIVATE+EFFECT_FLAG_CANNOT_NEGATE)
+	c:RegisterEffect(e1)
+	local e2=Effect.CreateEffect(c)
+	e2:SetType(EFFECT_TYPE_FIELD)
+	e2:SetCode(EFFECT_UPDATE_ATTACK)
+	e2:SetRange(LOCATION_FZONE)
+	e2:SetTargetRange(LOCATION_MZONE,0)
+	e2:SetValue(500)
+	c:RegisterEffect(e2)
+	local e3=Effect.CreateEffect(c)
+	e3:SetType(EFFECT_TYPE_SINGLE)
+	e3:SetProperty(EFFECT_FLAG_SINGLE_RANGE+EFFECT_FLAG_CANNOT_DISABLE)
+	e3:SetRange(LOCATION_FZONE)
+	e3:SetCode(EFFECT_INDESTRUCTABLE)
+	e3:SetValue(1)
+	c:RegisterEffect(e3)
+	for _,code in ipairs({EFFECT_CANNOT_TO_HAND,EFFECT_CANNOT_TO_DECK,EFFECT_CANNOT_TO_GRAVE,EFFECT_CANNOT_REMOVE}) do
+		local e=e3:Clone()
+		e:SetCode(code)
+		c:RegisterEffect(e)
+	end
+	local e4=e3:Clone()
+	e4:SetCode(EFFECT_IMMUNE_EFFECT)
+	e4:SetValue(function(e,te) return te:GetOwner()~=e:GetOwner() end)
+	c:RegisterEffect(e4)
+end
+`,
+  },
+};
+
 // 今のカードとアニメ版をまとめた一覧（切り替え用。先頭が今のカード）
 function animeFamily(c) {
   const baseId = c.animeBase || c.id;

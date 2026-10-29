@@ -157,6 +157,7 @@ async function loadCardScripts(codes, onStatus, errata = 'post', quiet = false) 
   for (const code of new Set(codes)) {
     const cc = DB.byId.get(code);
     if (cc && cc.custom && typeof customLua === 'function') Engine.scripts.set(`c${code}.lua`, customLua(cc.def0));
+    if (cc && cc.luaInline) Engine.scripts.set(`c${code}.lua`, cc.luaInline);   // EDOPro に無いアニメ版（data.js の EXTRA_ANIME）
   }
   const want = [...new Set(codes)].filter(c => !Engine.scripts.has(`c${c}.lua`));
   let done = 0;
