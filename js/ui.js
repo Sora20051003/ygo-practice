@@ -413,7 +413,7 @@ function jpCard(c, big = false) {
     fitLater(el('div', { class: 'jp-pdesc', text: p }), 3.2),
     el('div', { class: 'jp-pscale r' }, el('span', { text: '◆' }), el('b', { text: c.rs }))) : null;
 
-  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}${face ? ' ' + face.cls : ''}`, title: c.name },
+  return el('div', { class: `cardface jp ${frameClass(c)}${pend ? ' pend' : ''}${big ? ' big' : ''}${face ? ' ' + face.cls : ''}${(c.animeBase || c.id) === 13331639 ? ' zarc' : ''}`, title: c.name },
     el('div', { class: 'jp-head' },
       // ヒエラティックテキスト版：名前だけ英語（THE SUN OF GOD DRAGON）、ほかは神官文字
       ((nm) => el('div', { class: 'jp-name' + (hier || eng ? ' en' : ''), style: `font-size:max(${jpNameSize(nm)}cqw, 7px)`, text: nm }))(hier ? 'THE SUN OF GOD DRAGON' : eng ? eng.name : c.name),
