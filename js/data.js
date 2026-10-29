@@ -789,7 +789,7 @@ const splitTerms = s => (s || '').split(/[\s　]+/).map(normalizeText).filter(Bo
 // and: すべての語を含む / or: どれかの語を含む
 const matchTerms = (hay, terms, mode) => (mode === 'or' ? terms.some(t => hay.includes(t)) : terms.every(t => hay.includes(t)));
 
-function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new', atkMin = null, atkMax = null, defMin = null, defMax = null }) {
+function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode = 'and', kind = '', sub = '', subMode = 'or', attr = '', race = '', level = '', rank = '', link = '', marker = '', markerMode = 'or', sort = 'new', atkMin = null, atkMax = null, defMin = null, defMax = null, animeOnly = false }) {
   // 攻撃力・守備力の範囲（片方だけでもよい）。「？」（マイナスの値）と、守備力の無いリンクモンスターは、指定したら出さない
   const inRange = (v, lo, hi) => v >= 0 && (lo == null || v >= lo) && (hi == null || v <= hi);
   const useAtk = atkMin != null || atkMax != null, useDef = defMin != null || defMax != null;
@@ -813,7 +813,9 @@ function searchCards({ format = '', q = '', qMode = 'and', text = '', textMode =
   for (const c of DB.cards) {
     if (isToken(c)) continue;
     // アニメ版（今のカードと同じ名前）は出さない（カードの説明で切り替える）。アニメだけのカードは設定で出す・出さない
-    if (c.anime && (c.animeBase || !showAnime)) continue;
+    // animeOnly：アニメのカードだけ（今のカードのアニメ版も出す）
+    if (animeOnly) { if (!c.anime) continue; }
+    else if (c.anime && (c.animeBase || !showAnime)) continue;
     if (format && !cardAllowed(c, format)) continue;   // そのルールで使えないカードは出さない
     if (kind && !KIND_FILTERS[kind](c)) continue;
     if (subs.length && !subOk(c)) continue;

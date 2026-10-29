@@ -536,9 +536,12 @@ function setupSearch() {
   const an = $('#f-anime');
   an.checked = store.get('ygo.showAnime', true);
   an.addEventListener('change', () => { store.set('ygo.showAnime', an.checked); run(); });
+  // アニメのカードだけ
+  $('#f-anime-only').addEventListener('change', run);
   // 検索の条件を全部消す
   $('#f-clear').addEventListener('click', () => {
     $('#f-alt').checked = false;
+    $('#f-anime-only').checked = false;
     $('#q').value = '';
     $('#qt').value = '';
     $('#f-kind').value = '';
@@ -628,7 +631,7 @@ function renderResults() {
   let res = searchCards({
     format: fmt, q: $('#q').value, qMode: segMode('#q-mode'), text, textMode: segMode('#qt-mode'), kind: $('#f-kind').value, sub: getMulti('#f-sub'), subMode: $('#f-sub').dataset.mode,
     attr: getMulti('#f-attr'), race: getMulti('#f-race'), level: getMulti('#f-level'), rank: getMulti('#f-rank'), link: getMulti('#f-link'), marker: getMulti('#f-marker'), markerMode: $('#f-marker').dataset.mode, sort: $('#f-sort').value,
-    atkMin: statNum('#f-atk-min'), atkMax: statNum('#f-atk-max'), defMin: statNum('#f-def-min'), defMax: statNum('#f-def-max'),
+    atkMin: statNum('#f-atk-min'), atkMax: statNum('#f-atk-max'), defMin: statNum('#f-def-min'), defMax: statNum('#f-def-max'), animeOnly: $('#f-anime-only').checked,
   });
   // 選んだレギュレーションの時点で未発売のカードは出さない（設定でオフにできる）
   if (hideUnreleased(ctx)) res = res.filter(c => !isUnreleased(c, ctx));
