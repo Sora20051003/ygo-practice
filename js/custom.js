@@ -179,6 +179,7 @@ function customText(d) {
     if (mat) lines.push(mat);
   }
   if (d.kind === 'monster' && d.mtype === 'normal') return [...lines, d.flavor || ''].filter(Boolean).join('\n');
+  if (d.useAi && d.aiLua && (d.aiText || '').trim()) return [d.aiText.trim(), d.memo || ''].filter(Boolean).join('\n');   // AI が作った効果文
   if (d.useSrc && (d.src || '').trim()) return [...lines, d.src.trim()].join('\n');   // 自分の書いた文をそのまま出す
   const single = effs.length === 1 && CUSTOM_WHEN[effs[0].when].card;   // 魔法・罠の発動の効果だけ（今のカードと同じく①は付ける）
   const opt = effs.map((x, i) => (optOf(x) === 'name' ? CIRCLED[i] : null)).filter(Boolean);
@@ -216,7 +217,7 @@ function customToCard(d) {
   };
   c.jaText = customText(d);
   c.tkey = normalizeText(c.jaText);
-  c.jaStrs = (d.effects || []).map(x => (CUSTOM_WHAT[x.what] ? CUSTOM_WHAT[x.what].label : '効果'));
+  c.jaStrs = d.useAi && d.aiLua ? (d.aiStrs || []) : (d.effects || []).map(x => (CUSTOM_WHAT[x.what] ? CUSTOM_WHAT[x.what].label : '効果'));
   c.key = normalizeText(c.name) + '||';
   c.nkey = normalizeText(c.name);
   return c;
@@ -442,6 +443,7 @@ function luaRegister(x, d, i, act) {
   return lines.join('\n');
 }
 function customLua(d) {
+  if (d.useAi && d.aiLua) return d.aiLua;   // AI が作ったスクリプト（js/ai.js）
   const init = [];
   if (d.kind === 'monster') {
     const lv = Math.max(1, +d.level || 1);
@@ -870,6 +872,7 @@ function openCustomEditor(src, onSaved) {
         el('div', { class: 'muted small-note', text: '書いた文から「いつ・何をする・条件・数」を読み取って、下の効果に入れます。そのあと下で直せます（動くのは下の効果のとおりです）' }),
         src, el('div', { class: 'row' }, read), result,
         el('label', { class: 'check' }, useSrc, ' カードには自分の書いた文をそのまま表示する'));
+      if (typeof aiPanel === 'function') form.append(aiPanel(d, render));
       form.append(el('h4', { text: max > 1 ? `効果（${max}枠。効果ごとに「いつ・何をする・1ターンに使える回数」を決めます）` : '効果' }), box);
       const memo = el('textarea', { rows: 2, class: 'full', placeholder: '効果文の最後に足す文（表示だけ。処理はされません）' }, d.memo || '');
       memo.addEventListener('input', () => { d.memo = memo.value; redrawPreview(); });
