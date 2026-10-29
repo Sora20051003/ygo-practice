@@ -1807,3 +1807,29 @@ body.land .modal.wide:has(.big-detail) { width: calc(var(--lw) - 16px); max-heig
 .multi-panel.arrows > .check.ex { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 18%, transparent); }
 details.multi.has-ex > summary { color: var(--danger); }
 .multi-note { grid-column: 1 / -1; font-size: 11px; }
+/* デコーダーの候補（パソコン：右の列。スマホ：タブで切り替え） */
+.dec-room { grid-template-columns: 240px minmax(0, 1fr) 300px; grid-template-areas: "side main cands"; max-width: 1440px; }
+.dec-room > .dec-side { grid-area: side; }
+.dec-room > .dec-main { grid-area: main; }
+.dec-room > .dec-cands { grid-area: cands; }
+.dec-cands { display: flex; flex-direction: column; gap: 6px; min-height: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; max-height: calc(100vh - 120px); position: sticky; top: 0; }
+.dec-cand-head { display: flex; flex-direction: column; gap: 4px; }
+.dec-cand-head input { width: 100%; padding: 6px 8px; }
+.dec-cand-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dec-cand { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.dec-cand-body { flex: 1; min-width: 0; }
+.dec-cand-name { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dec-cand small { display: block; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1100px) and (min-width: 721px) {
+  .dec-room { grid-template-columns: 220px minmax(0, 1fr); grid-template-areas: "side main" "side cands"; }
+  .dec-cands { position: static; max-height: 60vh; }
+}
+@media (max-width: 720px) {
+  .dec-room { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tabs" "main" "side" "cands"; padding: 0 0 16px; width: 100%; }
+  .dec-mtabs button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .dec-room > .dec-mtabs { grid-area: tabs; }
+  .dec-room > .dec-main, .dec-room > .dec-side, .dec-room > .dec-cands { margin: 0 16px; }
+  .dec-room[data-pane="game"] > .dec-cands, .dec-room[data-pane="cands"] > .dec-main, .dec-room[data-pane="cands"] > .dec-side { display: none; }
+  .dec-cands { position: static; max-height: none; }
+  .dec-cand-list { overflow: visible; }
+}

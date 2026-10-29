@@ -37,7 +37,15 @@ function decThemesOf(c) {
 }
 
 // カードの各項目（比べるための key と、表示する text）。当てはまらない項目は null
+const decValCache = new Map();   // カードごとの項目（候補を絞るときに何度も使う）
 function decVals(c) {
+  const hit = decValCache.get(c.id);
+  if (hit) return hit;
+  const v = decValsRaw(c);
+  decValCache.set(c.id, v);
+  return v;
+}
+function decValsRaw(c) {
   const mon = isMonster(c);
   const v = {};
   v.kind = { key: mon ? 'M' : has(c, T.SPELL) ? 'S' : 'T', text: mon ? 'モンスター' : has(c, T.SPELL) ? '魔法' : '罠' };
@@ -216,7 +224,7 @@ function decEndRound(winner, answerId, all, text) {
 function decApplyJudge(j) {
   const G = Dec.G, pd = G.pending;
   if (!pd || j.n !== pd.n) return;
-  const entry = { t: 'guess', uid: pd.uid, name: pd.name, id: pd.id };
+  const entry = { t: 'guess', uid: pd.uid, name: pd.name, id: pd.id, r: G.round };   // r：何問目の答えか（候補を絞るのに使う）
   const c = DB.byId.get(pd.id);
   if (j.correct) {
     entry.correct = true;
@@ -358,6 +366,7 @@ async function decCreate(solo) {
     Dec.net = net;
     net.onMsg = m => { if (m.from && m.from !== Dec.me.uid) decHostHandle(m.from, m); };
   } else Dec.code = null;
+  decLockBack();
   decLog({ t: 'sys', text: solo ? 'ひとりで遊ぶ部屋です（コンピューターが出題します）。「スタート」で始めます' : '部屋を作りました。部屋コードを友だちに教えて、出題者を決めてください' });
   Dec.shownN = 0;
   decStartTimers();
@@ -388,6 +397,7 @@ async function decJoin(code) {
   Dec.net = net; Dec.code = code; Dec.isHost = false; Dec.solo = false; Dec.secret = null; Dec.judged = 0;
   Dec.shownN = 0;
   store.set('ygo.decLastCode', code);
+  decLockBack();
   decStartTimers();
   renderDecoder(true);
 }
@@ -395,7 +405,7 @@ function decLeave(silent) {
   if (!silent && Dec.isHost && !Dec.solo && Dec.G && Dec.G.players.filter(p => p.online).length > 1 && !confirm('部屋を閉じると、ほかの人も遊べなくなります。閉じますか？')) return;
   clearInterval(Dec.tick);
   if (Dec.net) Dec.net.close();
-  Object.assign(Dec, { net: null, G: null, secret: null, code: null, isHost: false, solo: false });
+  Object.assign(Dec, { net: null, G: null, secret: null, code: null, isHost: false, solo: false, backLocked: false });
   renderDecoder(true);
 }
 
@@ -421,9 +431,76 @@ function renderDecoder(full) {
     root.append(decRoomSkeleton());
     Dec.shownN = 0;
   }
-  decRenderSide(); decRenderSlots(); decRenderMaster(); decRenderPending(); decRenderLog(); decRenderTurn(); decRenderSuggest();
+  decRenderSide(); decRenderSlots(); decRenderMaster(); decRenderPending(); decRenderLog(); decRenderTurn(); decRenderSuggest(); decRenderCands();
   decMasterAuto();
 }
+
+// ---------- 候補（まだ答えの可能性があるカード） ----------
+// この問題で出たカードと、その結果から、答えではありえないカードを除く
+//   ・出たカード（はずれ）そのもの
+//   ・開示された項目：そのカードと比べたとき、同じ項目が同じ文で当たりになるカードだけ残す
+//   ・はずれ（当たりなし）：そのカードと1つでも同じ項目があるカードは除く
+//   ・当たりはもう開示済み：そのカードとの当たりが、開示済みの項目だけのカードを残す
+function decCandList() {
+  const G = Dec.G;
+  if (!G || G.status !== 'play') return null;
+  const guesses = G.log.filter(e => e.t === 'guess' && e.r === G.round && !e.correct).map(e => ({ e, c: DB.byId.get(e.id) })).filter(x => x.c);
+  const tried = new Set(guesses.map(x => x.c.name));
+  const pf = G.master === DEC_CPU && G.settings.pool !== 'deck' ? (DEC_POOLS[G.settings.pool] || DEC_POOLS.all)[1] : () => true;
+  const rev = Object.entries(G.revealed).filter(([k]) => k !== 'theme');
+  const out = [];
+  for (const c of DB.cards) {
+    if (!decUsable(c) || !(c.cid || c.special) || c.pre || tried.has(c.name) || !pf(c)) continue;
+    const v = decVals(c);
+    if (rev.some(([k, t]) => !v[k] || v[k].text !== t)) continue;
+    let ok = true;
+    for (const { e, c: g } of guesses) {
+      const m = decMatches(g, c), keys = Object.keys(m);
+      if (e.reveal) ok = m[e.reveal.k] === e.reveal.text;
+      else if (e.old) ok = keys.length > 0 && keys.every(k => G.revealed[k] != null);
+      else ok = !keys.length;
+      if (!ok) break;
+    }
+    if (ok) out.push(c);
+  }
+  return out;
+}
+const DEC_CAND_MAX = 300;
+function decRenderCands() {
+  const box = $('#dec-cands-box'), G = Dec.G;
+  if (!box || !G) return;
+  const key = G.status + ':' + G.round + ':' + G.seq + ':' + Object.keys(G.revealed).length;
+  if (Dec.candKey !== key) { Dec.candKey = key; Dec.cands = decCandList(); }
+  const list = Dec.cands, q = normalizeText($('#dec-cand-q').value || '');
+  const shown = list ? (q ? list.filter(c => c.key.includes(q)) : list) : [];
+  const count = list ? `${list.length.toLocaleString()}枚` : '';
+  $('#dec-cand-count').textContent = list ? `候補 ${count}` + (q ? `（名前で絞って ${shown.length}枚）` : '') : '候補';
+  const mt = $('#dec-mt-cands');
+  if (mt) mt.textContent = '🔍 候補' + (list ? `（${count}）` : '');
+  const ul = $('#dec-cand-list');
+  ul.innerHTML = '';
+  if (!list) { ul.append(el('li', { class: 'muted', text: '問題が始まると、まだ答えの可能性があるカードがここに出ます' })); return; }
+  const mine = decMyTurn();
+  for (const c of shown.slice(0, DEC_CAND_MAX)) {
+    ul.append(el('li', { class: 'dec-cand', dataset: { cid: c.id } }, rowMark(c),
+      el('div', { class: 'dec-cand-body' }, el('div', { class: 'dec-cand-name', text: c.name }), el('small', { class: 'muted', text: [typeLine(c), isMonster(c) ? `${ATTR[c.attr] || ''} ${levelText(c)} ${statText(c)}` : ''].filter(Boolean).join('　') })),
+      mine ? el('button', { class: 'btn small primary', text: '答える', onclick: () => decSendGuess(c) }) : null));
+  }
+  if (shown.length > DEC_CAND_MAX) ul.append(el('li', { class: 'muted small-note', text: `ほか ${shown.length - DEC_CAND_MAX}枚（名前で絞ってください）` }));
+}
+
+// ---------- 戻るボタン（部屋にいる間は使えない） ----------
+function decLockBack() {
+  if (Dec.backLocked) return;
+  Dec.backLocked = true;
+  history.pushState({ decRoom: 1 }, '');
+}
+window.addEventListener('popstate', () => {
+  if (!Dec.backLocked) return;
+  if (!Dec.G) { Dec.backLocked = false; return; }
+  history.pushState({ decRoom: 1 }, '');   // 戻る前の状態に置き直す
+  toast('デコーダーの部屋にいる間は、戻るボタンは使えません');
+});
 
 function decLobby() {
   const name = el('input', { type: 'text', maxlength: '20', value: duelMe().name, placeholder: '表示名' });
@@ -450,7 +527,25 @@ function decRoomSkeleton() {
     if (e.key !== 'Enter' || e.isComposing) return;
     e.preventDefault(); decSubmit();
   });
-  return el('div', { class: 'dec-room', id: 'dec-room' },
+  const candQ = el('input', { type: 'search', id: 'dec-cand-q', autocomplete: 'off', placeholder: '候補を名前で絞る' });
+  candQ.addEventListener('input', decRenderCands);
+  // スマホ：「ゲーム」「候補」をタブで切り替える（デッキ作成と同じ形）
+  const tabs = el('div', { class: 'mobile-tabs dec-mtabs' },
+    el('button', { class: 'on', dataset: { pane: 'game' }, text: '🎮 ゲーム' }),
+    el('button', { id: 'dec-mt-cands', dataset: { pane: 'cands' }, text: '🔍 候補' }));
+  tabs.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    tabs.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    $('#dec-room').dataset.pane = b.dataset.pane;
+    window.scrollTo(0, 0);
+  });
+  return el('div', { class: 'dec-room', id: 'dec-room', dataset: { pane: 'game' } },
+    tabs,
+    el('aside', { class: 'dec-cands', id: 'dec-cands-box' },
+      el('div', { class: 'dec-cand-head' }, el('b', { id: 'dec-cand-count', text: '候補' }),
+        el('div', { class: 'muted small-note', text: 'この問題で出たカードと、開示された情報から、答えではありえないカードを除いています' }), candQ),
+      el('ul', { class: 'dec-cand-list', id: 'dec-cand-list' })),
     el('aside', { class: 'dec-side', id: 'dec-side' }),
     el('div', { class: 'dec-main' },
       el('div', { class: 'dec-answer' }, el('div', { class: 'dec-answer-card', id: 'dec-answer-card' }), el('div', { class: 'dec-slots', id: 'dec-slots' })),
