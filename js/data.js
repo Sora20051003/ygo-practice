@@ -294,9 +294,11 @@ async function updateCards(onStatus) {
 // ---------- ルール（OCG / マスターデュエル）と禁止・制限リスト ----------
 // 禁止・制限リストは DawnbrandBots/yaml-yugi-limit-regulation（KONAMIの発表を毎日自動で取り込んでいる公開データ）から取得。
 // 中身は { date, regulation: { KONAMIカード番号: 0=禁止 / 1=制限 / 2=準制限 } }
+// マスターデュエルに無いが、MD のデッキでも使えるようにするカード（光の創造神 ホルアクティ）
+const MD_EXTRA = new Set([10000040]);
 const FORMATS = {
   ocg: { label: 'OCG', short: 'OCG', list: 'ocg', allowed: c => !c.noJp || (!!c.pre && c.id < 101000000) },
-  md: { label: 'マスターデュエル', short: 'MD', list: 'master-duel', allowed: c => c.md },
+  md: { label: 'マスターデュエル', short: 'MD', list: 'master-duel', allowed: c => c.md || MD_EXTRA.has(c.id) },
   // 海外（TCG）：海外で発売済みのカード（発売日の表に TCG の日付があるもの。表をまだ読んでいなければ英語名があるもの）
   tcg: { label: 'TCG（海外）', short: 'TCG', list: 'tcg', allowed: c => (c.pre ? c.id >= 101000000 : typeof RELEASE_DATES !== 'undefined' && RELEASE_DATES.tcg ? !!(c.cid && RELEASE_DATES.tcg[c.cid]) : !!c.en) },   // 発売前のカードは、海外の発売前（101 で始まる番号）だけ
 };
@@ -452,7 +454,7 @@ function releaseDate(c, fmt) {
   const table = RELEASE_DATES[fmt];
   if (!table) return 0;   // 古い発売日の表（TCG の日付が無い）
   if (table[c.cid]) return table[c.cid];
-  if (fmt === 'md') return 99999999;   // マスターデュエルは実装順がばらばらなので、不明なら「最近実装」とみなす
+  if (fmt === 'md') return MD_EXTRA.has(c.id) ? 0 : 99999999;   // （MD_EXTRA は日付で隠さない）マスターデュエルは実装順がばらばらなので、不明なら「最近実装」とみなす
   if (fmt === 'tcg') return 99999999;   // 海外の日付が無い＝海外では未発売（日本だけのカード）
   if (!releaseIndex[fmt]) releaseIndex[fmt] = Object.keys(table).map(Number).sort((a, b) => a - b);
   const ids = releaseIndex[fmt];
