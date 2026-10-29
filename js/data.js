@@ -127,7 +127,7 @@ function withPreCards(cards) {
 // ANIME_CARDS.d[id] = [base, tag, en, ja, type, lv, race, attr, atk, def, setcodes, alias, jaText, enText, strs]
 //   base：同じ名前の今のカード（あればアニメ版。無ければ 0＝アニメだけのカード）／tag：「アニメ」「漫画」など
 // アニメ版（今のカードと同じ名前）は検索に出さず、デッキ作成のカードの説明で「アニメの効果」に切り替える
-const ANIME_FILE = 'data/anime-cards.js?v=2';
+const ANIME_FILE = 'data/anime-cards.js?v=3';
 async function loadAnimeCards() {
   if (typeof ANIME_CARDS !== 'undefined') return;
   try { await loadScript(ANIME_FILE); } catch (e) { console.warn('アニメのカードを読めませんでした', e); }
@@ -141,10 +141,10 @@ function withAnimeCards(cards) {
   for (const [k, a] of Object.entries(ANIME_CARDS.d)) {
     const id = +k;
     if (byId.has(id)) continue;   // 番号がほかのカードとぶつかるものは入れない
-    const [base, tag, en, ja, type, lv, race, attr, atk, def, sc, alias, jaText, enText, strs] = a;
+    const [base, tag, en, ja, type, lv, race, attr, atk, def, sc, alias, jaText, enText, strs, ruby] = a;
     const b = base ? byId.get(base) : null;
     const c = {
-      id, cid: 0, name: b ? `${b.name}（${tag}）` : (ja || en), noJp: !b && !ja, md: false, ruby: b ? b.ruby : '', en, type, atk, def,
+      id, cid: 0, name: b ? `${b.name}（${tag}）` : (ja || en), noJp: !b && !ja, md: false, ruby: b ? b.ruby : (ruby || ''), en, type, atk, def,
       level: lv & 0xff, ls: (lv >>> 24) & 0xff, rs: (lv >>> 16) & 0xff, race, setcode: b ? b.setcode : 0, attr,
       desc: '', pdesc: '', anime: true, animeTag: tag, animeBase: b ? base : 0,
       edo: [alias, sc, type, lv, race, attr, atk, def], strs: strs || [], enText: enText || '',
