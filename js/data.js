@@ -127,7 +127,7 @@ function withPreCards(cards) {
 // ANIME_CARDS.d[id] = [base, tag, en, ja, type, lv, race, attr, atk, def, setcodes, alias, jaText, enText, strs]
 //   base：同じ名前の今のカード（あればアニメ版。無ければ 0＝アニメだけのカード）／tag：「アニメ」「漫画」など
 // アニメ版（今のカードと同じ名前）は検索に出さず、デッキ作成のカードの説明で「アニメの効果」に切り替える
-const ANIME_FILE = 'data/anime-cards.js?v=4';
+const ANIME_FILE = 'data/anime-cards.js?v=5';
 async function loadAnimeCards() {
   if (typeof ANIME_CARDS !== 'undefined') return;
   try { await loadScript(ANIME_FILE); } catch (e) { console.warn('アニメのカードを読めませんでした', e); }
