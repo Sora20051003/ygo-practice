@@ -543,7 +543,8 @@ class AutoDuel {
       const msgs = L.duelGetMessage(this.h);
       let ask = null;
       for (const m of msgs) {
-        if (m.type === MSG.RETRY) { this.retry = true; if (++this.retries > 20) throw new Error('処理が先に進めなくなりました'); continue; }
+        // 答えが通らなかった（RETRY）：エンジンは同じ選択を送り直さないので、直前の選択をもう一度聞く
+        if (m.type === MSG.RETRY) { if (!this.retry && ++this.retries > 400) throw new Error('処理が先に進めなくなりました'); this.retry = true; ask = this.lastAsk; continue; }
         if (isSelectMsg(m)) ask = m; else this.onInfo(m);
         // 自分のドローフェイズになったら、画面をタッチするまでドローしない（drawTap：一人回し・対戦の画面の対戦だけ。記録の流し直し中は止めない）
         if (this.drawTap && m.type === MSG.NEW_PHASE && m.phase === 1 && this.turnPlayer === this.me && (this.turn > 1 || this.firstDraw) && !(replay && replay.length)) this.drawWait = true;
@@ -561,7 +562,9 @@ class AutoDuel {
       // 試し発動中（probeActivate）：自分の選択は自動で答え、意味のある選択が出たかを数える
       if (this.probing && ask.player === this.me && ask.type !== MSG.SELECT_IDLECMD && ask.type !== MSG.SELECT_BATTLECMD) {
         if (probeMeaningful(ask, this.probing)) this.probeHits++;
-        this.respond(probeAnswer(ask, this.me), true, true); continue;
+        let pa = probeAnswer(ask, this.me);
+        if (this.retry && this.lastWasAuto) { if (!this.altTry || this.altTry.type !== ask.type) this.altTry = { type: ask.type, list: altAnswers(ask), n: 0 }; pa = this.altTry.list[this.altTry.n++]; if (!pa) throw new Error('処理が先に進めなくなりました'); }
+        this.respond(pa, true, true); continue;
       }
       // 先読み用の複製：相手（CPU）の番で一度止まる（ここから候補の手を試す）
       if (this.stopAtCpu && ask.player !== this.me) { this.stopAtCpu = false; this.pending = ask; return; }
@@ -569,7 +572,13 @@ class AutoDuel {
       if (this.net && ask.player !== this.me) { this.pending = null; this.remoteAsk = ask; return; }
       // 相手の番の入力と、聞くまでもない確認は自動で返す
       // CPU の先読み（noThink の複製）の中では、練習する人の答えも決める：分かっている伏せカードは使ってくるものとして考える
-      const auto = ask.player !== this.me ? (this.opp ? cpuAnswer(ask, this) : autoAnswer(ask)) : this.noThink ? humanSimAnswer(ask, this) : skippable(ask, this);
+      let auto = ask.player !== this.me ? (this.opp ? cpuAnswer(ask, this) : autoAnswer(ask)) : this.noThink ? humanSimAnswer(ask, this) : skippable(ask, this);
+      // 自動の答えが通らなかった（同じ選択をもう一度聞かれた）：別の答えを順に試す。自分の選択で試し尽くしたら、画面で選んでもらう
+      if (auto && this.retry && this.lastWasAuto) {
+        if (!this.altTry || this.altTry.type !== ask.type) this.altTry = { type: ask.type, list: altAnswers(ask), n: 0 };
+        auto = this.altTry.list[this.altTry.n++] || null;
+        if (!auto && ask.player !== this.me) throw new Error('処理が先に進めなくなりました');
+      } else this.altTry = null;
       // CPU が目に見える行動（召喚・発動・攻撃など）をするときは、一度止めて画面に見せてから進める（cpuSlow のときだけ）
       if (auto && this.cpuSlow && !this.probing && ask.player !== this.me && this.opp && cpuVisible(ask, auto)) { this.cpuWait = auto; this.pending = null; return; }
       if (auto) { this.respond(auto, true, true); continue; }
@@ -600,7 +609,8 @@ class AutoDuel {
     // 対戦：自分が選ぶ番の返答は、相手の画面にも送る（流し直し中は送らない）
     if (this.net && this.onSend && !this.replaying && src && src.player === this.me) this.onSend(res, this.responses.length - 1);
     this.retry = false;
-    if (!auto) this.retries = 0;
+    this.lastWasAuto = !!auto;
+    if (!auto) { this.retries = 0; this.altTry = null; }
     Engine.lib.duelSetResponse(this.h, res);
     if (!inner) { this.pending = null; this.run(); }
   }
@@ -962,7 +972,8 @@ function autoAnswer(m) {
     case MSG.SELECT_POSITION: return { type: RES.SELECT_POSITION, position: [1, 2, 4, 8].find(p => m.positions & p) };
     case MSG.SELECT_PLACE: return { type: RES.SELECT_PLACE, places: placeOrder(freePlaces(m.field_mask, m.player), m.player).slice(0, m.count) };
     case MSG.SELECT_DISFIELD: return { type: RES.SELECT_DISFIELD, places: freePlaces(m.field_mask, m.player).slice(0, m.count) };
-    case MSG.SELECT_SUM: return { type: RES.SELECT_SUM, indicies: [...Array(Math.max(m.min, 1)).keys()] };
+    case MSG.SELECT_SUM: { const ok = sumAnswers(m, 1)[0]; return { type: RES.SELECT_SUM, indicies: ok || [...Array(Math.max(m.min, 1)).keys()] }; }
+    case MSG.ANNOUNCE_RACE: case MSG.ANNOUNCE_ATTRIB: return altAnswers(m)[0] || null;
     case MSG.SORT_CARD: case MSG.SORT_CHAIN: return { type: RES.SORT_CARD, order: null };
     case MSG.SELECT_COUNTER: return { type: RES.SELECT_COUNTER, counters: m.cards.map((c, i) => (i === 0 ? m.count : 0)) };
     case MSG.ANNOUNCE_NUMBER: return { type: RES.ANNOUNCE_NUMBER, value: 0 };
@@ -970,6 +981,100 @@ function autoAnswer(m) {
   }
 }
 
+
+// ---------- 自動の答えが通らなかったときの予備 ----------
+// 選べる番号の組み合わせ（少ない枚数から順に、多すぎない数まで）
+function idxCombos(n, min, max, cap = 300) {
+  const out = [], cur = [];
+  min = Math.max(0, min | 0); max = Math.min(n, Math.max(min, max | 0));
+  for (let k = Math.max(min, 1); k <= max && out.length < cap; k++) {
+    const rec = s => {
+      if (out.length >= cap) return;
+      if (cur.length === k) { out.push(cur.slice()); return; }
+      for (let i = s; i <= n - (k - cur.length); i++) { cur.push(i); rec(i + 1); cur.pop(); }
+    };
+    rec(0);
+  }
+  return out;
+}
+// 「合計が〜になるように選ぶ」（シンクロ素材など）：合計が合う組み合わせを探す
+function sumAnswers(m, cap = 300) {
+  const vals = c => { const a = c.amount & 0xffff, b = c.amount >>> 16; return b && b !== a ? [a, b] : [a]; };
+  const addAll = (set, c) => { const out = new Set(); for (const s of set) for (const v of vals(c)) out.add(s + v); return out; };
+  let base = new Set([0]);
+  for (const c of m.selects_must || []) base = addAll(base, c);
+  const ok = sums => m.select_max ? [...sums].some(s => s >= m.amount) : sums.has(m.amount);
+  const min = Math.max(m.min || 0, (m.selects_must || []).length ? 0 : 1), max = m.max || m.selects.length;
+  const out = [], tryN = Math.min(20000, cap * 50);
+  let tried = 0;
+  for (const idx of idxCombos(m.selects.length, min, max, tryN)) {
+    if (++tried > tryN || out.length >= cap) break;
+    let sums = base;
+    for (const i of idx) sums = addAll(sums, m.selects[i]);
+    if (ok(sums)) out.push(idx);
+  }
+  return out;
+}
+// 自動の答えが通らなかったときに、順に試す別の答え
+function altAnswers(m) {
+  const list = [];
+  const push = r => list.push(r);
+  switch (m.type) {
+    case MSG.SELECT_IDLECMD:
+      if (m.to_ep) push({ type: RES.SELECT_IDLECMD, action: IDLE.TO_EP, index: null });
+      if (m.to_bp) push({ type: RES.SELECT_IDLECMD, action: IDLE.TO_BP, index: null });
+      break;
+    case MSG.SELECT_BATTLECMD:
+      if (m.to_ep) push({ type: RES.SELECT_BATTLECMD, action: BATTLE.TO_EP, index: null });
+      if (m.to_m2) push({ type: RES.SELECT_BATTLECMD, action: BATTLE.TO_M2, index: null });
+      break;
+    case MSG.SELECT_CHAIN:
+      if (!m.forced) push({ type: RES.SELECT_CHAIN, index: null });
+      (m.selects || []).forEach((_, i) => push({ type: RES.SELECT_CHAIN, index: i }));
+      break;
+    case MSG.SELECT_EFFECTYN: push({ type: RES.SELECT_EFFECTYN, yes: true }); push({ type: RES.SELECT_EFFECTYN, yes: false }); break;
+    case MSG.SELECT_YESNO: push({ type: RES.SELECT_YESNO, yes: true }); push({ type: RES.SELECT_YESNO, yes: false }); break;
+    case MSG.SELECT_OPTION: (m.options || []).forEach((_, i) => push({ type: RES.SELECT_OPTION, index: i })); break;
+    case MSG.SELECT_CARD: case MSG.SELECT_TRIBUTE:
+      for (const idx of idxCombos(m.selects.length, m.min, m.max)) push({ type: m.type === MSG.SELECT_CARD ? RES.SELECT_CARD : RES.SELECT_TRIBUTE, indicies: idx });
+      if (m.can_cancel) push({ type: m.type === MSG.SELECT_CARD ? RES.SELECT_CARD : RES.SELECT_TRIBUTE, indicies: null });
+      break;
+    case MSG.SELECT_SUM: for (const idx of sumAnswers(m)) push({ type: RES.SELECT_SUM, indicies: idx }); break;
+    case MSG.SELECT_UNSELECT_CARD:
+      if (m.can_finish) push({ type: RES.SELECT_UNSELECT_CARD, index: null });
+      (m.select_cards || []).forEach((_, i) => push({ type: RES.SELECT_UNSELECT_CARD, index: i }));
+      if (m.can_cancel && !m.can_finish) push({ type: RES.SELECT_UNSELECT_CARD, index: null });
+      break;
+    case MSG.SELECT_POSITION: [1, 2, 4, 8].filter(p => m.positions & p).forEach(p => push({ type: RES.SELECT_POSITION, position: p })); break;
+    case MSG.SELECT_PLACE: case MSG.SELECT_DISFIELD: {
+      const free = MSG.SELECT_PLACE === m.type ? placeOrder(freePlaces(m.field_mask, m.player), m.player) : freePlaces(m.field_mask, m.player);
+      const t = m.type === MSG.SELECT_PLACE ? RES.SELECT_PLACE : RES.SELECT_DISFIELD;
+      for (const idx of idxCombos(free.length, m.count || 1, m.count || 1)) push({ type: t, places: idx.map(i => free[i]) });
+      break;
+    }
+    case MSG.ANNOUNCE_NUMBER: (m.options || []).forEach(o => push({ type: RES.ANNOUNCE_NUMBER, value: Number(o) })); break;
+    case MSG.ANNOUNCE_RACE: case MSG.ANNOUNCE_ATTRIB: {
+      const avail = BigInt(m.available || 0), bits = [];
+      for (let i = 0; i < 40; i++) if (avail & (1n << BigInt(i))) bits.push(1n << BigInt(i));
+      for (const idx of idxCombos(bits.length, m.count || 1, m.count || 1, 100)) {
+        const picked = idx.map(i => bits[i]);
+        push(m.type === MSG.ANNOUNCE_RACE ? { type: RES.ANNOUNCE_RACE, races: picked } : { type: RES.ANNOUNCE_ATTRIB, attributes: picked.map(Number) });
+      }
+      break;
+    }
+    case MSG.ANNOUNCE_CARD: {
+      let n = 0;
+      for (const c of DB.cards) {
+        if (n >= 50) break;
+        try { if (Engine.ocg.cardMatchesOpcode(engineCardData(c.id), m.opcodes)) { push({ type: RES.ANNOUNCE_CARD, card: c.id }); n++; } } catch { /* 調べられないカードは飛ばす */ }
+      }
+      break;
+    }
+    case MSG.SORT_CARD: case MSG.SORT_CHAIN: push({ type: RES.SORT_CARD, order: null }); break;
+    case MSG.ROCK_PAPER_SCISSORS: [1, 2, 3].forEach(v => push({ type: RES.ROCK_PAPER_SCISSORS, value: v })); break;
+  }
+  return list;
+}
 // 自動で置く場所を決めるときの順番：真ん中から外へ（「中央のゾーンに召喚した場合」の効果を使えるように）
 const PLACE_PREF = [2, 1, 3, 0, 4, 5, 6, 7];
 function placeOrder(places, player) {
