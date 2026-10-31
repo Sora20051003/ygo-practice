@@ -559,7 +559,8 @@ function releaseDate(c, fmt) {
   const table = RELEASE_DATES[fmt];
   if (!table) return 0;   // 古い発売日の表（TCG の日付が無い）
   if (table[c.cid]) return table[c.cid];
-  if (fmt === 'md') return MD_EXTRA.has(c.id) ? 0 : 99999999;   // （MD_EXTRA は日付で隠さない）マスターデュエルは実装順がばらばらなので、不明なら「最近実装」とみなす
+  // マスターデュエル：表に無いカードは「最近実装」とみなす（表の一番新しい日。表の更新が遅れても、今のリストでは使える）
+  if (fmt === 'md') { if (MD_EXTRA.has(c.id)) return 0; if (!releaseIndex.mdMax) { const today = +new Date().toISOString().slice(0, 10).replace(/-/g, ""); releaseIndex.mdMax = Math.max(0, ...Object.values(table).filter(d => d <= today)); } return c.md ? releaseIndex.mdMax : 99999999; }
   if (fmt === 'tcg') return 99999999;   // 海外の日付が無い＝海外では未発売（日本だけのカード）
   if (!releaseIndex[fmt]) releaseIndex[fmt] = Object.keys(table).map(Number).sort((a, b) => a - b);
   const ids = releaseIndex[fmt];
@@ -603,7 +604,11 @@ function regContextBase(deck) {
 function regEndDate(listFmt, reg) {
   const ymd = t => new Date(t).toISOString().slice(0, 10);
   const dates = DB.regDates[listFmt] || [];
-  if (!dates.length) return reg;   // 一覧がまだ無いときは、前と同じく始まりの日で判定する
+  if (!dates.length) {
+    // 一覧を取れなかったとき（GitHub の回数制限など）：今使われているリストと同じか新しい日付なら、今日まで使えるとみなす
+    const cur = DB.banlists[listFmt === 'master-duel' ? 'md' : listFmt];
+    return cur && cur.date && reg >= cur.date ? ymd(Date.now()) : reg;
+  }
   const next = dates.filter(d => d > reg).sort()[0];
   if (!next) return ymd(Date.now());
   return ymd(Date.parse(next + 'T00:00:00Z') - 86400000);
