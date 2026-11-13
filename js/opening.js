@@ -38,6 +38,13 @@ const OpSim = (() => {
     for (const c of m.careIdx) if (hc[c] > 0 && ((m.cards[c].counter >> t) & 1)) return c;
     return -1;
   }
+  // マストカウンター：この初動（カードは hc から使用済み）のあとに、もっと強い初動がまだ手札に残っているか
+  // （残っているなら、相手は手札誘発を温存して、強いほうに使う）
+  function strongerLeft(m, hc, ns, i, s) {
+    const str = m.routes[i].strength || 1, u2 = s.used2 || (s.used2 = []);
+    for (let j = 0; j < m.routes.length; j++) if (j !== i && (m.routes[j].strength || 1) > str && tryAssign(m, m.routes[j], hc, ns, u2) >= 0) return true;
+    return false;
+  }
   // 相手の誘発 opp0 を受けながら、優先度の順に初動を試す。1つでも通れば true
   function resolve(m, hc0, opp0, nsInit, s) {
     const hc = s.hc2, opp = s.opp2, used = s.used;
@@ -55,6 +62,13 @@ const OpSim = (() => {
         for (let k = 0; k < (used.main ?? used.length); k++) { if (m.cards[used[k]].field) field = true; if (m.cards[used[k]].hand) hand = true; }
         const allowed = (field ? s.fieldBits : 0) | (hand ? s.handBits : 0);
         vm &= ~(s.fieldBits | s.handBits) | allowed;
+      }
+      // もっと強い初動が残っているなら、相手はこの初動には撃たない（通るが、展開しきったとはみなさず、カードと召喚権は使う）
+      if (vm) {
+        for (const c of used) hc[c]--;
+        const hold = strongerLeft(m, hc, ns - nsUsed, i, s);
+        if (hold) { ns -= nsUsed; i--; continue; }
+        for (const c of used) hc[c]++;
       }
       let stopped = false;
       for (;;) {
@@ -87,6 +101,11 @@ const OpSim = (() => {
       if (nsUsed < 0) continue;
       let vm = 0;
       for (let k = 0; k < (used.main ?? used.length); k++) vm |= m.cards[used[k]].vuln;
+      if (vm && left > 0) {   // マストカウンター：もっと強い初動が残っているなら温存
+        for (const c of used) hc[c]--;
+        if (strongerLeft(m, hc, ns - nsUsed, i, s)) { ns -= nsUsed; i--; continue; }
+        for (const c of used) hc[c]++;
+      }
       let stopped = false;
       while (left > 0 && vm) {
         let care = -1;
@@ -422,7 +441,7 @@ function opCardSetting(st, id) {
 // そのカード1枚だけを手札にした対戦を作り、発動・通常召喚・特殊召喚を3手先まで試す。
 // デッキのカードが手札・フィールド・墓地へ動いたら（サーチ・デッキからの特殊召喚・墓地へ送るなど）初動とみなす。
 // 通常召喚を使わずに動ければ召喚権なし、通常召喚が必要なら召喚権ありにする
-const OP_JUDGE_V = 3;   // 判別のしかたを変えたら上げる（前の結果を使わない）
+const OP_JUDGE_V = 4;   // 判別のしかたを変えたら上げる（前の結果を使わない）
 const OP_COST_FILLER = 4206964;   // 落とし穴（自分のメインフェイズには使えず、素材にもならない。手札コスト用の1枚）
 const OP_DEPTH = 3, OP_BRANCH = 6, OP_NODES = 60;
 // 試している間の選択の答え：自分の効果はできるだけ使う
@@ -467,7 +486,8 @@ function opGain(t) {
   });
   return n;
 }
-async function opJudgeHand(base, hand, maxNodes = OP_NODES, maxDepth = OP_DEPTH) {
+async function opJudgeHand(base, hand, maxNodes = OP_NODES, maxDepth = OP_DEPTH, full = false) {
+  // full：初動と分かっても止めずに、どこまで展開が伸びるか（デッキから動かせる枚数の最大）を数える（マストカウンターの判断用）
   const best = { free: 0, ns: 0, nsCode: 0 };
   let nodes = 0;
   const mk = () => new AutoDuel({ main: base.main, extra: base.extra, handIds: hand, handSize: 5, seed: [1n, 2n, 3n, 4n], opp: null, chainMode: 'off', autoTrigger: true, tools: false, rule: base.rule, speed: '', errata: base.errata, sv: 2 });
@@ -481,7 +501,7 @@ async function opJudgeHand(base, hand, maxNodes = OP_NODES, maxDepth = OP_DEPTH)
   // branched：この手順で、もうデッキのカードの選び分けを試した（選び分けは1つの手順で1回だけ）
   // nsCode：この手順で通常召喚したカード
   const visit = async (hist, act, depth, usedNS, branched, nsCode) => {
-    if (nodes >= maxNodes || best.free > 0) return;
+    if (nodes >= maxNodes || (best.free > 0 && !full)) return;
     nodes++;
     if (nodes % 3 === 0) await new Promise(r => setTimeout(r, 0));   // 画面が固まらないように
     const t = mk();
@@ -521,7 +541,7 @@ async function opAutoJudge(deck, st, onProgress) {
     onProgress && onProgress(++i, todo.length, (DB.byId.get(id) || {}).name);
     const s = opCardSetting(st, id);
     // 手札誘発・誘発ケアは試さない（相手の行動が無いと使えない）
-    const r = s.role === 'handtrap' || s.role === 'care' ? { v: OP_JUDGE_V, starter: false, ns: false, gain: 0, skip: true } : await opJudgeHand(base, [id]);
+    const r = s.role === 'handtrap' || s.role === 'care' ? { v: OP_JUDGE_V, starter: false, ns: false, gain: 0, skip: true } : await opJudgeHand(base, [id], OP_NODES, OP_DEPTH, true);
     // 1枚では動けないときは、何でもない1枚（落とし穴）を手札に足して試す（「手札を1枚捨てて特殊召喚」などの手札コスト）
     if (!r.skip && !r.starter) { const r2 = await opJudgeHand(base, [id, OP_COST_FILLER]); if (r2.starter) { Object.assign(r, r2); r.cost = 1; } }
     st.auto[id] = r;
@@ -565,7 +585,7 @@ async function opAutoPairs(deck, st, onProgress) {
   // 前に自動で入れた組み合わせは入れ直す（自分で書いたものはそのまま）
   st.combos = st.combos.filter(c => !c.auto);
   for (const { a, b, r } of found) {
-    st.combos.push({ id: opUid('k'), text: `${a.card.name} + ${b.card.name}`, priority: 30, auto: true, ns: r.ns ? 1 : 0 });
+    st.combos.push({ id: opUid('k'), text: `${a.card.name} + ${b.card.name}`, priority: 30, auto: true, ns: r.ns ? 1 : 0, gain: r.gain });
     // 組み合わせで使うカードは「展開札」にする（受けると止まる誘発を選べるように）
     for (const x of [a, b]) { const s = opCardSetting(st, x.id); if (!s.manual && s.role === 'other') s.role = 'extender'; }
   }
@@ -601,6 +621,8 @@ function opBuildModel(deck, st, noDraw) {
       counter: s.role === 'care' ? maskOf(s[opF(st, "counters")]) : 0,
       tags: String(s.tags || '').split(/[,、，\s]+/).map(opNorm).filter(Boolean),
       priority: Number(s.priority) || 0, cost: s.role === 'starter' ? s.cost | 0 : 0, field: s.noField ? 0 : 1, hand: s.noHand ? 0 : 1,
+      // 初動の強さ（自動判別で、そのカードからデッキのカードを何枚動かせたか）。マストカウンターの判断に使う
+      gain: st.auto && st.auto[id] && st.auto[id].starter ? st.auto[id].gain || 1 : 1,
     };
   });
   const nameIdx = new Map();
@@ -610,7 +632,7 @@ function opBuildModel(deck, st, noDraw) {
   cards.forEach((c, i) => c.tags.forEach(t => (tagCards[t] = tagCards[t] || []).push(i)));
   for (const t in tagCards) tagCards[t].sort((a, b) => (cards[a].ns - cards[b].ns) || ((cards[a].role === 'starter') - (cards[b].role === 'starter')));
   const routes = [];
-  cards.forEach((c, i) => { if (c.role === 'starter') routes.push({ named: [i], tags: [], priority: c.priority, single: true, cost: c.cost }); });
+  cards.forEach((c, i) => { if (c.role === 'starter') routes.push({ named: [i], tags: [], priority: c.priority, single: true, cost: c.cost, strength: c.gain }); });
   // 手札コストで捨てるカードの順番：事故札 → その他 → 展開札 → 手札誘発 → 誘発ケア → 初動（初動はできるだけ残す）
   const costRank = { brick: 0, other: 1, extender: 2, handtrap: 3, care: 4, starter: 5 };
   const costOrder = cards.map((c, i) => i).sort((a, b) => costRank[cards[a].role] - costRank[cards[b].role]);
@@ -626,7 +648,7 @@ function opBuildModel(deck, st, noDraw) {
       else { const idx = nameIdx.get(opNorm(p)); if (idx === undefined) errors.push(p); else for (let k = 0; k < n; k++) named.push(idx); }
     }
     if (errors.length) { comboErrors[cb.id] = errors; continue; }
-    if (named.length + tags.length) routes.push({ named, tags, priority: Number(cb.priority) || 0, single: false, fixedNs: cb.auto && cb.ns != null ? cb.ns : null });
+    if (named.length + tags.length) routes.push({ named, tags, priority: Number(cb.priority) || 0, single: false, strength: Number(cb.gain) || 1, fixedNs: cb.auto && cb.ns != null ? cb.ns : null });
   }
   routes.sort((a, b) => (a.priority - b.priority) || (b.single - a.single));
   const deckArr = [];
@@ -887,6 +909,7 @@ function openOpeningRate() {
         el('li', { text: '初動率：初動のカード、または組み合わせ初動がそろっている手札の割合（召喚権は考えない）。' }),
         el('li', { text: '召喚権を考慮：通常召喚1回で始められる初動がある割合。' }),
         el('li', { text: '実質初動率：相手にもデッキから手札を配り、止められずに展開できた割合（「環境の使用率から」では、毎回ランクマッチなどのデッキを1つ選んで相手のデッキにします）。初動を優先度の順に使い、相手は止められる誘発があれば撃ち（ケアされないものから）、自分はケア札があれば無効にします。止められた初動のカードと召喚権は失い、残りで次の初動を試します。' }),
+        el('li', { text: 'マストカウンター：相手は手札誘発を、手札の中で一番展開が伸びる初動（自動判別で、デッキからいちばん多くカードを動かせた初動）に使います。もっと強い初動が手札に残っているあいだは、弱い初動には使わずに温存します（弱い初動は通りますが、そのカードと召喚権は使ったものとして、強い初動を止めに来ます）。' }),
         el('li', { text: '貫通率：初動がある手札で、相手が「止める誘発」を1枚（2枚）持っていて、止められる初動には必ず撃ってくるとしたときに、展開を続けられる割合。止められた初動のカードと召喚権は失い、残りの初動で動きます。誘発ケアは、その初動を止める誘発のどれかをケアできるカードなら使います。' }),
         el('li', { text: '分かりやすさ優先の近似です。止まった初動から一部のリソースが残る場合や、召喚権を増やすカード、増殖するGを受けて展開をやめる判断などは考えていません。' }))));
   renderCount(); renderCards(); renderCombos(); renderOpp();
