@@ -1480,7 +1480,7 @@ function cpuMustCounter(duel, nowIndex, code) {
       t.stopAtCpu = true;
       t.run(hist.slice());
       const p0 = t.pending;
-      if (!p0 || p0.player !== cpu || p0.type !== MSG.SELECT_CHAIN) return null;
+      if (!p0 || p0.player !== cpu || p0.type !== MSG.SELECT_CHAIN) { if (typeof window !== 'undefined' && window.__mcLog) window.__mcLog.push({ bad: p0 ? p0.type + '/' + p0.player : 'none' }); return null; }
       let seen = 0, fired = fireAt === 0;
       t.stopAtCpu = true;
       t.respond({ type: RES.SELECT_CHAIN, index: fireAt === 0 ? nowIndex : null });
@@ -1505,11 +1505,13 @@ function cpuMustCounter(duel, nowIndex, code) {
           if (i >= 0 && !fired) { seen++; if (seen === fireAt) { fired = true; res = { type: RES.SELECT_CHAIN, index: i }; } }
           if (!res) res = { type: RES.SELECT_CHAIN, index: p.forced ? 0 : null };
         } else res = cpuAnswer(p, t);
+        if (!res) res = altAnswers(p)[0];   // 決められない選択は、選べる答えのどれか
+        if (!res) break;
         t.stopAtCpu = true;
         t.respond(res);
       }
       return { score: cpuScore(t, cpu), seen };
-    } catch (e) { return null; }
+    } catch (e) { if (typeof window !== 'undefined' && window.__mcLog) window.__mcLog.push({ err: String(e) }); return null; }
     finally { if (t && t.h) Engine.lib.destroyDuel(t.h); }
   };
   const now = playout(0);

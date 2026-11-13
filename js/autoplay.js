@@ -516,6 +516,8 @@ function setupAutoPlay() {
 
 // ---------- 相手（何もしない／誘発練習） ----------
 // 手札誘発セット：よく使われる妨害カード＋何もしない通常モンスター
+// 手札誘発セットのEXデッキ（金雲獣－馬龍・エニグマスター・パックビット・ウィンドペガサス＠イグニスター・フルール・ド・バロネス・PSYフレームロード・Ω・ブラック・ローズ・ドラゴン）
+const OPP_HANDTRAP_EXTRA = [93125329, 72444406, 98506199, 84815190, 74586817, 73580471];
 const HANDTRAP_SET = [[14558127, 3], [23434538, 3], [97268402, 3], [10045474, 3], [94145021, 2], [73642296, 2], [59438930, 3], [24224830, 2], [70088809, 3], [42141493, 3]];   // うらら・G・ヴェーラー・泡影・ドロール・わらし・うさぎ・墓穴・調和ノ天救竜（ハルモニア）・マルチャミー・フワロス
 // 相手の手札を選ぶときに上に出すカード（名前で探す。無いものは出さない）
 const HANDTRAP_NAMES = ['灰流うらら', '増殖するG', 'エフェクト・ヴェーラー', '無限泡影', 'ドロール＆ロックバード', '屋敷わらし', '幽鬼うさぎ',
@@ -558,6 +560,7 @@ function oppDeck() {
     const main = [];
     for (const [id, n] of HANDTRAP_SET) if (DB.byId.has(id)) for (let i = 0; i < n; i++) main.push(id);
     while (main.length < 40) main.push(OPP_FILLER);
+    // EXデッキ：調和ノ天救竜（ハルモニア）で見せるシンクロモンスター（墓地へ送る金雲獣－馬龍・エニグマスター・パックビット・ウィンドペガサス＠イグニスターを含めて6体以上）
     deck = { main, extra: [] };
   }
   // 選んだ初手は、デッキに無ければ足す（何もしないカードと入れ替え）
@@ -567,6 +570,7 @@ function oppDeck() {
     for (let k = have; k < need; k++) { const f = deck.main.indexOf(OPP_FILLER); if (f >= 0) deck.main[f] = id; else deck.main.push(id); }
   }
   deck.handIds = handIds;
+  oppAutoExtra(deck);
   deck.plays = oppMode() === 'cpu';   // 「デッキで対戦」：相手もデッキを回す
   return deck;
 }
@@ -1531,4 +1535,21 @@ function uniqTexts(list) {
 function uniqLabels(items) {
   const t = uniqTexts(items.map(x => x.label));
   return items.map((x, i) => ({ ...x, label: t[i] }));
+}
+
+// 相手のEXデッキを使う手札誘発があれば、要るカードをEXデッキに自動で足す（15枚まで）
+//  ・調和ノ天救竜（ハルモニア）：見せるシンクロモンスター（墓地へ送る金雲獣－馬龍・エニグマスター・パックビット・ウィンドペガサス＠イグニスターを含めて6体）
+//  ・浮幽さくら：見せる自分のEXデッキのカード（練習する人のEXデッキと同じカード。汎用のEXモンスターを入れている想定）
+function oppAutoExtra(deck) {
+  const extra = deck.extra = [...(deck.extra || [])];
+  const room = () => extra.length < 15;
+  const ids = new Set([...deck.main, ...(deck.handIds || [])]);
+  if (ids.has(70088809)) {
+    for (const id of OPP_HANDTRAP_EXTRA) if (room() && DB.byId.has(id) && !extra.includes(id)) extra.push(id);
+  }
+  if (DB.cards.some(c => c.name === '浮幽さくら' && ids.has(c.id))) {
+    const mine = typeof boardDeck === 'function' && boardDeck() ? boardDeck().extra || [] : [];
+    for (const id of [...new Set(mine)].slice(0, 5)) if (room() && DB.byId.has(id) && !extra.includes(id)) extra.push(id);
+  }
+  return deck;
 }
