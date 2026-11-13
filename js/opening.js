@@ -121,6 +121,7 @@ const OpSim = (() => {
         const tmp = oppDeck[i]; oppDeck[i] = oppDeck[j]; oppDeck[j] = tmp;
         if (oppDeck[i] >= 0) opp[oppDeck[i]]++;
       }
+      for (const t of m.zeroIdx || []) if (opp[t] > 1) opp[t] = 1;   // 0ターン展開は、そのテーマのカードが何枚あっても妨害1回
       if (!nsok) continue;
       res.nsok++;
       if (resolve(m, hc, opp, 99, s)) res.realInfNs++;
@@ -147,7 +148,7 @@ const OpSim = (() => {
 
 const OP_ROLES = [['starter', '初動'], ['extender', '展開札'], ['handtrap', '手札誘発'], ['care', '誘発ケア'], ['brick', '事故札'], ['other', 'その他']];
 const OP_CARE_NAMES = ['抹殺の指名者', '墓穴の指名者', '三戦の才', '禁じられた一滴'];
-const OP_STOP_RE = /うらら|泡影|ヴェーラー|わらし|しぐれ|うさぎ|ドロール|γ/;   // 初動を止める誘発（増殖するGなどは止めない扱い）
+const OP_STOP_RE = /0ターン展開|うらら|泡影|ヴェーラー|わらし|しぐれ|うさぎ|ドロール|γ/;   // 初動を止める誘発（増殖するGなどは止めない扱い）
 // 手札誘発として数えないカード（自分の展開を助けるカード・永続罠など）
 const OP_NOT_TRAP = ['墓穴の指名者', '抹殺の指名者', '三戦の才', 'センサー万別'];
 const OP_SRC = { md: 'マスターデュエル', ocg: 'OCG', tcg: 'TCG（海外）' };
@@ -157,13 +158,16 @@ const OP_SRC_NOTE = { md: 'Master Duel Meta の大会上位・高ランクのデ
 const opUsageCache = {};
 async function opLoadUsage(fmt, oppHand) {
   if (opUsageCache[fmt]) return opUsageCache[fmt];
+  // 0ターン展開のカードを見分けるのに効果の文を使う（まだ読んでいなければ読む）
+  if (!DB.textMeta && typeof loadJaTexts === 'function') { try { await loadJaTexts(() => {}); } catch (e) { /* 文が無くても手札誘発は数えられる */ } }
   const data = await loadSamples(fmt);
   const periods = data && data.periods ? Object.keys(data.periods).filter(k => data.periods[k].length).sort() : [];
   if (!periods.length) return null;
   // 一番新しいリストの期間のデッキ（40個より少なければ1つ前の期間も足す）
   let decks = data.periods[periods[periods.length - 1]], from = periods[periods.length - 1];
   if (decks.length < 40 && periods.length > 1) { decks = [...data.periods[periods[periods.length - 2]], ...decks]; from = periods[periods.length - 2]; }
-  const isTrap = c => c && !OP_NOT_TRAP.includes(c.name) && ((typeof isHandTrap === 'function' && isHandTrap(c.id)) || (typeof HANDTRAP_NAMES !== 'undefined' && HANDTRAP_NAMES.includes(c.name)));
+  // マルチャミー（相手の行動でドローする）も、増殖するGと同じ手札誘発として数える（止める誘発ではない）
+  const isTrap = c => c && !OP_NOT_TRAP.includes(c.name) && (/^マルチャミー/.test(c.name) || (typeof isHandTrap === 'function' && isHandTrap(c.id)) || (typeof HANDTRAP_NAMES !== 'undefined' && HANDTRAP_NAMES.includes(c.name)));
   const list = decks.map(d => (d.m || []).map(([v, n, en]) => ({ card: sampleCard(v) || (en ? sampleCard(en) : null), n: n | 0 })).filter(x => x.card && x.n > 0));
   const stat = new Map();
   for (const dl of list) for (const { card, n } of dl) {
@@ -171,11 +175,40 @@ async function opLoadUsage(fmt, oppHand) {
     const s = stat.get(card.id) || { card, decks: 0, copies: 0 };
     s.decks++; s.copies += n; stat.set(card.id, s);
   }
-  const traps = [...stat.values()].filter(s => s.decks / list.length >= 0.02).sort((a, b) => b.decks - a.decks).slice(0, 30)
+  const traps = [...stat.values()].filter(s => s.decks / list.length >= 0.02).sort((a, b) => b.decks - a.decks).slice(0, 24)
     .map(s => ({ id: 'c' + s.card.id, cardId: s.card.id, name: s.card.name, rate: s.decks / list.length, avg: s.copies / s.decks }));
   const idx = new Map(traps.map((t, i) => [t.cardId, i]));
+  // 0ターン展開（エルフェンノーツ・キラーチューンなど）：相手のターン（こちらの先攻1ターン目）に手札から動き出せるカード。
+  // テーマごとに1つの「誘発」として数え、そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回できるとみなす
+  const zero = new Map();   // テーマ名 → { cards: Set, decks, copies }
+  for (const dl of list) {
+    const seen = new Map();
+    for (const { card, n } of dl) {
+      if (!opIsZeroTurn(card) || isTrap(card)) continue;
+      const th = opThemeOf(card);
+      seen.set(th, (seen.get(th) || 0) + n);
+      const z = zero.get(th) || { cards: new Set(), decks: 0, copies: 0 };
+      z.cards.add(card.id); zero.set(th, z);
+    }
+    for (const [th, n] of seen) { const z = zero.get(th); z.decks++; z.copies += n; }
+  }
+  [...zero].filter(([, z]) => z.decks / list.length >= 0.02).sort((a, b) => b[1].decks - a[1].decks).slice(0, 6).forEach(([th, z]) => {
+    const i = traps.length;
+    traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
+    for (const id of z.cards) idx.set(id, i);
+  });
   const oppDecks = list.map(dl => { const a = []; for (const { card, n } of dl) for (let k = 0; k < n; k++) a.push(idx.has(card.id) ? idx.get(card.id) : -1); return a; }).filter(a => a.length >= 20);
   return (opUsageCache[fmt] = { fmt, from, nDecks: oppDecks.length, traps, oppDecks });
+}
+// 相手のターンに手札から動き出せるカードか（効果の文から判断。手札誘発は別に数える）
+const OP_ZERO_RE = /(相手メインフェイズ|相手ターン|自分・相手ターン|お互いのメインフェイズ|相手の(メインフェイズ|ターン))[^①②③④⑤]{0,120}?(手札から|手札の|このカードを特殊召喚)|(手札に存在する(場合|限り))[^①②③④⑤]{0,60}?(相手メインフェイズ|相手ターン|自分・相手ターン|お互いのメインフェイズ)/;
+function opIsZeroTurn(c) {
+  return !!(c && (c.type & T.MONSTER) && !(c.type & EXTRA_MASK) && OP_ZERO_RE.test(c.jaText || ''));
+}
+// カードのテーマ名（無ければカード名）
+function opThemeOf(c) {
+  const th = typeof decThemesOf === 'function' ? decThemesOf(c) : [];
+  return th[0] || c.name;
 }
 // 相手の初手（hand 枚）に、そのカード（k 枚入り・デッキ n 枚）が1枚以上ある確率
 function opAtLeastOne(n, k, hand) { let p = 1; for (let i = 0; i < hand; i++) p *= Math.max(0, n - k - i) / (n - i); return 1 - p; }
@@ -218,7 +251,8 @@ function opDefaultVuln(st, c) {
   return {
     vuln: stop.length ? stop : traps.map(t => t.id),
     // 墓穴の指名者は、墓地へ行く誘発だけケアできる（泡影・ドロールなどは無理）
-    counters: traps.filter(t => !(c.name === '墓穴の指名者' && /泡影|γ/.test(t.name))).map(t => t.id),
+    // 0ターン展開は誘発ケアでは止められない扱い
+    counters: traps.filter(t => !t.zero && !(c.name === '墓穴の指名者' && /泡影|γ/.test(t.name))).map(t => t.id),
   };
 }
 // デッキのカードの設定（初めてのカードは、名前などから役割を推測する）
@@ -226,11 +260,21 @@ function opCardSetting(st, id) {
   const s0 = st.cards[id];
   if (s0) {
     // 使用率の誘発の一覧で、まだ決めていなければ推測で入れる
-    if (opUsing(st) && !s0.vulnU) { const d = opDefaultVuln(st, DB.byId.get(id) || {}); s0.vulnU = d.vuln; s0.countersU = d.counters; }
+    if (opUsing(st) && !s0.vulnU) { const d = opDefaultVuln(st, DB.byId.get(id) || {}); s0.vulnU = d.vuln; s0.countersU = d.counters; s0.seenU = opTraps(st).map(t => t.id); }
+    else if (opUsing(st)) {
+      // あとから増えた誘発（0ターン展開など）は、推測した値を足す
+      const seen = new Set(s0.seenU || opTraps(st).filter(t => !t.zero).map(t => t.id));
+      const fresh = opTraps(st).filter(t => !seen.has(t.id));
+      if (fresh.length) {
+        const d = opDefaultVuln(st, DB.byId.get(id) || {});
+        for (const t of fresh) { if (d.vuln.includes(t.id)) s0.vulnU = [...(s0.vulnU || []), t.id]; if (d.counters.includes(t.id)) s0.countersU = [...(s0.countersU || []), t.id]; }
+        s0.seenU = [...seen, ...fresh.map(t => t.id)];
+      }
+    }
     return s0;
   }
   const c = DB.byId.get(id) || {};
-  const ht = typeof isHandTrap === 'function' && isHandTrap(id);
+  const ht = (typeof isHandTrap === 'function' && isHandTrap(id)) || /^マルチャミー/.test(c.name || '');
   const care = OP_CARE_NAMES.includes(c.name);
   const monster = !!(c.type & T.MONSTER);
   const traps = st.opp.traps;
@@ -242,7 +286,7 @@ function opCardSetting(st, id) {
     ns: monster && !ht && (c.level || 0) <= 4 && !(c.type & (T.LINK | T.SPSUMMON)),
     tags: '', vuln: stop.length ? stop : traps.map(t => t.id), counters, priority: 10,
   };
-  if (opUsing(st)) { const d = opDefaultVuln(st, c); s.vulnU = d.vuln; s.countersU = d.counters; }
+  if (opUsing(st)) { const d = opDefaultVuln(st, c); s.vulnU = d.vuln; s.countersU = d.counters; s.seenU = opTraps(st).map(t => t.id); }
   return s;
 }
 // ---------- 初動の自動判別 ----------
@@ -408,7 +452,12 @@ function opDeckCards(deck) {
 
 // 計算用のデータを作る
 function opBuildModel(deck, st) {
-  const traps = opTraps(st), usage = opUsing(st);
+  const usage = opUsing(st);
+  // 使用率：「数えない」にした誘発は外す（相手のデッキでは何でもないカードとして扱う）
+  const ignore = new Set(usage ? st.opp.ignore || [] : []);
+  const all = opTraps(st), traps = all.filter(t => !ignore.has(t.id));
+  const remap = all.map(t => traps.indexOf(t));
+  const oppDecksU = usage ? (ignore.size ? usage.oppDecks.map(d => d.map(x => (x >= 0 ? remap[x] : -1))) : usage.oppDecks) : null;
   const trapIndex = new Map(traps.map((t, i) => [t.id, i]));
   const maskOf = ids => (ids || []).reduce((m, id) => (trapIndex.has(id) ? m | (1 << trapIndex.get(id)) : m), 0);
   const cards = opDeckCards(deck).map(({ id, n, card }) => {
@@ -456,7 +505,7 @@ function opBuildModel(deck, st) {
   const oppDeck = [];
   if (!usage) traps.forEach((t, i) => { for (let k = 0; k < (t.count | 0); k++) oppDeck.push(i); });
   while (oppDeck.length < oppDeckSize) oppDeck.push(-1);
-  return { cards, routes, costOrder, deck: deckArr, careIdx, handtrapIdx, tagCards, comboErrors, traps, T: traps.length, oppDeck, oppDecks: usage ? usage.oppDecks : null, oppHand: usage ? st.opp.handSize | 0 : Math.min(st.opp.handSize | 0, oppDeck.length) };
+  return { cards, routes, costOrder, deck: deckArr, careIdx, handtrapIdx, tagCards, comboErrors, traps, T: traps.length, oppDeck, oppDecks: oppDecksU, zeroIdx: traps.map((t, i) => (t.zero ? i : -1)).filter(i => i >= 0), oppHand: usage ? st.opp.handSize | 0 : Math.min(st.opp.handSize | 0, oppDeck.length) };
 }
 
 function openOpeningRate() {
@@ -578,10 +627,19 @@ function openOpeningRate() {
         el('p', { class: 'muted small-note', text: `${OP_SRC_NOTE[u.fmt]} ${u.nDecks}個（${u.from} からのリスト）で数えた採用率です。計算では毎回このデッキの中から1つを相手に選び、そこから初手を配ります（その誘発を入れていないデッキや、入れていても引かない場合も確率に入ります）。` }),
         el('div', { class: 'op-row' },
           el('label', {}, '相手の手札 ', num, ' 枚'),
-          el('span', { class: 'muted', text: `相手の初手に下の誘発が1枚以上ある確率 ${pct(opUsageOpen(u, H, -1))}` })),
+          el('span', { class: 'muted', text: `相手の初手に下の誘発・0ターン展開が1枚以上ある確率 ${pct(opUsageOpen(u, H, -1))}` })),
+        el('p', { class: 'muted small-note', text: '「0ターン展開」は、エルフェンノーツ・キラーチューンなどの、相手のターン（こちらの先攻1ターン目）に手札から動き出せるカード（効果の文から見分けています）。そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回あるとみなします。チェックを外した行は数えません。' }),
         el('table', { class: 'op-trap-table' },
-          el('tr', {}, el('th', { text: '誘発' }), el('th', { text: '採用率' }), el('th', { text: '採用時の枚数' }), el('th', { text: '相手の初手にある' })),
-          u.traps.map((t, i) => el('tr', {}, el('td', { text: t.name }), el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', { text: pct(opUsageOpen(u, H, i)) })))));
+          el('tr', {}, el('th', { text: '数える' }), el('th', { text: '誘発' }), el('th', { text: '採用率' }), el('th', { text: '採用時の枚数' }), el('th', { text: '相手の初手にある' })),
+          u.traps.map((t, i) => {
+            const ign = new Set(st.opp.ignore || []);
+            const cb = el('input', { type: 'checkbox', checked: !ign.has(t.id) });
+            cb.onchange = () => { const s = new Set(st.opp.ignore || []); cb.checked ? s.delete(t.id) : s.add(t.id); st.opp.ignore = [...s]; save(); };
+            return el('tr', { class: t.zero ? 'op-zero' : null },
+              el('td', {}, cb),
+              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') }) : null),
+              el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', { text: pct(opUsageOpen(u, H, i)) }));
+          })));
       return;
     }
     const D = Math.max(st.opp.deckSize | 0, 1);
