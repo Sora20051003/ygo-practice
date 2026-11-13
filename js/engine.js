@@ -1291,7 +1291,7 @@ function cpuThink(m, duel, kind) {
 // ---------- チェーンの判断（手札誘発・速攻効果・任意の誘発） ----------
 // 「発動しない」と、発動できるそれぞれを複製の中で試し、チェーンを解決して次に誰かが行動を選ぶところまで進めて点数を比べる。
 // 相手（練習する人）の効果を無効にできたら、その分を高く見る（サーチ・展開を止めた価値）
-const LASTING_TRAPS = new Set(['増殖するG', 'ドロール＆ロックバード']);
+const LASTING_TRAPS = new Set(['増殖するG', 'ドロール＆ロックバード', 'マルチャミー・フワロス', 'マルチャミー・プルリア']);   // 使ったあと、そのターンの間ずっと効くカード
 function cpuChainThink(m, duel) {
   const cpu = 1 - duel.me, hist = duel.history(), t0 = performance.now();
   const opts = [...(m.forced ? [] : [-1]), ...m.selects.map((_, i) => i)];

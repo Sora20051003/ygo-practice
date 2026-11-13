@@ -516,10 +516,10 @@ function setupAutoPlay() {
 
 // ---------- 相手（何もしない／誘発練習） ----------
 // 手札誘発セット：よく使われる妨害カード＋何もしない通常モンスター
-const HANDTRAP_SET = [[14558127, 3], [23434538, 3], [97268402, 3], [10045474, 3], [94145021, 2], [73642296, 2], [59438930, 3], [24224830, 2]];
+const HANDTRAP_SET = [[14558127, 3], [23434538, 3], [97268402, 3], [10045474, 3], [94145021, 2], [73642296, 2], [59438930, 3], [24224830, 2], [70088809, 3], [42141493, 3]];   // うらら・G・ヴェーラー・泡影・ドロール・わらし・うさぎ・墓穴・調和ノ天救竜（ハルモニア）・マルチャミー・フワロス
 // 相手の手札を選ぶときに上に出すカード（名前で探す。無いものは出さない）
 const HANDTRAP_NAMES = ['灰流うらら', '増殖するG', 'エフェクト・ヴェーラー', '無限泡影', 'ドロール＆ロックバード', '屋敷わらし', '幽鬼うさぎ',
-  '墓穴の指名者', '原始生命態ニビル', 'PSYフレームギア・γ', '儚無みずき', '浮幽さくら', '朔夜しぐれ', 'D.D.クロウ', 'ディメンション・シフター', '抹殺の指名者', '三戦の才', 'センサー万別', '調和ノ天救竜'];
+  '墓穴の指名者', '原始生命態ニビル', 'PSYフレームギア・γ', '儚無みずき', '浮幽さくら', '朔夜しぐれ', 'D.D.クロウ', 'ディメンション・シフター', '抹殺の指名者', '三戦の才', 'センサー万別', '調和ノ天救竜', 'マルチャミー・フワロス', 'マルチャミー・プルリア'];
 const oppMode = () => store.get('ygo.oppMode', 'trap');
 const oppHandIds = () => store.get('ygo.oppHand', []).filter(id => DB.byId.has(id));
 
@@ -528,7 +528,7 @@ function refreshOppSelect() {
   if (!sel) return;
   const cur = store.get('ygo.autoOpp', 'handtraps');
   sel.innerHTML = '';
-  sel.append(el('option', { value: 'handtraps', text: '手札誘発セット（うらら・G・ヴェーラーなど）' }));
+  sel.append(el('option', { value: 'handtraps', text: '手札誘発セット（うらら・G・ヴェーラー・ハルモニアなど）' }));
   for (const d of Decks.list) sel.append(el('option', { value: 'deck:' + d.id, text: `デッキ「${d.name}」` }));
   sel.value = [...sel.options].some(o => o.value === cur) ? cur : 'handtraps';
   renderOppSettings();
