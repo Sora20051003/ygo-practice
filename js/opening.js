@@ -321,7 +321,7 @@ async function opAutoJudge(deck, st, onProgress) {
 }
 // 2枚そろうと動けるカード（1枚では初動にならないカード同士）を試して、組み合わせ初動に入れる。
 // 例：ヤミーの「リンク1＋レベル1の非チューナー」のように、手札の2枚から EXデッキを使って展開が始まるもの
-const OP_PAIR_V = 1, OP_PAIR_CARDS = 18, OP_PAIR_NODES = 40, OP_PAIR_MAX = 40;
+const OP_PAIR_V = 2, OP_PAIR_CARDS = 18, OP_PAIR_NODES = 40, OP_PAIR_MAX = 60;
 async function opAutoPairs(deck, st, onProgress) {
   const sig = deck.main.slice().sort().join(',') + '|' + (deck.extra || []).slice().sort().join(',');
   if (st.autoPairs && st.autoPairs.v === OP_PAIR_V && st.autoPairs.sig === sig) return false;
@@ -334,13 +334,20 @@ async function opAutoPairs(deck, st, onProgress) {
     .sort((a, b) => b.n - a.n).slice(0, OP_PAIR_CARDS);
   const pairs = [];
   cand.forEach((a, i) => cand.forEach((b, j) => { if (j > i || (j === i && a.n >= 2)) pairs.push([a, b]); }));
+  // 通常召喚できる手札誘発（うららなど）＋ほかのカード：誘発を通常召喚してリンク1（アルミラージなど）にして展開する形。
+  // 相手のカードは、1枚では初動にならないもの、または召喚権が必要な初動（誘発で召喚権を使えば、そのカードは召喚権なしで動けることがある）
+  const nsTrap = x => { const c = x.card; return opCardSetting(st, x.id).role === 'handtrap' && (c.type & T.MONSTER) && (c.level || 0) <= 4 && !(c.type & (T.SPSUMMON | T.LINK)); };
+  const partners = opDeckCards(deck).filter(x => { const s = opCardSetting(st, x.id); const a = st.auto && st.auto[x.id]; return s.role !== 'handtrap' && s.role !== 'care' && !(s.role === 'starter' && a && a.starter && !a.ns); });
+  for (const h of opDeckCards(deck).filter(nsTrap)) for (const b of partners) pairs.push([h, b]);
   const found = [];
   let k = 0;
   for (const [a, b] of pairs) {
     onProgress && onProgress(++k, pairs.length, `${a.card.name}＋${b.card.name}`);
     if (found.length >= OP_PAIR_MAX) break;
     const r = await opJudgeHand(base, [a.id, b.id], OP_PAIR_NODES, OP_DEPTH + 1);
-    if (r.starter) found.push({ a, b, r });
+    // 1枚でも初動のカードとの組み合わせは、1枚のときより多く展開できるときだけ入れる
+    const single = Math.max(...[a, b].map(x => (st.auto && st.auto[x.id] && st.auto[x.id].starter ? st.auto[x.id].gain : 0)));
+    if (r.starter && r.gain > single) found.push({ a, b, r });
   }
   // 前に自動で入れた組み合わせは入れ直す（自分で書いたものはそのまま）
   st.combos = st.combos.filter(c => !c.auto);
