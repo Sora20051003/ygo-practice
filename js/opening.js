@@ -445,7 +445,23 @@ function openOpeningRate() {
   function renderCount() {
     const list = opDeckCards(deck);
     const by = r => list.filter(x => opCardSetting(st, x.id).role === r).reduce((s, x) => s + x.n, 0);
-    countBox.textContent = `メインデッキ ${deck.main.length}枚 ｜ 初動 ${by('starter')}・展開札 ${by('extender')}・手札誘発 ${by('handtrap')}・誘発ケア ${by('care')}・事故札 ${by('brick')}`;
+    countBox.replaceChildren(
+      el('div', { text: `メインデッキ ${deck.main.length}枚 ｜ 初動 ${by('starter')}・展開札 ${by('extender')}・手札誘発 ${by('handtrap')}・誘発ケア ${by('care')}・事故札 ${by('brick')}` }),
+      starterSummary());
+  }
+  // 初動に割り振られたカードの一覧（1枚で初動・2枚の組み合わせ初動）
+  function starterSummary() {
+    const list = opDeckCards(deck).filter(x => opCardSetting(st, x.id).role === 'starter');
+    const total = list.reduce((s, x) => s + x.n, 0);
+    const combos = st.combos.filter(c => String(c.text || '').trim());
+    return el('div', { class: 'op-starters' },
+      el('div', {}, el('b', { text: `初動のカード ${list.length}種類・${total}枚` }), el('span', { class: 'muted', text: `（デッキの${deck.main.length ? Math.round(total / deck.main.length * 100) : 0}%）` })),
+      list.length ? el('div', { class: 'op-chips' }, list.map(x => {
+        const s = opCardSetting(st, x.id);
+        return el('span', { class: 'op-starter-chip', title: s.ns ? '通常召喚権を使う' : '通常召喚権を使わない' }, `${x.card.name} ×${x.n}`, s.ns ? el('span', { class: 'op-ns-mark', text: '召' }) : null);
+      })) : el('div', { class: 'muted', text: '（まだありません。下の一覧で「初動」にしてください）' }),
+      combos.length ? el('details', { class: 'op-combo-sum' }, el('summary', { text: `組み合わせ初動 ${combos.length}通り` }),
+        el('ul', {}, combos.map(c => el('li', { text: c.text + (c.auto && c.ns ? '（召喚権を使う）' : '') })))) : null);
   }
   function renderCards() {
     const order = { starter: 0, extender: 1, care: 2, handtrap: 3, brick: 4, other: 5 };
@@ -473,6 +489,7 @@ function openOpeningRate() {
     }));
   }
   function renderCombos() {
+    renderCount();   // 初動の一覧の「組み合わせ初動」も更新する
     const model = opBuildModel(deck, st);
     combosBox.replaceChildren(...st.combos.map(cb => {
       const text = el('input', { type: 'text', class: 'op-combo-text', value: cb.text, placeholder: 'カードA + カードB（#タグ も使えます）', list: 'op-names' });
@@ -569,7 +586,7 @@ function openOpeningRate() {
           el('tr', {}, el('th', { text: '相手が1枚だけ持っていた誘発' }), el('th', { text: '展開できる率' })),
           R.model.traps.map((t, i) => el('tr', {}, el('td', { text: t.name }), el('td', { text: pct(r.perTrap[i] / n) })))) : null);
     };
-    resBox.replaceChildren(el('div', { class: 'op-res-grid' }, col('先攻（手札5枚）', R.first, R.exact5), col('後攻（手札6枚）', R.second, R.exact6)));
+    resBox.replaceChildren(starterSummary(), el('div', { class: 'op-res-grid' }, col('先攻（手札5枚）', R.first, R.exact5), col('後攻（手札6枚）', R.second, R.exact6)));
   }
 
   const iters = el('select', {}, [[20000, '2万回（速い）'], [100000, '10万回'], [300000, '30万回（精密）']].map(([v, l]) => el('option', { value: v, text: l, selected: (st.iters || 100000) === v })));

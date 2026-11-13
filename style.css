@@ -1876,3 +1876,8 @@ details.multi.has-ex > summary { color: var(--danger); }
 .op-badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); white-space: nowrap; }
 .op-badge.manual { border-color: var(--muted); color: var(--muted); }
 .op-auto-msg { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.op-starters { margin: 6px 0 10px; padding: 8px 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.op-starter-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); }
+.op-ns-mark { font-size: 10px; padding: 0 4px; border-radius: 4px; background: var(--accent); color: var(--accent-text); }
+.op-combo-sum ul { margin: 4px 0 0; padding-left: 18px; }
+.op-results .op-starters { margin-top: 10px; }
