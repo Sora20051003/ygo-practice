@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Egyptian+Hieroglyphs&display=swap">
-<link rel="stylesheet" href="style.css?v=20261114-024834">
+<link rel="stylesheet" href="style.css?v=20261114-030515">
 </head>
 <body>
 <header class="topbar">
@@ -152,6 +152,7 @@
               <button class="btn small" id="deck-image-import" title="ニューロンのデッキ画像などから読み取る">📷 デッキ画像から読み込み</button>
               <button class="btn small accent" id="deck-custom" title="自分で作ったカード（効果を選んで作れます）">🃏 オリジナルカード</button>
               <button class="btn small accent" id="deck-samples" title="レギュレーションごとの強いデッキ（マスターデュエルは大会上位のデッキ）">🏆 サンプルデッキ</button>
+              <button class="btn small accent" id="deck-auto" title="大会・ランクマッチのデッキの同時採用率から、デッキを自動で組みます">🤖 自動で作る</button>
             </span>
             <span class="action-group">
               <label class="sort-pick" title="全部のデッキで共通。カードを追加したときもこの順に入ります">並び順 <select id="deck-sort"></select></label>
@@ -442,33 +443,34 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261114-024834"></script>
-<script src="js/consts.js?v=20261114-024834"></script>
-<script src="js/ui.js?v=20261114-024834"></script>
-<script src="data/errata-texts.js?v=20261114-024834"></script>
-<script src="data/alt-arts.js?v=20261114-024834"></script>
-<script src="data/prerelease-cards.js?v=20261114-024834"></script>
-<script src="data/md-rarity.js?v=20261114-024834"></script>
-<script src="js/data.js?v=20261114-024834"></script>
-<script src="data/setnames.js?v=20261114-024834"></script>
-<script src="js/custom.js?v=20261114-024834"></script>
-<script src="js/cloud-config.js?v=20261114-024834"></script>
-<script src="js/auth.js?v=20261114-024834"></script>
-<script src="js/admin.js?v=20261114-024834"></script>
-<script src="js/deck.js?v=20261114-024834"></script>
-<script src="js/board.js?v=20261114-024834"></script>
-<script src="js/engine.js?v=20261114-024834"></script>
-<script src="js/autoplay.js?v=20261114-024834"></script>
-<script src="js/glow.js?v=20261114-024834"></script>
-<script src="js/duel.js?v=20261114-024834"></script>
-<script src="js/friends.js?v=20261114-024834"></script>
-<script src="js/decoder.js?v=20261114-024834"></script>
-<script src="js/opening.js?v=20261114-024834"></script>
-<script src="js/inquiry.js?v=20261114-024834"></script>
-<script src="js/pcapp.js?v=20261114-024834"></script>
-<script src="js/replay.js?v=20261114-024834"></script>
-<script src="js/imgdeck.js?v=20261114-024834"></script>
-<script src="js/slots.js?v=20261114-024834"></script>
-<script src="js/app.js?v=20261114-024834"></script>
+<script src="js/version.js?v=20261114-030515"></script>
+<script src="js/consts.js?v=20261114-030515"></script>
+<script src="js/ui.js?v=20261114-030515"></script>
+<script src="data/errata-texts.js?v=20261114-030515"></script>
+<script src="data/alt-arts.js?v=20261114-030515"></script>
+<script src="data/prerelease-cards.js?v=20261114-030515"></script>
+<script src="data/md-rarity.js?v=20261114-030515"></script>
+<script src="js/data.js?v=20261114-030515"></script>
+<script src="data/setnames.js?v=20261114-030515"></script>
+<script src="js/custom.js?v=20261114-030515"></script>
+<script src="js/cloud-config.js?v=20261114-030515"></script>
+<script src="js/auth.js?v=20261114-030515"></script>
+<script src="js/admin.js?v=20261114-030515"></script>
+<script src="js/deck.js?v=20261114-030515"></script>
+<script src="js/board.js?v=20261114-030515"></script>
+<script src="js/engine.js?v=20261114-030515"></script>
+<script src="js/autoplay.js?v=20261114-030515"></script>
+<script src="js/glow.js?v=20261114-030515"></script>
+<script src="js/duel.js?v=20261114-030515"></script>
+<script src="js/friends.js?v=20261114-030515"></script>
+<script src="js/decoder.js?v=20261114-030515"></script>
+<script src="js/opening.js?v=20261114-030515"></script>
+<script src="js/autobuild.js?v=20261114-030515"></script>
+<script src="js/inquiry.js?v=20261114-030515"></script>
+<script src="js/pcapp.js?v=20261114-030515"></script>
+<script src="js/replay.js?v=20261114-030515"></script>
+<script src="js/imgdeck.js?v=20261114-030515"></script>
+<script src="js/slots.js?v=20261114-030515"></script>
+<script src="js/app.js?v=20261114-030515"></script>
 </body>
 </html>

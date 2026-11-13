@@ -1807,6 +1807,7 @@ function setupDeckView() {
   $('#deck-code').onclick = openDeckCode;
   $('#deck-code-import').onclick = openCodeImport;
   $('#deck-samples').onclick = openSamples;
+  $('#deck-auto').onclick = openAutoBuild;
   $('#deck-image-import').onclick = () => {
     const input = el('input', { type: 'file', accept: 'image/*,.pdf,application/pdf' });
     input.addEventListener('change', async () => {
