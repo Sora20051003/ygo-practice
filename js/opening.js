@@ -21,6 +21,7 @@ const OpSim = (() => {
       }
     }
     for (const c of used) hc[c]++;
+    if (ok && r.fixedNs != null) ns = r.fixedNs;   // 自動で見つけた組み合わせは、試したときに使った召喚権の数
     return !ok || ns > nsAvail ? -1 : ns;
   }
   const anyRoute = (m, hc, nsAvail, used) => m.routes.some(r => tryAssign(m, r, hc, nsAvail, used) >= 0);
@@ -255,10 +256,10 @@ function opGain(t) {
   });
   return n;
 }
-async function opJudgeCard(base, id) {
-  const best = { free: 0, ns: 0 };
+async function opJudgeHand(base, hand, maxNodes = OP_NODES, maxDepth = OP_DEPTH) {
+  const best = { free: 0, ns: 0, nsCode: 0 };
   let nodes = 0;
-  const mk = () => new AutoDuel({ main: base.main, extra: base.extra, handIds: [id], handSize: 5, seed: [1n, 2n, 3n, 4n], opp: null, chainMode: 'off', autoTrigger: true, tools: false, rule: base.rule, speed: '', errata: base.errata, sv: 2 });
+  const mk = () => new AutoDuel({ main: base.main, extra: base.extra, handIds: hand, handSize: 5, seed: [1n, 2n, 3n, 4n], opp: null, chainMode: 'off', autoTrigger: true, tools: false, rule: base.rule, speed: '', errata: base.errata, sv: 2 });
   const actionsOf = p => {
     const out = [], seen = new Set();
     const add = (list, action) => (list || []).forEach((c, i) => { const key = action + ':' + c.code + ':' + (c.description || ''); if (!seen.has(key)) { seen.add(key); out.push({ type: RES.SELECT_IDLECMD, action, index: i }); } });
@@ -267,8 +268,9 @@ async function opJudgeCard(base, id) {
   };
   // hist まで流し直し、行動 act をして、選択に答えて次の行動選択まで進める（act が無ければ最初の状態）
   // branched：この手順で、もうデッキのカードの選び分けを試した（選び分けは1つの手順で1回だけ）
-  const visit = async (hist, act, depth, usedNS, branched) => {
-    if (nodes >= OP_NODES || best.free > 0) return;
+  // nsCode：この手順で通常召喚したカード
+  const visit = async (hist, act, depth, usedNS, branched, nsCode) => {
+    if (nodes >= maxNodes || best.free > 0) return;
     nodes++;
     if (nodes % 3 === 0) await new Promise(r => setTimeout(r, 0));   // 画面が固まらないように
     const t = mk();
@@ -282,16 +284,17 @@ async function opJudgeCard(base, id) {
       if (r.branch) next = { hist: t.history(), choices: r.branch };
       else {
         const g = opGain(t);
-        if (usedNS) best.ns = Math.max(best.ns, g); else best.free = Math.max(best.free, g);
-        if (depth < OP_DEPTH) next = { hist: t.history(), acts: actionsOf(t.pending) };
+        if (usedNS) { if (g > best.ns) { best.ns = g; best.nsCode = nsCode; } } else best.free = Math.max(best.free, g);
+        if (depth < maxDepth) next = { hist: t.history(), acts: actionsOf(t.pending), p: t.pending };
       }
     } catch (e) { return; } finally { if (t.h) Engine.lib.destroyDuel(t.h); }
     if (!next) return;
-    if (next.choices) for (const c of next.choices) await visit(next.hist, c, depth, usedNS, true);
-    else for (const a of next.acts) await visit(next.hist, a, depth + 1, usedNS || a.action === IDLE.SUMMON, branched);
+    if (next.choices) for (const c of next.choices) await visit(next.hist, c, depth, usedNS, true, nsCode);
+    else for (const a of next.acts) { const ns = a.action === IDLE.SUMMON; await visit(next.hist, a, depth + 1, usedNS || ns, branched, ns ? next.p.summons[a.index].code : nsCode); }
   };
-  await visit([], null, 0, false, false);
-  return { v: OP_JUDGE_V, starter: best.free > 0 || best.ns > 0, ns: best.free === 0 && best.ns > 0, gain: Math.max(best.free, best.ns) };
+  await visit([], null, 0, false, false, 0);
+  const ns = best.free === 0 && best.ns > 0;
+  return { v: OP_JUDGE_V, starter: best.free > 0 || best.ns > 0, ns, nsCode: ns ? best.nsCode : 0, gain: Math.max(best.free, best.ns) };
 }
 // まだ判別していないカードを判別して、役割（初動／その他）と召喚権を入れる。自分で役割を変えたカードはそのまま
 async function opAutoJudge(deck, st, onProgress) {
@@ -307,13 +310,46 @@ async function opAutoJudge(deck, st, onProgress) {
     onProgress && onProgress(++i, todo.length, (DB.byId.get(id) || {}).name);
     const s = opCardSetting(st, id);
     // 手札誘発・誘発ケアは試さない（相手の行動が無いと使えない）
-    const r = s.role === 'handtrap' || s.role === 'care' ? { v: OP_JUDGE_V, starter: false, ns: false, gain: 0, skip: true } : await opJudgeCard(base, id);
+    const r = s.role === 'handtrap' || s.role === 'care' ? { v: OP_JUDGE_V, starter: false, ns: false, gain: 0, skip: true } : await opJudgeHand(base, [id]);
     st.auto[id] = r;
     if (!s.manual && !r.skip) {
       s.role = r.starter ? 'starter' : s.role === 'starter' ? 'other' : s.role;
       if (r.starter) s.ns = r.ns;
     }
   }
+  return true;
+}
+// 2枚そろうと動けるカード（1枚では初動にならないカード同士）を試して、組み合わせ初動に入れる。
+// 例：ヤミーの「リンク1＋レベル1の非チューナー」のように、手札の2枚から EXデッキを使って展開が始まるもの
+const OP_PAIR_V = 1, OP_PAIR_CARDS = 18, OP_PAIR_NODES = 40, OP_PAIR_MAX = 40;
+async function opAutoPairs(deck, st, onProgress) {
+  const sig = deck.main.slice().sort().join(',') + '|' + (deck.extra || []).slice().sort().join(',');
+  if (st.autoPairs && st.autoPairs.v === OP_PAIR_V && st.autoPairs.sig === sig) return false;
+  const errata = errataOfDecks(errataMode(), deck);
+  await engineLoad(() => {});
+  await loadCardScripts([...deck.main, ...(deck.extra || []), OPP_FILLER], () => {}, errata, true);
+  const base = { main: deck.main.filter(id => DB.byId.has(id)), extra: (deck.extra || []).filter(id => DB.byId.has(id)), rule: masterRule(), errata };
+  // 試すカード：初動・手札誘発・誘発ケアではないもの（枚数の多い順）
+  const cand = opDeckCards(deck).filter(x => { const s = opCardSetting(st, x.id); return s.role !== 'starter' && s.role !== 'handtrap' && s.role !== 'care'; })
+    .sort((a, b) => b.n - a.n).slice(0, OP_PAIR_CARDS);
+  const pairs = [];
+  cand.forEach((a, i) => cand.forEach((b, j) => { if (j > i || (j === i && a.n >= 2)) pairs.push([a, b]); }));
+  const found = [];
+  let k = 0;
+  for (const [a, b] of pairs) {
+    onProgress && onProgress(++k, pairs.length, `${a.card.name}＋${b.card.name}`);
+    if (found.length >= OP_PAIR_MAX) break;
+    const r = await opJudgeHand(base, [a.id, b.id], OP_PAIR_NODES, OP_DEPTH + 1);
+    if (r.starter) found.push({ a, b, r });
+  }
+  // 前に自動で入れた組み合わせは入れ直す（自分で書いたものはそのまま）
+  st.combos = st.combos.filter(c => !c.auto);
+  for (const { a, b, r } of found) {
+    st.combos.push({ id: opUid('k'), text: `${a.card.name} + ${b.card.name}`, priority: 30, auto: true, ns: r.ns ? 1 : 0 });
+    // 組み合わせで使うカードは「展開札」にする（受けると止まる誘発を選べるように）
+    for (const x of [a, b]) { const s = opCardSetting(st, x.id); if (!s.manual && s.role === 'other') s.role = 'extender'; }
+  }
+  st.autoPairs = { v: OP_PAIR_V, sig, n: found.length };
   return true;
 }
 
@@ -358,7 +394,7 @@ function opBuildModel(deck, st) {
       else { const idx = nameIdx.get(opNorm(p)); if (idx === undefined) errors.push(p); else for (let k = 0; k < n; k++) named.push(idx); }
     }
     if (errors.length) { comboErrors[cb.id] = errors; continue; }
-    if (named.length + tags.length) routes.push({ named, tags, priority: Number(cb.priority) || 0, single: false });
+    if (named.length + tags.length) routes.push({ named, tags, priority: Number(cb.priority) || 0, single: false, fixedNs: cb.auto && cb.ns != null ? cb.ns : null });
   }
   routes.sort((a, b) => (a.priority - b.priority) || (b.single - a.single));
   const deckArr = [];
@@ -433,12 +469,12 @@ function openOpeningRate() {
     const model = opBuildModel(deck, st);
     combosBox.replaceChildren(...st.combos.map(cb => {
       const text = el('input', { type: 'text', class: 'op-combo-text', value: cb.text, placeholder: 'カードA + カードB（#タグ も使えます）', list: 'op-names' });
-      text.oninput = () => { cb.text = text.value; save(); };
+      text.oninput = () => { cb.text = text.value; cb.auto = false; save(); };
       text.onchange = renderCombos;
       const prio = el('input', { type: 'number', class: 'op-prio', value: cb.priority });
       prio.oninput = () => { cb.priority = Number(prio.value) || 0; save(); };
       const errs = model.comboErrors[cb.id];
-      return el('div', { class: 'op-combo' }, text, el('label', { class: 'op-ns' }, '優先度', prio),
+      return el('div', { class: 'op-combo' }, text, cb.auto ? el('span', { class: 'op-badge', text: '自動', title: '自動で見つけた組み合わせ（この2枚だけの手札から展開できました）' }) : null, el('label', { class: 'op-ns' }, '優先度', prio),
         el('button', { class: 'btn small', text: '✕', title: '消す', onclick: () => { st.combos = st.combos.filter(x => x !== cb); save(); renderCombos(); } }),
         errs ? el('div', { class: 'warn', text: 'デッキに無いカード：' + errs.join('、') }) : null);
     }), el('button', { class: 'btn small', text: '＋ 組み合わせを追加', onclick: () => { st.combos.push({ id: opUid('k'), text: '', priority: 20 }); save(); renderCombos(); const ins = combosBox.querySelectorAll('.op-combo-text'); if (ins.length) ins[ins.length - 1].focus(); } }));
@@ -571,13 +607,16 @@ function openOpeningRate() {
   renderCount(); renderCards(); renderCombos(); renderOpp();
   // 初動の自動判別（まだ判別していないカードだけ。終わったら役割を入れ直す）
   const judge = async (redo) => {
-    if (redo) { st.auto = {}; for (const s of Object.values(st.cards)) delete s.manual; }
+    if (redo) { st.auto = {}; st.autoPairs = null; for (const s of Object.values(st.cards)) delete s.manual; }
     autoMsg.textContent = '初動を自動で判別しています…';
     try {
       const changed = await opAutoJudge(deck, st, (i, n, name) => { autoMsg.textContent = `初動を自動で判別しています… ${i}/${n}（${name}）`; });
       if (changed) { save(); renderCards(); renderCount(); }
+      // 2枚の組み合わせ（1枚では初動にならないカード同士）
+      const changed2 = await opAutoPairs(deck, st, (i, n, name) => { autoMsg.textContent = `2枚の組み合わせ初動を探しています… ${i}/${n}（${name}）`; });
+      if (changed2) { save(); renderCards(); renderCount(); renderCombos(); }
       const list = opDeckCards(deck), auto = st.auto || {};
-      autoMsg.replaceChildren(`自動で判別しました：初動 ${list.filter(x => auto[x.id] && auto[x.id].starter).length}種類（そのカード1枚だけの手札から、デッキのカードを手札・フィールド・墓地へ動かせるもの）。違っていたら役割を直してください。`,
+      autoMsg.replaceChildren(`自動で判別しました：初動 ${list.filter(x => auto[x.id] && auto[x.id].starter).length}種類・2枚の組み合わせ初動 ${(st.autoPairs && st.autoPairs.n) || 0}通り（その手札だけから、デッキのカードを手札・フィールド・墓地へ動かせるもの）。組み合わせ初動も実質初動率に入ります。違っていたら直してください。`,
         el('button', { class: 'btn small', text: '判別をやり直す（手で変えた役割も戻す）', onclick: () => judge(true) }));
     } catch (e) { console.error(e); autoMsg.textContent = '初動を自動で判別できませんでした：' + e.message; }
   };
