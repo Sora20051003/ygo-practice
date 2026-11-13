@@ -570,7 +570,7 @@ async function duelJoin(code) {
 function enterRoom(code) {
   Duel.code = code;
   Duel.matchOverShown = false;
-  Duel.feed = []; Duel.chat = []; Duel.chatUnread = 0; Duel.seen = new Set(); Duel.opp = null; Duel.oppLogSeen = 0; Duel.lastSent = ''; Duel.turnKey = '';
+  Duel.feed = []; Duel.chat = []; Duel.chatUnread = 0; Duel.seen = new Set(); Duel.opp = null; Duel.oppLogSeen = 0; Duel.lastSent = ''; Duel.turnKey = ''; Duel.room = null;   // 入った直後の部屋の情報を「最初の1回」として扱う（途中の対戦の続きを聞くため）
   Duel.deckId = Duel.deckId || Decks.currentId;
   store.set('ygo.duel.current', { code, deckId: Duel.deckId, host: !!(Duel.t && Duel.t.isHost) });
   Duel.t.listen(code, { room: onDuelRoom, opp: onDuelOpp, event: onDuelEvent, error: e => { if (!(Duel.room && Duel.room.status === 'ended')) toast('通信エラー：' + e.message); } });
@@ -743,6 +743,11 @@ function onDuelRoom(r) {
   }
   if (r.status === 'rps') { showRps(r); if (r.host === me) judgeRps(r); } else closeRps();
   if (r.status === 'choosing') askFirstOrSecond(r); else closeFirstOrSecond();
+  // 相手が「新しく始める」を選んで部屋が準備中に戻った：自分の盤面も閉じる
+  if (Duel.active && prev && prev.status === 'playing' && r.status === 'waiting') { endDuelBoard(); switchView('duel'); toast('前の対戦をやめて、新しく始めます。「準備OK」を押してください'); }
+  // 部屋に入ったら、途中で終わった対戦が残っていた：続きからか、新しく始めるかを聞く（聞いているあいだは盤面を開かない）
+  if (r.status === 'playing' && !Duel.active && !prev && r.seed && Duel.resumeAsked !== Duel.code + r.seed.join(',')) { askResumeDuel(r); return; }
+  if (r.status === 'playing' && !Duel.active && Duel.resumeAsking) return;
   if (r.status === 'playing' && !Duel.active) {
     // 始まったら、先攻か後攻かを画面の真ん中に大きく出す（入り直したときは出さない）
     if (prev && prev.status !== 'playing' && r.first) showPhaseBanner(r.first === me ? 'あなたは先攻' : 'あなたは後攻', `${r.first === r.host ? r.hostName : r.guestName} の先攻で始めます`, r.first !== me, true);
@@ -826,6 +831,8 @@ function onDuelOpp(state) {
 }
 
 function onDuelEvent(ev) {
+  // 相手が「新しく始める」を選んだ：部屋を作った人が、部屋を準備中に戻す
+  if (ev.type === 'reset') { if (Duel.t && Duel.t.isHost && ev.from !== Duel.me.uid) resetDuelRoom(); return; }
   if (ev.type === 'eng' || ev.type === 'engsync') { onNetEvent(ev); return; }   // 効果を自動処理する対戦のやり取り（ログには出さない）
   const id = ev.from + ':' + ev.ts + ':' + ev.type;
   if (Duel.seen.has(id)) return;
@@ -1708,3 +1715,29 @@ function openChatPop() {
   setTimeout(() => input.focus(), 0);
 }
 function closeChatPop() { const p = $('#duel-chat-pop'); if (p) p.remove(); }
+
+// ---------- 途中で終わった対戦の続き ----------
+// 部屋に入ったとき、前の対戦が途中のまま残っていたら「続きから」か「新しく始める」かを選んでもらう
+function askResumeDuel(r) {
+  if (Duel.resumeAsking) return;
+  Duel.resumeAsking = true;
+  const key = Duel.code + r.seed.join(',');
+  const done = () => { Duel.resumeAsking = false; Duel.resumeAsked = key; };
+  showModal({
+    title: '前の対戦が途中です',
+    body: el('p', { text: 'この部屋には、途中で終わった対戦が残っています。続きから始めますか？　新しく始めると、前の対戦は消えて、2人とも準備からやり直します。' }),
+    buttons: [
+      { label: '新しく始める', onClick: () => { done(); store.set('ygo.duel.net.' + Duel.code, null); if (Duel.t.isHost) resetDuelRoom(); else Duel.t.sendEvent({ type: 'reset' }); } },
+      { label: '続きから', primary: true, onClick: () => { done(); if (Duel.room) onDuelRoom(Duel.room); } },
+    ],
+    onClose: () => { if (Duel.resumeAsking) { done(); if (Duel.room) onDuelRoom(Duel.room); } },
+  });
+}
+// 部屋を準備中に戻す（部屋を作った人だけ）
+function resetDuelRoom() {
+  if (!Duel.t || !Duel.t.isHost) return;
+  if (Duel.active) endDuelBoard();
+  store.set('ygo.duel.net.' + Duel.code, null);
+  Duel.t.sendEvent({ type: 'sys', text: '前の対戦をやめて、新しく始めます。2人とも「準備OK」を押してください' });
+  Duel.t.updateRoom({ status: 'waiting', ready: {}, seed: null, turn: 0, turnPlayer: null, phase: 'DP', winner: null, rps: null, first: null });
+}
