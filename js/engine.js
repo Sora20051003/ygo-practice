@@ -822,6 +822,8 @@ function skippable(m, duel) {
   if (m.type === MSG.SELECT_CHAIN && m.forced && m.selects.length) return { type: RES.SELECT_CHAIN, index: 0 };
   if (m.type === MSG.SELECT_CHAIN && !m.forced) {
     if (!m.selects.length) return { type: RES.SELECT_CHAIN, index: null };
+    // チェーン確認「オフ」（遊んでいる対戦）：強制効果以外は聞かずに使わない（召喚した場合・ドローした時などの任意の誘発効果も）
+    if (duel && duel.offStrict && duel.chainMode === 'off') return { type: RES.SELECT_CHAIN, index: null };
     // 相手がデッキから手札に加えた（ドロー・サーチ）あと：チェーンの有無にかかわらず、自分の手札のカード（ドロール＆ロックバードなど）を使うか聞く。チェーン確認がオフなら聞かない
     if (duel && duel.oppAdded && duel.oppAdded !== duel.oppAddedAsked && duel.chainMode !== 'off' && m.selects.some(c => c.controller === duel.me && c.location === LOC.HAND)) { duel.oppAddedAsked = duel.oppAdded; return null; }
     if (duel && duel.chain.length && duel.chain[duel.chain.length - 1].code === TOOL_CODE) return { type: RES.SELECT_CHAIN, index: null };   // 練習ツールには聞かない

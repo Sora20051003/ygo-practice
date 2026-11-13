@@ -390,6 +390,7 @@ async function autoStart(handIds) {
   }
   Auto.redoLog = null;
   Auto.duel = new AutoDuel({ main: deck.main.filter(id => DB.byId.has(id)), extra: deck.extra.filter(id => DB.byId.has(id)), handIds: handIds && handIds.slice(0, 5), handSize, opp, chainMode: $('#ap-chain').value, autoTrigger: false, firstDraw: firstTurnDraw(), tools: true, rule: masterRule(), speed: speedMode(), errata });
+  Auto.duel.offStrict = true;   // チェーン確認「オフ」：強制効果以外は聞かない（遊んでいる対戦だけ。裏で試す複製は今までどおり）
   Auto.deckId = deck.id;
   Auto.duel.drawTap = true;   // 自分のドローフェイズは、画面をタッチするまでドローしない
   Auto.duel.vsCpu = oppMode() === 'cpu';   // CPU との対戦（デッキで対戦）：時間切れで負け
@@ -432,6 +433,7 @@ async function autoResume() {
   // 読み込んでいる間に対戦が始まった・別の一人回しを始めたときは、前の一人回しで上書きしない
   if (Auto.net || (typeof Duel !== 'undefined' && Duel.active) || Auto.duel) return;
   const d = new AutoDuel({ main: saved.main, extra: saved.extra, handIds: saved.handIds, handSize: saved.handSize, seed: saved.seed, opp: saved.opp, chainMode: saved.chainMode || 'auto', autoTrigger: false, firstDraw: !!saved.firstDraw, tools: !!saved.tools, rule: saved.rule || 'mr5', speed: saved.speed || '', errata: saved.errata, sv: saved.sv === 2 ? 2 : 1 });   // sv が無い＝前の版の混ぜ方で保存した盤面
+  d.offStrict = true;
   d.drawTap = true;
   d.vsCpu = oppMode() === 'cpu';
   Auto.duel = d; Auto.deckId = saved.deckId; d.cpuSlow = cpuDelay() > 0;
@@ -492,7 +494,7 @@ function setupAutoPlay() {
   const proc = $('#proc-settings');
   if (proc) { proc.open = store.get('ygo.procOpen', true); proc.addEventListener('toggle', () => store.set('ygo.procOpen', proc.open)); }
   $('#ap-chain').value = store.get('ygo.chainMode', 'auto');
-  const chainNote = { off: 'チェーンの確認をしません（必ず答える場面だけ聞きます）', always: '召喚・発動などのあと、発動できるものがあれば毎回聞きます', auto: '効果が発動したとき、それに対して発動できるものがあるときだけ聞きます' };
+  const chainNote = { off: 'チェーンの確認をしません。強制効果以外は聞かずに使いません（召喚した場合・ドローした時などの任意の効果も使わない。使いたいときは「自動」か「オン」に）', always: '召喚・発動などのあと、発動できるものがあれば毎回聞きます', auto: '効果が発動したとき、それに対して発動できるものがあるときだけ聞きます' };
   const paintChain = () => { const v = $('#ap-chain').value; $$('#ap-chainseg button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); $('#ap-chainnote').textContent = chainNote[v] || ''; };
   $$('#ap-chainseg button').forEach(b => { b.onclick = () => { $('#ap-chain').value = b.dataset.v; $('#ap-chain').onchange({ target: $('#ap-chain') }); }; });
   paintChain();

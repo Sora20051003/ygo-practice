@@ -1475,6 +1475,7 @@ async function beginNetDuel() {
   showLoading(null);
   const d = new AutoDuel({ main: decks[idx][0], extra: decks[idx][1], seed: r.seed.map(s => BigInt(s)), net: { me: idx, decks }, rule: r.rule || 'mr5', speed: r.speed || '', errata: netErrata,
     chainMode: $('#ap-chain').value, autoTrigger: false, firstDraw: !!r.firstDraw });
+  d.offStrict = true;   // チェーン確認「オフ」：強制効果以外は聞かない
   d.drawTap = true;   // 自分のドローフェイズは、画面をタッチするまでドローしない
   noteLinkRemoved(decks[idx][1], r.rule || 'mr5');
   d.onSend = (res, i) => Duel.t.sendEvent({ type: 'eng', i, res: JSON.stringify(res, bigReplacer) });
