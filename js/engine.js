@@ -937,6 +937,19 @@ function cpuAnswer(m, duel) {
     case MSG.SELECT_EFFECTYN: return cpuChoiceThink(m, duel, [{ type: RES.SELECT_EFFECTYN, yes: true }, { type: RES.SELECT_EFFECTYN, yes: false }]) || { type: RES.SELECT_EFFECTYN, yes: true };
     case MSG.SELECT_YESNO: return cpuChoiceThink(m, duel, [{ type: RES.SELECT_YESNO, yes: true }, { type: RES.SELECT_YESNO, yes: false }]) || { type: RES.SELECT_YESNO, yes: true };
     case MSG.SELECT_CARD: {
+      // 調和ノ天救竜の処理中か（見せるのは発動のコストなので、まだチェーンに乗っていないこともある：手札にあるかでも見る）
+      const fromExtra = m.selects.length && m.selects.every(c => c.location === LOC.EXTRA && c.controller !== me);
+      let harmonia = duel.chain.length && duel.chain[duel.chain.length - 1].code === 70088809 && duel.chain[duel.chain.length - 1].con !== me;
+      if (!harmonia && fromExtra) { try { harmonia = duel.query()[1 - me].hand.some(c => c && c.code === 70088809); } catch { /* 分からなければ普通に選ぶ */ } }
+      // 調和ノ天救竜：EXデッキのSモンスターは見せられるだけ見せる（6体で相手のモンスターを破壊できる）
+      if (harmonia && fromExtra && m.max > m.min) return { type: RES.SELECT_CARD, indicies: [...Array(m.max).keys()] };
+      // 調和ノ天救竜：墓地へ送るSモンスター。相手（練習する人）の場に破壊できるカードが2枚以上なら金雲獣－馬龍・エニグマスター・パックビット、1枚ならウィンドペガサス＠イグニスター
+      if (harmonia && fromExtra && m.min === 1 && m.max === 1) {
+        let mine = 0;
+        try { const q = duel.query()[me]; mine = [...q.m, ...q.s].filter(c => c && c.code).length; } catch { /* 数えられなければ多いとみなす */ mine = 2; }
+        const order = mine >= 2 ? [93125329, 72444406, 98506199] : [98506199, 93125329, 72444406];
+        for (const code of order) { const i = m.selects.findIndex(c => c.code === code); if (i >= 0) return { type: RES.SELECT_CARD, indicies: [i] }; }
+      }
       const attackTarget = Number(BigInt(duel.cpuHint || 0) & 0xfffffn) === 549;   // 攻撃の対象を選ぶ
       if (m.min === 1 && m.max === 1) {
         const best = cpuChoiceThink(m, duel, cpuSingleAnswers(m.selects, i => ({ type: RES.SELECT_CARD, indicies: [i] })));
@@ -947,6 +960,15 @@ function cpuAnswer(m, duel) {
     }
     case MSG.SELECT_TRIBUTE: return { type: RES.SELECT_TRIBUTE, indicies: [...Array(m.min).keys()] };
     case MSG.SELECT_UNSELECT_CARD: {
+      // 調和ノ天救竜：EXデッキのSモンスターは見せられるだけ見せる（墓地へ送る候補の金雲獣－馬龍・エニグマスター・パックビット・ウィンドペガサス＠イグニスターから先に）
+      if (m.select_cards.length && m.select_cards.every(c => c.location === LOC.EXTRA && c.controller !== me)) {
+        let harm = duel.chain.length && duel.chain[duel.chain.length - 1].code === 70088809;
+        if (!harm) { try { harm = duel.query()[1 - me].hand.some(c => c && c.code === 70088809); } catch { /* 分からなければ普通に選ぶ */ } }
+        if (harm) {
+          for (const code of [93125329, 72444406, 98506199]) { const i = m.select_cards.findIndex(c => c.code === code); if (i >= 0) return { type: RES.SELECT_UNSELECT_CARD, index: i }; }
+          return { type: RES.SELECT_UNSELECT_CARD, index: 0 };
+        }
+      }
       if (m.can_finish || !m.select_cards.length) return { type: RES.SELECT_UNSELECT_CARD, index: null };
       return { type: RES.SELECT_UNSELECT_CARD, index: prefer(m.select_cards)[0] };
     }
