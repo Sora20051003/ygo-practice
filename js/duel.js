@@ -486,7 +486,17 @@ function feed(text, cls = '') {
 }
 
 // ---------- 部屋に入る・作る ----------
+// 部屋を作っている途中・入っている途中か（ボタンを2回押して部屋が2つできないように）
+let duelOpening = false;
+// 前の部屋の接続を閉じる（新しく部屋を作る・入る前に。閉じないと、前の部屋に自分が残ったままになる）
+function closeOldRoom() { if (Duel.t) { try { Duel.t.leave(); } catch { /* もう閉じている */ } } Duel.t = null; }
+
 async function duelCreate(code, share) {   // code：前回の部屋を作り直すとき。share：作ったらすぐ招待リンクを送る
+  // 部屋を作っている途中なら何もしない。もう自分の部屋があるなら、作り直さずに今の部屋の招待を送る
+  if (duelOpening) return;
+  if (Duel.t && Duel.code && !code) { if (share) shareInvite(); return; }
+  duelOpening = true;
+  closeOldRoom();
   Duel.me = duelMe();
   Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new MqttDuelTransport(Duel.me);
   try {
@@ -494,6 +504,7 @@ async function duelCreate(code, share) {   // code：前回の部屋を作り直
     enterRoom(newCode);
     if (share) shareInvite();
   } catch (e) { toast(e.message); }
+  finally { duelOpening = false; }
 }
 
 // 招待リンクを送る。スマホは共有画面（LINE など）を出す。パソコンはリンクをコピーする
@@ -526,6 +537,7 @@ async function quickMatch() {
     if (open) { await duelJoin(open); return; }
     // だれも待っていない：空いている番号で部屋を作って待つ
     for (const code of MATCH_SLOTS) {
+      closeOldRoom();   // 前に試した番号の接続は閉じる
       Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new MqttDuelTransport(Duel.me);
       try {
         await Duel.t.create(code);
@@ -542,12 +554,17 @@ async function quickMatch() {
 async function duelJoin(code) {
   code = (code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length !== 6) { toast('部屋コードは6文字です'); return; }
+  if (duelOpening) return;
+  if (Duel.t && Duel.code === code) return;   // もうその部屋にいる
+  duelOpening = true;
+  closeOldRoom();
   Duel.me = duelMe();
   Duel.t = DUEL_TEST ? new LocalDuelTransport(Duel.me) : new MqttDuelTransport(Duel.me);
   try {
     await Duel.t.join(code);
     enterRoom(code);
   } catch (e) { toast(e.message || '部屋に入れませんでした'); }
+  finally { duelOpening = false; }
 }
 
 function enterRoom(code) {
