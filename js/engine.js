@@ -26,7 +26,7 @@ const MSG = {
   SELECT_OPTION: 14, SELECT_CARD: 15, SELECT_CHAIN: 16, SELECT_PLACE: 18, SELECT_POSITION: 19, SELECT_TRIBUTE: 20,
   SORT_CHAIN: 21, SELECT_COUNTER: 22, SELECT_SUM: 23, SELECT_DISFIELD: 24, SORT_CARD: 25, SELECT_UNSELECT_CARD: 26,
   CONFIRM_DECKTOP: 30, CONFIRM_CARDS: 31, SHUFFLE_DECK: 32, NEW_TURN: 40, NEW_PHASE: 41, MOVE: 50, POS_CHANGE: 53, SET: 54,
-  SUMMONING: 60, SPSUMMONING: 62, FLIPSUMMONING: 64, CHAINING: 70, CHAIN_SOLVING: 72, CHAIN_SOLVED: 73, CHAIN_END: 74, CHAIN_NEGATED: 75,
+  SUMMONING: 60, SUMMONED: 61, SPSUMMONING: 62, SPSUMMONED: 63, FLIPSUMMONING: 64, FLIPSUMMONED: 65, CHAINING: 70, CHAIN_SOLVING: 72, CHAIN_SOLVED: 73, CHAIN_END: 74, CHAIN_NEGATED: 75,
   CHAIN_DISABLED: 76, DRAW: 90, DAMAGE: 91, RECOVER: 92, LPUPDATE: 94, PAY_LPCOST: 100, ATTACK: 110, BATTLE: 111, ATTACK_DISABLED: 112, DAMAGE_STEP_START: 113, DAMAGE_STEP_END: 114,
   TOSS_COIN: 130, TOSS_DICE: 131, ROCK_PAPER_SCISSORS: 132, ANNOUNCE_RACE: 140, ANNOUNCE_ATTRIB: 141,
   ANNOUNCE_CARD: 142, ANNOUNCE_NUMBER: 143, CARD_HINT: 160, PLAYER_HINT: 165,
@@ -554,7 +554,7 @@ class AutoDuel {
       if (status === 2) continue;
       if (!ask) continue;
       // 自分が次の行動を選ぶ時点で、召喚したばかりのカードの記録は消す（誘発の機会は終わっている）
-      if (ask.player === this.me && (ask.type === MSG.SELECT_IDLECMD || ask.type === MSG.SELECT_BATTLECMD)) { this.justSummoned.clear(); this.justMoved.clear(); }
+      if (ask.player === this.me && (ask.type === MSG.SELECT_IDLECMD || ask.type === MSG.SELECT_BATTLECMD)) { this.justSummoned.clear(); this.justMoved.clear(); this.summonWin = false; }
       this.lastAsk = ask;
       if (replay && replay.length) { const r = replay.shift(); this.replaying = true; try { this.respond(r.res, !r.user, true); } finally { this.replaying = false; } continue; }
       // 記録の再生：記録した返答が終わったら、そこで止める（CPU や自動の返答で先へ進めない）
@@ -672,7 +672,9 @@ class AutoDuel {
       }
       case MSG.CHAIN_SOLVING: this.solving = m.chain_size; break;   // チェーンの解決中（何番目を解決しているか）
       case MSG.CHAIN_SOLVED: this.chain.pop(); break;
-      case MSG.CHAIN_END: this.chain = []; this.solving = 0; break;
+      case MSG.CHAIN_END: this.chain = []; this.solving = 0; this.summonWin = false; break;   // チェーンの解決後は「召喚・特殊召喚に成功した時」の場面ではない
+      // 召喚・特殊召喚・反転召喚に成功した：その直後の場面（奈落の落とし穴・神の宣告などで反応できる）。チェーン確認「自動」でも聞く
+      case MSG.SUMMONED: case MSG.SPSUMMONED: case MSG.FLIPSUMMONED: this.summonWin = true; break;
       case MSG.CHAIN_NEGATED: case MSG.CHAIN_DISABLED: {
         // 無効になったチェーン（演出用に、どのカードかを残す）
         const link = this.chain.find(l => l.n === m.chain_size) || this.chain[this.chain.length - 1];
@@ -832,6 +834,11 @@ function skippable(m, duel) {
     // 召喚したばかり・動いたばかりの自分のカードの誘発効果（「〜した場合に発動できる」）は、チェーン確認の設定に関係なく聞く
     const freshTrigger = !!duel && !last && m.selects.some(c => duel.justSummoned.has(locKey(c.controller, c.location, c.sequence)) || duel.justMoved.has(locKey(c.controller, c.location, c.sequence)) || duel.justMoved.has(`${c.controller}-${c.location}-c${c.code}`));
     let ask = mode === 'always' || freshTrigger;
+    // 誘発効果（何かが起きたことがきっかけで発動できる効果。ほかのカードの召喚・相手の召喚・リバース・戦闘・フェイズなど）があれば、
+    // チェーンが無くても聞く（エンジンの spe_count：誘発効果の数。いつでも使える速攻魔法などは数えない）
+    if (mode === 'auto' && !last && m.spe_count > 0 && duel && m.selects.some(c => c.controller === duel.me)) ask = true;
+    // 召喚・特殊召喚に成功した直後（チェーンの解決後ではない）に、反応できるカードがあれば聞く（「自動」。「オン」は解決後も聞く）
+    if (mode === 'auto' && !last && duel && duel.summonWin && m.selects.some(c => c.controller === duel.me)) ask = true;
     // エンドフェイズ（自分のターン）：チェーン確認がオン・自動なら、ここで止まって発動できるようにする。
     // オフでも、前もって発動しておいたカードの効果（「エンドフェイズに〜できる」など、その時に発動する誘発効果）は聞く
     //  チェーンが組まれている途中（チェーン2・3…）も、発動できるものがあれば毎回聞く

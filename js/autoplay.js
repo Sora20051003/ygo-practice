@@ -494,7 +494,7 @@ function setupAutoPlay() {
   const proc = $('#proc-settings');
   if (proc) { proc.open = store.get('ygo.procOpen', true); proc.addEventListener('toggle', () => store.set('ygo.procOpen', proc.open)); }
   $('#ap-chain').value = store.get('ygo.chainMode', 'auto');
-  const chainNote = { off: 'チェーンの確認をしません。強制効果以外は聞かずに使いません（召喚した場合・ドローした時などの任意の効果も使わない。使いたいときは「自動」か「オン」に）', always: '召喚・発動などのあと、発動できるものがあれば毎回聞きます', auto: '効果が発動したとき、それに対して発動できるものがあるときだけ聞きます' };
+  const chainNote = { off: 'チェーンの確認をしません。強制効果以外は聞かずに使いません（召喚した場合・ドローした時などの任意の効果も使わない。使いたいときは「自動」か「オン」に）', always: 'チェーンを組むときに加えて、チェーンの解決後・召喚や特殊召喚に成功した時・そのあとも、発動できるものがあれば毎回聞きます', auto: 'チェーンを組むとき（効果の発動に反応できるとき）・召喚や特殊召喚に成功した時・誘発効果（召喚した場合・ドローした時など）があるときに聞きます。チェーンの解決後の何も起きていない場面では聞きません' };
   const paintChain = () => { const v = $('#ap-chain').value; $$('#ap-chainseg button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); $('#ap-chainnote').textContent = chainNote[v] || ''; };
   $$('#ap-chainseg button').forEach(b => { b.onclick = () => { $('#ap-chain').value = b.dataset.v; $('#ap-chain').onchange({ target: $('#ap-chain') }); }; });
   paintChain();
