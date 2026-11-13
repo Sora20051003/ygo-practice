@@ -168,8 +168,12 @@ async function opLoadUsage(fmt, oppHand) {
     if (typeof MD_USAGE === 'undefined') { try { await loadScript('data/md-usage.js?d=' + new Date().toISOString().slice(0, 10)); } catch (e) { /* 無ければサンプルデッキで数える */ } }
     if (typeof MD_USAGE !== 'undefined' && MD_USAGE.n >= 40) {
       const table = MD_USAGE.cards.map(v => sampleCard(v));
-      list = MD_USAGE.decks.map(d => { const a = []; for (let i = 2; i + 1 < d.length; i += 2) if (table[d[i]]) a.push({ card: table[d[i]], n: d[i + 1] | 0 }); return a; });
-      from = MD_USAGE.from; src = 'all';
+      // ランクマッチのデッキだけで数える（少なすぎるときは大会のデッキも入れる）
+      const ranked = MD_USAGE.decks.filter(d => d[0] === 'r');
+      const use = ranked.length >= 40 ? ranked : MD_USAGE.decks;
+      src = ranked.length >= 40 ? 'ranked' : 'all';
+      list = use.map(d => { const a = []; for (let i = 2; i + 1 < d.length; i += 2) if (table[d[i]]) a.push({ card: table[d[i]], n: d[i + 1] | 0 }); return a; });
+      from = MD_USAGE.from;
     }
   }
   if (!list) {
@@ -685,7 +689,7 @@ function openOpeningRate() {
       const num = el('input', { type: 'number', class: 'op-prio', value: H, min: 0, max: 10 });
       num.onchange = () => { st.opp.handSize = Math.max(0, parseInt(num.value, 10) || 0); save(); renderOpp(); };
       oppBox.replaceChildren(modeBar,
-        el('p', { class: 'muted small-note', text: `${u.src === 'all' ? 'Master Duel Meta に載った大会・ランク戦（マスター）のデッキ全部' : OP_SRC_NOTE[u.fmt]} ${u.nDecks}個（${u.from} からのリスト）で数えた採用率です。計算では毎回このデッキの中から1つを相手に選び、そこから初手を配ります（その誘発を入れていないデッキや、入れていても引かない場合も確率に入ります）。` }),
+        el('p', { class: 'muted small-note', text: `${u.src === 'ranked' ? 'Master Duel Meta に載ったランクマッチ（マスター）のデッキ全部' : u.src === 'all' ? 'Master Duel Meta に載った大会・ランクマッチのデッキ全部' : OP_SRC_NOTE[u.fmt]} ${u.nDecks}個（${u.from} からのリスト）で数えた採用率です。計算では毎回このデッキの中から1つを相手に選び、そこから初手を配ります（その誘発を入れていないデッキや、入れていても引かない場合も確率に入ります）。` }),
         el('div', { class: 'op-row' },
           el('label', {}, '相手の手札 ', num, ' 枚'),
           el('span', { class: 'muted', text: `相手の初手に下の誘発・0ターン展開が1枚以上ある確率 ${pct(opUsageOpen(u, H, -1))}` })),
@@ -797,7 +801,7 @@ function openOpeningRate() {
       el('ul', {},
         el('li', { text: '初動率：初動のカード、または組み合わせ初動がそろっている手札の割合（召喚権は考えない）。' }),
         el('li', { text: '召喚権を考慮：通常召喚1回で始められる初動がある割合。' }),
-        el('li', { text: '実質初動率：相手にもデッキから手札を配り、止められずに展開できた割合（「環境の使用率から」では、毎回大会のデッキを1つ選んで相手のデッキにします）。初動を優先度の順に使い、相手は止められる誘発があれば撃ち（ケアされないものから）、自分はケア札があれば無効にします。止められた初動のカードと召喚権は失い、残りで次の初動を試します。' }),
+        el('li', { text: '実質初動率：相手にもデッキから手札を配り、止められずに展開できた割合（「環境の使用率から」では、毎回ランクマッチなどのデッキを1つ選んで相手のデッキにします）。初動を優先度の順に使い、相手は止められる誘発があれば撃ち（ケアされないものから）、自分はケア札があれば無効にします。止められた初動のカードと召喚権は失い、残りで次の初動を試します。' }),
         el('li', { text: '貫通率：初動がある手札で、相手が「止める誘発」を1枚（2枚）持っていて、止められる初動には必ず撃ってくるとしたときに、展開を続けられる割合。止められた初動のカードと召喚権は失い、残りの初動で動きます。誘発ケアは、その初動を止める誘発のどれかをケアできるカードなら使います。' }),
         el('li', { text: '分かりやすさ優先の近似です。止まった初動から一部のリソースが残る場合や、召喚権を増やすカード、増殖するGを受けて展開をやめる判断などは考えていません。' }))));
   renderCount(); renderCards(); renderCombos(); renderOpp();
