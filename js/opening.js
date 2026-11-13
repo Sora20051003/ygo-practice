@@ -207,7 +207,7 @@ async function opLoadUsage(fmt, oppHand) {
   }
   [...zero].filter(([, z]) => z.decks / list.length >= 0.02).sort((a, b) => b[1].decks - a[1].decks).slice(0, 6).forEach(([th, z]) => {
     const i = traps.length;
-    traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
+    traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, stopBy: opThemeStops(th), cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
     for (const id of z.cards) idx.set(id, i);
   });
   const oppDecks = list.map(dl => { const a = []; for (const { card, n } of dl) for (let k = 0; k < n; k++) a.push(idx.has(card.id) ? idx.get(card.id) : -1); return a; }).filter(a => a.length >= 20);
@@ -217,6 +217,24 @@ async function opLoadUsage(fmt, oppHand) {
 const OP_ZERO_RE = /(相手メインフェイズ|相手ターン|自分・相手ターン|お互いのメインフェイズ|相手の(メインフェイズ|ターン))[^①②③④⑤]{0,120}?(手札から|手札の|このカードを特殊召喚)|(手札に存在する(場合|限り))[^①②③④⑤]{0,60}?(相手メインフェイズ|相手ターン|自分・相手ターン|お互いのメインフェイズ)/;
 function opIsZeroTurn(c) {
   return !!(c && (c.type & T.MONSTER) && !(c.type & EXTRA_MASK) && OP_ZERO_RE.test(c.jaText || ''));
+}
+// そのテーマに、相手のターンに使える妨害（無効・破壊・除外・バウンスなど）があるか（効果の文から判断）。
+// 無いテーマの0ターン展開は、最初から「数えない」にする
+const OP_OPP_TIMING = /相手メインフェイズ|相手ターン|自分・相手ターン|お互いの(メインフェイズ|ターン)|相手[^。]{0,30}発動した(時|場合)|効果が発動した時|カードが発動した時|召喚・反転召喚・特殊召喚した(時|場合)/;
+const OP_DISRUPT = /無効に|(相手|フィールド)[^。]{0,40}(破壊|除外|手札に戻|デッキに戻|裏側守備表示|コントロールを得)/;
+const opStopCache = new Map();
+function opThemeStops(th) {
+  if (opStopCache.has(th)) return opStopCache.get(th);
+  let hit = null;
+  for (const c of DB.cards) {
+    if (!c.jaText || c.anime || !(c.cid || c.pre)) continue;
+    if (!(typeof decThemesOf === 'function' ? decThemesOf(c) : []).includes(th) && c.name !== th) continue;
+    // 効果ごと（①②③…）に、相手のターンに使えて妨害になるものを探す
+    const seg = c.jaText.split(/[①②③④⑤⑥]/).find(s => OP_OPP_TIMING.test(s) && OP_DISRUPT.test(s));
+    if (seg) { hit = c.name; break; }
+  }
+  opStopCache.set(th, hit);
+  return hit;
 }
 // カードのテーマ名（無ければカード名）
 function opThemeOf(c) {
@@ -467,7 +485,7 @@ function opDeckCards(deck) {
 function opBuildModel(deck, st) {
   const usage = opUsing(st);
   // 使用率：「数えない」にした誘発は外す（相手のデッキでは何でもないカードとして扱う）
-  const ignore = new Set(usage ? st.opp.ignore || [] : []);
+  const ignore = usage ? opIgnored(st) : new Set();
   const all = opTraps(st), traps = all.filter(t => !ignore.has(t.id));
   const remap = all.map(t => traps.indexOf(t));
   const oppDecksU = usage ? (ignore.size ? usage.oppDecks.map(d => d.map(x => (x >= 0 ? remap[x] : -1))) : usage.oppDecks) : null;
@@ -645,12 +663,15 @@ function openOpeningRate() {
         el('table', { class: 'op-trap-table' },
           el('tr', {}, el('th', { text: '数える' }), el('th', { text: '誘発' }), el('th', { text: '採用率' }), el('th', { text: '採用時の枚数' }), el('th', { text: '相手の初手にある' })),
           u.traps.map((t, i) => {
-            const ign = new Set(st.opp.ignore || []);
-            const cb = el('input', { type: 'checkbox', checked: !ign.has(t.id) });
-            cb.onchange = () => { const s = new Set(st.opp.ignore || []); cb.checked ? s.delete(t.id) : s.add(t.id); st.opp.ignore = [...s]; save(); };
+            const cb = el('input', { type: 'checkbox', checked: !opIgnored(st).has(t.id) });
+            cb.onchange = () => {
+              const ig = new Set(st.opp.ignore || []), keep = new Set(st.opp.keep || []);
+              if (cb.checked) { ig.delete(t.id); keep.add(t.id); } else { ig.add(t.id); keep.delete(t.id); }
+              st.opp.ignore = [...ig]; st.opp.keep = [...keep]; save();
+            };
             return el('tr', { class: t.zero ? 'op-zero' : null },
               el('td', {}, cb),
-              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') }) : null),
+              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') + (t.stopBy ? `（妨害：${t.stopBy}など）` : '（妨害になる効果が見つからないので、最初は数えません）') }) : null),
               el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', { text: pct(opUsageOpen(u, H, i)) }));
           })));
       return;
@@ -775,4 +796,12 @@ function opBadge(st, id, s) {
   if (s.manual) return el('span', { class: 'op-badge manual', text: '手動', title: '自分で役割・召喚権を変えたカード（自動の判別では変えません）' });
   if (a && a.starter) return el('span', { class: 'op-badge', text: `自動：初動${a.ns ? '（召喚）' : ''}`, title: `このカード1枚から、デッキのカードを${a.gain}枚以上動かせました${a.ns ? '（通常召喚が必要）' : ''}` });
   return null;
+}
+
+// 数えない誘発：自分で外したもの＋妨害の効果が見つからない0ターン展開（自分でチェックを入れ直したものは数える）
+function opIgnored(st) {
+  const u = opUsageCache[st.opp.src];
+  const ig = new Set(st.opp.ignore || []), keep = new Set(st.opp.keep || []);
+  if (u) for (const t of u.traps) if (t.zero && !t.stopBy && !keep.has(t.id)) ig.add(t.id);
+  return ig;
 }
