@@ -1319,7 +1319,7 @@ function cpuChainThink(m, duel) {
       }
       const denied = t.events.filter(e => e.t === 'negate' && e.con === duel.me).length;
       // 発動しなかったとき、練習する人の展開がどれだけ伸びるか（デッキから手札・場・墓地へ動いたカード、EXデッキからの特殊召喚）
-      if (o < 0) passGain = t.events.filter(e => e.t === 'move' && e.code && e.from && e.from.con === duel.me && ((e.from.loc === LOC.DECK && (e.to.loc & (LOC.HAND | LOC.MZONE | LOC.SZONE | LOC.GRAVE))) || (e.from.loc === LOC.EXTRA && e.to.loc === LOC.MZONE))).length;
+      if (o < 0) passGain = t.events.filter(e => (e.t === 'move' && e.code && e.from && e.from.con === duel.me && ((e.from.loc === LOC.DECK && (e.to.loc & (LOC.HAND | LOC.MZONE | LOC.SZONE | LOC.GRAVE))) || (e.from.loc === LOC.EXTRA && e.to.loc === LOC.MZONE))) || (e.t === 'summon' && e.con === duel.me)).length;   // トークンなどの特殊召喚も数える
       // 増殖するG のように、効果がそのターンの間あとから効くカード：相手のメインフェイズに使う価値を足す
       const lasting = o >= 0 && LASTING_TRAPS.has(cardName(m.selects[o].code)) && duel.turnPlayer === duel.me && (duel.phase === 4 || duel.phase === 256);
       const s = cpuScore(t, cpu, true) + denied * 4 + (lasting ? 6 : 0);
@@ -1336,6 +1336,11 @@ function cpuChainThink(m, duel) {
   if (best >= 0 && passGain === 0) {
     const c = m.selects[best];
     if (c && c.location === LOC.HAND && isHandTrap(c.code) && !LASTING_TRAPS.has(cardName(c.code))) best = -1;
+  }
+  // さらに、今撃つのと、このあとの場面まで待って撃つのを比べる（先まで動かして、相手の最後の盤面がいちばん弱くなるところで撃つ）
+  if (best >= 0) {
+    const c = m.selects[best];
+    if (c && c.location === LOC.HAND && isHandTrap(c.code) && !LASTING_TRAPS.has(cardName(c.code)) && !cpuMustCounter(duel, best, c.code)) best = -1;
   }
   return { type: RES.SELECT_CHAIN, index: best < 0 ? null : best };
 }
@@ -1456,4 +1461,67 @@ function cpuScore(t, cpu, chain = false) {
   };
   // チェーンの判断では、相手が得るもの（サーチ・展開）を重く見る
   return side(cpu) - side(you) * (chain ? 1.3 : 0.9) + (8000 - t.lp[you]) / 120 - (8000 - t.lp[cpu]) / 200;
+}
+
+// ---------- マストカウンター（一人回しのCPUの手札誘発） ----------
+// 今この効果に撃つのと、撃たずに待って、このあと同じ誘発を撃てる場面（k 回目）で撃つのを比べる。
+// それぞれ練習する人のターンの残りを簡単な動き（発動 → 特殊召喚 → 通常召喚）で進め、最後の盤面の点数（CPU から見て）がいちばん良いところを選ぶ。
+// 今撃つのがいちばん良い（か、差が小さい）なら true
+const MUST_PLAYOUT_STEPS = 24, MUST_MAX_LATER = 4, MUST_TIME = 4000;
+function cpuMustCounter(duel, nowIndex, code) {
+  const cpu = 1 - duel.me, hist = duel.history(), t0 = performance.now();
+  // fireAt：0＝今撃つ、k＝撃たずに待って k 回目の場面で撃つ、-1＝撃たない
+  const playout = fireAt => {
+    let t = null;
+    try {
+      t = new AutoDuel({ main: duel.main, extra: duel.extra, handIds: duel.handIds, handSize: duel.handSize, seed: duel.seed, opp: duel.opp, chainMode: 'off', autoTrigger: true, tools: duel.tools, rule: duel.rule, speed: duel.speed, errata: duel.errata, sv: duel.sv });
+      t.noThink = true;
+      t.create();
+      t.stopAtCpu = true;
+      t.run(hist.slice());
+      const p0 = t.pending;
+      if (!p0 || p0.player !== cpu || p0.type !== MSG.SELECT_CHAIN) return null;
+      let seen = 0, fired = fireAt === 0;
+      t.stopAtCpu = true;
+      t.respond({ type: RES.SELECT_CHAIN, index: fireAt === 0 ? nowIndex : null });
+      const count = new Map();
+      for (let step = 0; step < 120 && t.pending && !t.ended; step++) {
+        const p = t.pending;
+        let res = null;
+        if (p.player === t.me) {
+          if (p.type === MSG.SELECT_IDLECMD) {
+            const key = (a, c) => a + ':' + c.code + ':' + (c.description || '');
+            const acts = [...(p.activates || []).map((c, i) => [IDLE.ACTIVATE, i, c]), ...(p.special_summons || []).map((c, i) => [IDLE.SPSUMMON, i, c]), ...(p.summons || []).map((c, i) => [IDLE.SUMMON, i, c])]
+              .filter(([a, , c]) => (count.get(key(a, c)) || 0) < 2);
+            if (!acts.length || [...count.values()].reduce((s, v) => s + v, 0) >= MUST_PLAYOUT_STEPS) break;
+            const [a, i, c] = acts[0];
+            count.set(key(a, c), (count.get(key(a, c)) || 0) + 1);
+            res = { type: RES.SELECT_IDLECMD, action: a, index: i };
+          } else if (p.type === MSG.SELECT_BATTLECMD) break;
+          else res = humanSimAnswer(p, t) || autoAnswer(p);
+        } else if (p.type === MSG.SELECT_CHAIN) {
+          // 同じ誘発を撃てる場面：数えて、決めた回目で撃つ
+          const i = (p.selects || []).findIndex(c => c.code === code && c.location === LOC.HAND);
+          if (i >= 0 && !fired) { seen++; if (seen === fireAt) { fired = true; res = { type: RES.SELECT_CHAIN, index: i }; } }
+          if (!res) res = { type: RES.SELECT_CHAIN, index: p.forced ? 0 : null };
+        } else res = cpuAnswer(p, t);
+        t.stopAtCpu = true;
+        t.respond(res);
+      }
+      return { score: cpuScore(t, cpu), seen };
+    } catch (e) { return null; }
+    finally { if (t && t.h) Engine.lib.destroyDuel(t.h); }
+  };
+  const now = playout(0);
+  if (!now) return true;
+  const wait = playout(-1);   // 撃たなかったとき：あとで撃てる場面が何回あるか
+  if (!wait || !wait.seen) return true;
+  let bestLater = -Infinity;
+  for (let k = 1; k <= Math.min(wait.seen, MUST_MAX_LATER); k++) {
+    if (performance.now() - t0 > MUST_TIME) break;
+    const r = playout(k);
+    if (r && r.score > bestLater) bestLater = r.score;
+  }
+  if (typeof window !== 'undefined' && window.__mcLog) window.__mcLog.push({ last: duel.chain.length ? cardName(duel.chain[duel.chain.length - 1].code) : '', now: Math.round(now.score * 10) / 10, later: Math.round(bestLater * 10) / 10, seen: wait.seen });
+  return now.score >= bestLater - 0.5;
 }
