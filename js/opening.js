@@ -140,12 +140,13 @@ const OpSim = (() => {
       let fieldBits = 0, handBits = 0;
       if (ids && m.zeroSim && !second) for (const [t, fn] of m.zeroSim) {
         const r = fn(ids, OH, OD);   // 1＝条件なしで動ける／2＝こちらが場でモンスター効果を使えば／4＝手札・墓地でモンスター効果を使えば
-        opp[t] = r ? 1 : 0;
+        opp[t] = r ? 1 + (r >> 4) : 0;
         if (r && !(r & 1)) { if (r & 2) fieldBits |= 1 << t; if (r & 4) handBits |= 1 << t; }
       }
       s.fieldBits = fieldBits; s.handBits = handBits;
-      // 0ターン展開（相手が後攻のとき、こちらの先攻1ターン目に展開する）：そのテーマのカードが何枚あっても妨害1回。こちらが後攻なら無い
-      for (const t of m.zeroIdx || []) opp[t] = second ? 0 : Math.min(opp[t], 1);
+      // 0ターン展開（相手が後攻のとき、こちらの先攻1ターン目に展開する）：こちらが後攻なら無い。
+      // 試していないもの（相手のデッキの中身が無いとき）は、そのテーマのカードが何枚あっても妨害1回
+      for (const t of m.zeroIdx || []) opp[t] = second ? 0 : ids && m.zeroSim && m.zeroSim.some(z => z[0] === t) ? opp[t] : Math.min(opp[t], 1);
       if (!nsok) continue;
       res.nsok++;
       if (resolve(m, hc, opp, 99, s)) res.realInfNs++;
@@ -988,12 +989,13 @@ function opZeroCond(c) {
   const segs = opText(c).split(/[①②③④⑤⑥]/).filter(s => OP_ZERO_TIMING.test(s) && OP_ZERO_HAND.test(s) && /特殊召喚/.test(s) && !opNeedsOwnField(s));
   let best = null;
   for (const s of segs) {
-    if (/自分の「[^」]+」(カード|モンスター)の効果で/.test(s)) continue;   // 自分のテーマの効果のあとでしか動けない（ウィスカ・ブリッツクリークなど）
+    // 自分のテーマの効果のあとでしか動けない（ウィスカ・ブリッツクリークなど）：ほかの動き出せるカードと重ねて引いたときだけ動ける
+    if (/自分の「[^」]+」(カード|モンスター)の効果で/.test(s)) { if (!best) best = { kind: 0, dep: true, need: null }; continue; }
     const kind = /相手がフィールドのモンスターの効果を発動した/.test(s) ? 2 : /相手が手札・墓地のモンスターの効果を発動した/.test(s) ? 4 : 1;
     // 手札にほかに要るカード（0ターン目は墓地が空なので、「手札・墓地から○○を除外」なども手札に要る）
     const m = s.match(/(このカード以外の|他の|このカード以外の自分の)「([^」]+)」/) || s.match(/手札・墓地から()「([^」]+)」/);
     const cond = { kind, need: m ? m[2] : null };
-    if (!best || (cond.kind === 1 && best.kind !== 1) || (cond.kind === best.kind && !cond.need && best.need)) best = cond;
+    if (!best || best.dep || (cond.kind === 1 && best.kind !== 1) || (cond.kind === best.kind && !cond.need && best.need)) best = cond;
   }
   return best || { kind: 0, need: null };
 }
@@ -1005,7 +1007,7 @@ function opZeroSim(cardIds) {
     const c = DB.byId.get(id);
     if (!c) continue;
     const cond = opZeroCond(c);
-    if (!cond.kind) continue;
+    if (!cond.kind && !cond.dep) continue;
     if (cond.need && !needSets.has(cond.need)) {
       const key = normalizeText(cond.need);
       needSets.set(cond.need, new Set(DB.cards.filter(x => normalizeText(x.name).includes(key) || themeOf(x).some(t => normalizeText(t) === key)).map(x => x.id)));
@@ -1013,10 +1015,11 @@ function opZeroSim(cardIds) {
     info.set(id, cond);
   }
   return (ids, OH) => {
-    let bits = 0;
+    let bits = 0, dep = 0;
     for (let i = 0; i < OH; i++) {
       const cond = info.get(ids[i]);
       if (!cond) continue;
+      if (cond.dep) { dep++; continue; }
       if (cond.need) {
         const set = needSets.get(cond.need);
         let ok = false;
@@ -1025,7 +1028,8 @@ function opZeroSim(cardIds) {
       }
       bits |= cond.kind;
     }
-    return bits & 1 ? 1 : bits;
+    // 重ねて引いた「あとから動けるカード」は、ほかのカードが動き出せたときに妨害をもう1回（16の位に回数）
+    return bits ? (bits & 1 ? 1 : bits) | (Math.min(dep, 3) << 4) : 0;
   };
 }
 // 0ターン展開のカードの名前と、動き出しの条件
@@ -1033,6 +1037,6 @@ function opZeroCondLabel(id) {
   const c = DB.byId.get(id);
   if (!c) return '';
   const k = opZeroCond(c);
-  const what = k.kind === 0 ? '単独では動けない' : k.kind === 2 ? 'こちらが場でモンスター効果を使った時' : k.kind === 4 ? 'こちらが手札・墓地でモンスター効果を使った時' : '条件なし';
+  const what = k.dep ? 'ほかのカードが動いたあとに重ねて動ける' : k.kind === 0 ? '単独では動けない' : k.kind === 2 ? 'こちらが場でモンスター効果を使った時' : k.kind === 4 ? 'こちらが手札・墓地でモンスター効果を使った時' : '条件なし';
   return `${c.name}（${what}${k.kind && k.need ? `・手札にほかの「${k.need}」が要る` : ''}）`;
 }
