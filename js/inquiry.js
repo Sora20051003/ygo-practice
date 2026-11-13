@@ -77,6 +77,21 @@ function openInquiry() {
     toast('GitHubの画面で「Submit new issue」を押すと送られます');
     return false;
   };
+  // そのまま送る（GitHub のアカウント不要）：中継サーバーに置き、GitHub の自動処理が15分ごとに Issue にする
+  const direct = async () => {
+    if (!body.value.trim() && !title.value.trim()) { toast('内容を書いてください'); return false; }
+    let b = text();
+    if (b.length > 12000) b = b.slice(0, 12000) + '
+…（長いので省略しました）';
+    try {
+      await inqSendDirect({ title: issueTitle(), body: b });
+      toast('送りました。ありがとうございます（AIが読んで直します）');
+      return true;   // 送れたら閉じる
+    } catch (e) {
+      toast('送れませんでした（' + (e.message || e) + '）。「内容をコピー」して作った人に送ってください');
+      return false;
+    }
+  };
   const copy = async () => {
     const all = `${issueTitle()}\n\n${text()}`;
     try { await navigator.clipboard.writeText(all); toast('内容をコピーしました。作った人に送ってください'); }
@@ -86,13 +101,36 @@ function openInquiry() {
   showModal({
     title: '✉ 問い合わせ（不具合・要望）',
     body: el('div', { class: 'stack inq' },
-      el('p', { class: 'muted small-note', text: '送った内容はAIが読んで直します（GitHubのIssueとして公開されます。個人情報は書かないでください）。GitHubのアカウントが無いときは「内容をコピー」して作った人に送ってください。' }),
+      el('p', { class: 'muted small-note', text: '「送る」を押すと送られます（アカウントは要りません）。送った内容はAIが読んで直します。内容は公開されるので、個人情報は書かないでください。GitHubのアカウントがある人は「GitHubで送る」でも送れます。' }),
       el('label', { class: 'row' }, '種類 ', kind),
       title, body,
       el('label', { class: 'row inq-check' }, withState, '今の画面の状態（版・端末・デッキ・直前の操作ログ）を付ける'),
       stateBox),
     wide: true,
-    buttons: [{ label: '内容をコピー', onClick: copy }, { label: 'GitHubで送る', primary: true, onClick: send }],
+    buttons: [{ label: '内容をコピー', onClick: () => { copy(); return false; } }, { label: 'GitHubで送る', onClick: send }, { label: '送る', primary: true, onClick: close => { direct().then(ok => { if (ok) close(); }); return false; } }],
   });
   setTimeout(() => body.focus(), 0);
+}
+
+// 中継サーバー（対戦と同じ MQTT の公開サーバー）に、問い合わせを「残すメッセージ」として置く。
+// GitHub Actions（.github/workflows/inquiries.yml）が15分ごとに受け取って Issue にし、中継サーバーから消す。
+// 2つのサーバーのどちらかに置ければ成功
+async function inqSendDirect({ title, body }) {
+  if (typeof mqtt === 'undefined') await loadScript(MQTT_URL);
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const payload = JSON.stringify({ id, title, body, ts: Date.now() });
+  const topic = `${MQTT_BASE}/inq/${id}`;
+  const one = url => new Promise((resolve, reject) => {
+    const c = mqtt.connect(url, { clientId: 'ygo-inq-' + id + '-' + Math.random().toString(36).slice(2, 6), connectTimeout: 8000, reconnectPeriod: 0, clean: true });
+    const timer = setTimeout(() => { try { c.end(true); } catch { /* もう閉じている */ } reject(new Error('時間切れ')); }, 12000);
+    c.on('connect', () => c.publish(topic, payload, { qos: 1, retain: true }, err => {
+      clearTimeout(timer);
+      c.end();
+      if (err) reject(err); else resolve();
+    }));
+    c.on('error', e => { clearTimeout(timer); try { c.end(true); } catch { /* もう閉じている */ } reject(e); });
+  });
+  const results = await Promise.allSettled(MQTT_BROKERS.map(one));
+  if (!results.some(r => r.status === 'fulfilled')) throw new Error('中継サーバーにつながりません');
+  return id;
 }

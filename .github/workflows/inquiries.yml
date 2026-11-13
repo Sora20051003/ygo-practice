@@ -1,0 +1,23 @@
+# アプリの「問い合わせ」で送られたものを、15分ごとに GitHub の Issue にする（.github/scripts/collect_inquiries.py）
+name: 問い合わせをIssueにする
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 受け取る準備
+        run: pip install --quiet paho-mqtt==2.1.0
+      - name: 問い合わせを受け取って Issue にする
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/collect_inquiries.py
