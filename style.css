@@ -1888,3 +1888,8 @@ details.multi.has-ex > summary { color: var(--danger); }
 .op-fill.f4 { background: #8a5cc9; }
 .op-zero td { background: color-mix(in srgb, #8a5cc9 10%, transparent); }
 .op-nodraw { font-size: 13px; color: var(--muted); } .op-nodraw b { color: var(--text); font-size: 15px; } .op-nodraw-table td:not(:first-child), .op-nodraw-table th { text-align: right; }
+
+/* ---------- 問い合わせ ---------- */
+.inq .inq-body { min-height: 120px; resize: vertical; }
+.inq-check { gap: 6px; font-size: 13px; }
+.inq-state { max-height: 200px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 0; }
