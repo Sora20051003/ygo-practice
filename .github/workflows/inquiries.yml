@@ -1,6 +1,6 @@
 # アプリの「問い合わせ」で送られたものを GitHub の Issue にする（.github/scripts/collect_inquiries.py）。
-# 1回の実行で55分つないだまま待ち、届いたらすぐ Issue にする。5分ごとに次の回を予約し、前の回が終わったらすぐ始まるので、
-# いつも受け取れる状態になっている（送ってから数秒〜1分で Issue になる）
+# 1回の実行で55分つないだまま待ち、届いたらすぐ Issue にする。終わるときに次の回を自分で始めるので、
+# いつも受け取れる状態になっている（送ってから数秒で Issue になる）。時間指定（cron）は途切れたときの予備
 name: 問い合わせをIssueにする
 
 on:
@@ -11,6 +11,7 @@ on:
 permissions:
   issues: write
   contents: read
+  actions: write   # 終わるときに次の回を自分で始める（GitHub の時間指定は遅れたり動かなかったりするため）
 
 # 同時に動かすのは1つだけ。前の回が動いているあいだ、次の回は待つ（待つのは1つだけで、ほかは取り消される）
 concurrency:
@@ -30,3 +31,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_SECONDS: "3300"
         run: python3 .github/scripts/collect_inquiries.py
+      - name: 次の回を始める（途切れずに待ち続ける）
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run inquiries.yml -R "${{ github.repository }}" --ref "${{ github.ref_name }}"
