@@ -211,8 +211,8 @@ function opCardSetting(st, id) {
 // そのカード1枚だけを手札にした対戦を作り、発動・通常召喚・特殊召喚を3手先まで試す。
 // デッキのカードが手札・フィールド・墓地へ動いたら（サーチ・デッキからの特殊召喚・墓地へ送るなど）初動とみなす。
 // 通常召喚を使わずに動ければ召喚権なし、通常召喚が必要なら召喚権ありにする
-const OP_JUDGE_V = 1;   // 判別のしかたを変えたら上げる（前の結果を使わない）
-const OP_DEPTH = 3, OP_BRANCH = 6, OP_NODES = 36;
+const OP_JUDGE_V = 2;   // 判別のしかたを変えたら上げる（前の結果を使わない）
+const OP_DEPTH = 3, OP_BRANCH = 6, OP_NODES = 60;
 // 試している間の選択の答え：自分の効果はできるだけ使う
 function opProbeAnswer(m, me) {
   switch (m.type) {
@@ -225,20 +225,36 @@ function opProbeAnswer(m, me) {
     default: return probeAnswer(m, me);
   }
 }
-// 選択に答えながら、自分のメインフェイズの行動選択まで進める
-function opAdvance(t) {
+// 選択に答えながら、自分のメインフェイズの行動選択まで進める。
+// branch のときは、デッキのカードを1枚選ぶ選択（何を除外する・何を墓地へ送るなど）で止めて、選べるカードごとの答えを返す
+function opAdvance(t, branch) {
   let alt = null, k = 0;
   for (let guard = 0; guard < 80 && t.pending && t.pending.type !== MSG.SELECT_IDLECMD && !t.ended; guard++) {
     const p = t.pending;
+    if (branch && !t.retry && p.type === MSG.SELECT_CARD && p.min === 1 && p.max === 1 && p.player === t.me) {
+      const seen = new Set(), ch = [];
+      p.selects.forEach((c, i) => { if (c.location === LOC.DECK && !seen.has(c.code)) { seen.add(c.code); ch.push({ type: RES.SELECT_CARD, indicies: [i] }); } });
+      if (ch.length > 1) return { branch: ch.slice(0, 8) };
+    }
     let res;
-    if (t.retry) { if (!alt) alt = altAnswers(p); res = alt[k++]; if (!res) return false; }
+    if (t.retry) { if (!alt) alt = altAnswers(p); res = alt[k++]; if (!res) return null; }
     else { alt = null; k = 0; res = opProbeAnswer(p, t.me); }
     t.respond(res, false);
   }
-  return !!(t.pending && t.pending.type === MSG.SELECT_IDLECMD);
+  return t.pending && t.pending.type === MSG.SELECT_IDLECMD ? { ok: true } : null;
 }
-// デッキから手札・フィールド・墓地へ動いたカードの数（ドローや、デッキから除外するコストは数えない）
-const opGain = t => t.events.filter(e => e.t === 'move' && e.from.loc === LOC.DECK && e.from.con === t.me && (e.to.loc & (LOC.HAND | LOC.MZONE | LOC.SZONE | LOC.GRAVE))).length;
+
+// デッキから動いたカードの数（ドローは数えない）。
+// デッキから除外したカードは、そのあと効果を発動した・特殊召喚されたときだけ数える（封印の黄金櫃で「除外された場合」の効果を使うデッキなど）
+function opGain(t) {
+  let n = 0;
+  t.events.forEach((e, i) => {
+    if (e.t !== 'move' || e.from.loc !== LOC.DECK || e.from.con !== t.me) return;
+    if (e.to.loc & (LOC.HAND | LOC.MZONE | LOC.SZONE | LOC.GRAVE)) { n++; return; }
+    if (e.to.loc & LOC.REMOVED && t.events.slice(i + 1).some(x => x.code === e.code && (x.t === 'chain' || x.t === 'summon' || (x.t === 'move' && x.from.loc === LOC.REMOVED)))) n++;
+  });
+  return n;
+}
 async function opJudgeCard(base, id) {
   const best = { free: 0, ns: 0 };
   let nodes = 0;
@@ -250,7 +266,8 @@ async function opJudgeCard(base, id) {
     return out.slice(0, OP_BRANCH);
   };
   // hist まで流し直し、行動 act をして、選択に答えて次の行動選択まで進める（act が無ければ最初の状態）
-  const visit = async (hist, act, depth, usedNS) => {
+  // branched：この手順で、もうデッキのカードの選び分けを試した（選び分けは1つの手順で1回だけ）
+  const visit = async (hist, act, depth, usedNS, branched) => {
     if (nodes >= OP_NODES || best.free > 0) return;
     nodes++;
     if (nodes % 3 === 0) await new Promise(r => setTimeout(r, 0));   // 画面が固まらないように
@@ -259,15 +276,21 @@ async function opJudgeCard(base, id) {
     try {
       t.create();
       t.run(hist.slice());
-      if (act) { if (!t.pending || t.pending.type !== MSG.SELECT_IDLECMD) return; t.respond(act, false); }
-      if (!opAdvance(t)) return;
-      const g = opGain(t);
-      if (usedNS) best.ns = Math.max(best.ns, g); else best.free = Math.max(best.free, g);
-      if (depth < OP_DEPTH) next = { hist: t.history(), acts: actionsOf(t.pending) };
+      if (act) { if (!t.pending) return; t.respond(act, false); }
+      const r = opAdvance(t, !branched);
+      if (!r) return;
+      if (r.branch) next = { hist: t.history(), choices: r.branch };
+      else {
+        const g = opGain(t);
+        if (usedNS) best.ns = Math.max(best.ns, g); else best.free = Math.max(best.free, g);
+        if (depth < OP_DEPTH) next = { hist: t.history(), acts: actionsOf(t.pending) };
+      }
     } catch (e) { return; } finally { if (t.h) Engine.lib.destroyDuel(t.h); }
-    if (next) for (const a of next.acts) await visit(next.hist, a, depth + 1, usedNS || a.action === IDLE.SUMMON);
+    if (!next) return;
+    if (next.choices) for (const c of next.choices) await visit(next.hist, c, depth, usedNS, true);
+    else for (const a of next.acts) await visit(next.hist, a, depth + 1, usedNS || a.action === IDLE.SUMMON, branched);
   };
-  await visit([], null, 0, false);
+  await visit([], null, 0, false, false);
   return { v: OP_JUDGE_V, starter: best.free > 0 || best.ns > 0, ns: best.free === 0 && best.ns > 0, gain: Math.max(best.free, best.ns) };
 }
 // まだ判別していないカードを判別して、役割（初動／その他）と召喚権を入れる。自分で役割を変えたカードはそのまま
