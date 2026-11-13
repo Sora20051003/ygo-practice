@@ -395,7 +395,7 @@ class AutoDuel {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
     this.log = []; this.pending = null; this.drawWait = false; this.attacking = null; this.knownSets = new Map(); this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
-    this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
+    this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = []; this.oppAdded = 0; this.oppAddedAsked = 0;
     this.justSummoned = new Set();   // 召喚・特殊召喚したばかりのカードの位置（誘発効果を自動で発動するため）
     this.justMoved = new Set();      // 直前に動いたカードの行き先（墓地へ送られた場合などの誘発を聞くため）
     this.used = new Map();   // このターンに自分が使った効果（カードid → Stringid の番号の集合。'proc'＝自分の方法での特殊召喚）
@@ -482,7 +482,7 @@ class AutoDuel {
     const L = Engine.lib, O = Engine.ocg;
     if (this.h) L.destroyDuel(this.h);
     this.log = []; this.pending = null; this.remoteAsk = null; this.cpuWait = null; this.drawWait = false; this.attacking = null; this.knownSets = new Map(); this.leaving = 0; this.phaseWin = false; this.hint = 0; this.ended = null; this.turn = 0; this.turnPlayer = 0; this.phase = 0;
-    this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = [];
+    this.lp = [8000, 8000]; this.chain = []; this.events = []; this.retries = 0; this.locks = []; this.oppAdded = 0; this.oppAddedAsked = 0;
     this.justSummoned = new Set(); this.justMoved = new Set(); this.used = new Map();
     this.rng = seededRandom(Number(BigInt(this.seed[1]) & 0xffffffffn) || 7);
     const team = { drawCountPerTurn: 1, startingDrawCount: 5, startingLP: 8000 };
@@ -655,6 +655,7 @@ class AutoDuel {
       case MSG.DRAW:
         if (m.player === this.me) this.addLog(`ドロー：${m.drawn.map(d => cardName(d.code & 0x7fffffff)).join('、')}`);
         this.events.push({ t: 'draw', player: m.player, n: m.drawn.length });   // ドローの演出用
+        if (m.player !== this.me) this.oppAdded = (this.oppAdded || 0) + 1;   // 相手がデッキから手札に加えた（ドロール＆ロックバードなどを使える）
         break;
       case MSG.SUMMONING: this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を通常召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
       case MSG.SPSUMMONING: if (this.procCode === m.code && !this.chain.length) { this.markUsed(m.code, 'proc'); this.procCode = 0; } this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を特殊召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
@@ -700,6 +701,7 @@ class AutoDuel {
           this.knownSets.delete(locKey(m.from.controller, m.from.location, m.from.sequence));
           if (code && (m.to.location & (LOC.SZONE | LOC.MZONE)) && !(m.to.position & 5) && m.from.location && m.from.location !== LOC.HAND) this.knownSets.set(locKey(m.to.controller, m.to.location, m.to.sequence), code);
         }
+        if (m.from.location === LOC.DECK && m.to.location === LOC.HAND && m.to.controller !== this.me) this.oppAdded = (this.oppAdded || 0) + 1;
         if (!code || m.from.location === m.to.location && m.from.controller === m.to.controller) break;
         if (m.from.controller !== this.me && m.to.controller !== this.me && !(m.from.location & LOC.ONFIELD_ALL) && !(m.to.location & LOC.ONFIELD_ALL)) break;   // 相手の手札・デッキ・墓地の間の移動（手札調整など）は省く
         if (m.to.location === LOC.HAND && m.from.location === LOC.DECK && m.from.controller === this.me && this.drawing) break;
@@ -817,6 +819,8 @@ function skippable(m, duel) {
   if (m.type === MSG.SELECT_CHAIN && m.forced && m.selects.length) return { type: RES.SELECT_CHAIN, index: 0 };
   if (m.type === MSG.SELECT_CHAIN && !m.forced) {
     if (!m.selects.length) return { type: RES.SELECT_CHAIN, index: null };
+    // 相手がデッキから手札に加えた（ドロー・サーチ）あと：チェーンの有無にかかわらず、自分の手札のカード（ドロール＆ロックバードなど）を使うか聞く。チェーン確認がオフなら聞かない
+    if (duel && duel.oppAdded && duel.oppAdded !== duel.oppAddedAsked && duel.chainMode !== 'off' && m.selects.some(c => c.controller === duel.me && c.location === LOC.HAND)) { duel.oppAddedAsked = duel.oppAdded; return null; }
     if (duel && duel.chain.length && duel.chain[duel.chain.length - 1].code === TOOL_CODE) return { type: RES.SELECT_CHAIN, index: null };   // 練習ツールには聞かない
     const mode = duel ? duel.chainMode : 'always';
     const last = duel && duel.chain[duel.chain.length - 1];
