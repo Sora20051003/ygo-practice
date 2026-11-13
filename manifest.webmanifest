@@ -3,6 +3,7 @@
   "short_name": "遊戯王練習",
   "description": "遊戯王OCGのデッキ作成・一人回し・対戦の練習ができる非公式のファンツール（KONAMIとは関係ありません）",
   "lang": "ja",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",
