@@ -158,9 +158,12 @@ const OP_SRC_NOTE = { md: 'Master Duel Meta の大会上位・高ランクのデ
 // ---------- 環境の手札誘発の使用率（サンプルデッキから数える） ----------
 const opUsageCache = {};
 async function opLoadUsage(fmt, oppHand) {
-  if (opUsageCache[fmt]) return opUsageCache[fmt];
+  if (opUsageCache[fmt] && !opUsageCache[fmt].partial) return opUsageCache[fmt];
   // 0ターン展開のカードを見分けるのに効果の文を使う（まだ読んでいなければ読む）
-  if (DB.cards.filter(c => c.jaText).length < 5000 && typeof loadJaTexts === 'function') { try { await loadJaTexts(() => {}); } catch (e) { /* 文が無くても手札誘発は数えられる */ } }
+  // （起動直後はカードのデータを読み直していて、文がまだ付いていないことがあるので、付くまで少し待つ）
+  const textReady = () => opTextReady();
+  if (!textReady() && typeof loadJaTexts === 'function') { try { await loadJaTexts(() => {}); } catch (e) { /* 文が無くても手札誘発は数えられる */ } }
+  for (let i = 0; i < 100 && !textReady(); i++) await new Promise(r => setTimeout(r, 200));
   // マルチャミー（相手の行動でドローする）も、増殖するGと同じ手札誘発として数える（止める誘発ではない）
   const isTrap = c => c && !OP_NOT_TRAP.includes(c.name) && (/^マルチャミー/.test(c.name) || (typeof isHandTrap === 'function' && isHandTrap(c.id)) || (typeof HANDTRAP_NAMES !== 'undefined' && HANDTRAP_NAMES.includes(c.name)));
   let list = null, from = '', src = 'samples';
@@ -218,7 +221,11 @@ async function opLoadUsage(fmt, oppHand) {
     for (const id of z.cards) idx.set(id, i);
   });
   const oppDecks = list.map(dl => { const a = []; for (const { card, n } of dl) for (let k = 0; k < n; k++) a.push(idx.has(card.id) ? idx.get(card.id) : -1); return a; }).filter(a => a.length >= 20);
-  return (opUsageCache[fmt] = { fmt, from, src, nDecks: oppDecks.length, traps, oppDecks });
+  const res = { fmt, from, src, nDecks: oppDecks.length, traps, oppDecks };
+  res.partial = !textReady();   // 文が無いまま数えたものは、次に開いたときに数え直す
+  if (res.partial) opStopCache.clear();
+  opUsageCache[fmt] = res;
+  return res;
 }
 // 相手のターンに手札から動き出せるカードか（効果の文から判断。手札誘発は別に数える）
 // 1つの効果（①②③…）の中に、相手のターンに使える・手札にあるこのカードから・特殊召喚する、の3つがそろっているか
@@ -229,7 +236,7 @@ const OP_ZERO_HAND = /このカードを手札から|手札のこのカード|�
 const opNeedsOwnField = s => /自分フィールドの/.test(s) || /(^|[^手])(自分)?フィールドに[^。]{0,30}存在する場合/.test(s.replace(/相手フィールドに[^。]{0,30}存在する場合/g, ''));
 function opIsZeroTurn(c) {
   if (!c || !(c.type & T.MONSTER) || (c.type & EXTRA_MASK)) return false;
-  return String(c.jaText || '').split(/[①②③④⑤⑥]/).some(s => OP_ZERO_TIMING.test(s) && OP_ZERO_HAND.test(s) && /特殊召喚/.test(s) && !opNeedsOwnField(s));
+  return opText(c).split(/[①②③④⑤⑥]/).some(s => OP_ZERO_TIMING.test(s) && OP_ZERO_HAND.test(s) && /特殊召喚/.test(s) && !opNeedsOwnField(s));
 }
 // そのテーマに、相手のターンに使える妨害（無効・破壊・除外・バウンスなど）があるか（効果の文から判断）。
 // 無いテーマの0ターン展開は、最初から「数えない」にする
@@ -240,9 +247,23 @@ function opThemeStops(th) {
   if (opStopCache.has(th)) return opStopCache.get(th);
   // kinds：neg＝発動・効果を無効にする／mon＝モンスターを除く（破壊・除外・バウンスなど）／st＝魔法・罠を除く／any＝カードの種類を問わず除く
   const kinds = new Set(), by = [];
-  for (const c of DB.cards) {
-    if (!c.jaText || c.anime || !(c.cid || c.pre)) continue;
-    if (!(typeof decThemesOf === 'function' ? decThemesOf(c) : []).includes(th) && c.name !== th) continue;
+  const cards = DB.cards.filter(c => c.jaText && !c.anime && (c.cid || c.pre) && ((typeof decThemesOf === 'function' ? decThemesOf(c) : []).includes(th) || c.name === th));
+  // 0ターン目に場に出せる妨害だけ数える：
+  //  ・相手ターンに手札から特殊召喚できるカード（0ターン展開のカード）自身の効果
+  //  ・EXデッキのモンスターは、相手ターンにS・X・リンク・融合召喚できる効果がテーマにあるときだけ
+  //  ・魔法・罠は、手札から発動できるものだけ（伏せる時間が無い）
+  // 相手のターンにも使える効果：相手ターンと書いてあるもの、または「〜場合／〜時」の誘発（自分メインフェイズだけのものは除く）
+  const anyTurn = s => !/自分メインフェイズ/.test(s) && (OP_OPP_TIMING.test(s) || /(場合|時)(に発動できる|に発動する|、)/.test(s));
+  const segsOf = c => c.jaText.split(/[①②③④⑤⑥]/);
+  const oppExtra = cards.some(c => segsOf(c).some(s => anyTurn(s) && /(シンクロ|エクシーズ|リンク|融合|Ｓ|Ｘ)召喚(する|を行う)/.test(s)));
+  // 0ターン展開のカードや誘発で、手札・デッキ・墓地からモンスターを特殊召喚できれば、テーマのメインデッキのモンスターも出せる
+  const oppMain = cards.some(c => !(c.type & EXTRA_MASK) && segsOf(c).some(s => anyTurn(s) && /(手札|デッキ|墓地)から[^。]{0,40}モンスター[^。]{0,20}特殊召喚/.test(s)));
+  const reachable = c => {
+    if (c.type & T.MONSTER) return c.type & EXTRA_MASK ? oppExtra : opIsZeroTurn(c) || oppMain;
+    return /手札から発動できる/.test(c.jaText);
+  };
+  for (const c of cards) {
+    if (!reachable(c)) continue;
     // 効果ごと（①②③…）に、相手のターンに使えて妨害になるものを探す
     for (const s of c.jaText.split(/[①②③④⑤⑥]/)) {
       if (!OP_OPP_TIMING.test(s) || !OP_DISRUPT.test(s)) continue;
@@ -263,7 +284,7 @@ function opThemeStops(th) {
 }
 // その0ターン展開の妨害で、このカード（初動・展開札）が止まるか。
 // 無効は何でも止まる。モンスターを除く妨害はモンスター、魔法・罠を除く妨害は永続・フィールド・装備などの残る魔法・罠だけ止まる
-const OP_ZERO_V = 1;
+const OP_ZERO_V = 2;
 function opZeroHits(stop, c) {
   if (!stop) return false;
   const k = new Set(stop.kinds);
@@ -692,6 +713,12 @@ function openOpeningRate() {
           if (st.opp.src !== src || st.opp.mode !== 'usage') return;
           if (!r || !r.oppDecks.length) { oppBox.append(el('p', { class: 'warn', text: 'この環境のデッキのデータがありません。「自分で決める」を使ってください。' })); return; }
           renderOpp(); renderCards();
+          // 効果の文がまだ付いていなかったときは、付いてから数え直す（0ターン展開の見分けに使う）
+          if (r.partial) (async () => {
+            for (let i = 0; i < 300 && !opTextReady(); i++) await new Promise(res => setTimeout(res, 500));
+            if (st.opp.src !== src || st.opp.mode !== 'usage') return;
+            opStopCache.clear(); await opLoadUsage(src); renderOpp(); renderCards();
+          })();
         }).catch(e => oppBox.append(el('p', { class: 'warn', text: '読み込めませんでした：' + e.message })));
         return;
       }
@@ -856,7 +883,11 @@ function opStopKinds(stop) {
 }
 // 0ターン展開の動き出し（判断に使った効果の文）
 function opZeroWhy(c) {
-  const segs = String(c.jaText || '').split(/(?=[①②③④⑤⑥])/);
+  const segs = opText(c).split(/(?=[①②③④⑤⑥])/);
   const s = segs.find(x => OP_ZERO_TIMING.test(x) && OP_ZERO_HAND.test(x) && /特殊召喚/.test(x) && !opNeedsOwnField(x));
   return s ? `${c.name} ${s.replace(/\s+/g, '').slice(0, 90)}` : '';
 }
+// カードの日本語の文（カードのデータを読み直したあとでも、今のデータの文を使う）
+function opText(c) { return String(((DB.byId.get(c.id) || {}).jaText) || c.jaText || ''); }
+// 公式カードの日本語の文が付いているか（アニメのカードは最初から文があるので数えない）
+function opTextReady() { let n = 0; for (const c of DB.cards) if (c.cid && c.jaText && ++n > 8000) return true; return false; }
