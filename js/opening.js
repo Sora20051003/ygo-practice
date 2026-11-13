@@ -192,7 +192,8 @@ async function opLoadUsage(fmt, oppHand) {
     const s = stat.get(card.id) || { card, decks: 0, copies: 0 };
     s.decks++; s.copies += n; stat.set(card.id, s);
   }
-  const traps = [...stat.values()].filter(s => s.decks / list.length >= 0.02).sort((a, b) => b.decks - a.decks).slice(0, 24)
+  // 採用率が低くても出す（1つのデッキでも入っていれば）。誘発は20種類まで、0ターン展開と合わせて30まで（計算の都合）
+  const traps = [...stat.values()].sort((a, b) => b.decks - a.decks).slice(0, 20)
     .map(s => ({ id: 'c' + s.card.id, cardId: s.card.id, name: s.card.name, rate: s.decks / list.length, avg: s.copies / s.decks }));
   const idx = new Map(traps.map((t, i) => [t.cardId, i]));
   // 0ターン展開（エルフェンノーツ・キラーチューンなど）：相手のターン（こちらの先攻1ターン目）に手札から動き出せるカード。
@@ -209,7 +210,7 @@ async function opLoadUsage(fmt, oppHand) {
     }
     for (const [th, n] of seen) { const z = zero.get(th); z.decks++; z.copies += n; }
   }
-  [...zero].filter(([, z]) => z.decks / list.length >= 0.02).sort((a, b) => b[1].decks - a[1].decks).slice(0, 6).forEach(([th, z]) => {
+  [...zero].sort((a, b) => b[1].decks - a[1].decks).slice(0, 30 - traps.length).forEach(([th, z]) => {
     const i = traps.length;
     traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, stopBy: opThemeStops(th), cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
     for (const id of z.cards) idx.set(id, i);
