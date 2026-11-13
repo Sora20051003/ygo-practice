@@ -68,6 +68,19 @@ def parse_list(page):
     return out
 
 
+SCRIPT = "https://raw.githubusercontent.com/ProjectIgnis/CardScripts/master/pre-release/c{}.lua"
+
+
+# EDOPro の発売前のスクリプトの1行目（「--日本語の名前」）。日本語でなければ None
+def script_name(cid):
+    try:
+        first = fetch(SCRIPT.format(cid), 30).decode("utf-8", "replace").split("\n", 1)[0]
+    except Exception:
+        return None
+    m = re.match(r"--\s*(.+?)\s*$", first)
+    return m.group(1) if m and re.search(r"[^\x00-\x7f]", m.group(1)) else None
+
+
 def race_ja(race):
     for i, n in enumerate(RACES):
         if race == 1 << i:
@@ -143,6 +156,12 @@ def main():
             key = re.sub(r"\s", "", name)
             # アプリのカードデータにもう入っているカード（名前・英語名・新しいカードで値が同じモンスター）は入れない
             same = have.get(key) or have_en.get((en or "").lower())
+            # スクリプトの1行目に書いてある日本語の名前でも見分ける（収録リストから日本語の名前が取れなかったカード）
+            lua_ja = None
+            if not same:
+                lua_ja = script_name(cid)
+                if lua_ja:
+                    same = have.get(re.sub(r"\s", "", lua_ja))
             if not same and not ja and typ & TYPE_MONSTER:   # 日本語の名前が分かったカードは、名前だけで見分ける
                 s = stats.get((typ, lv, race, attr, atk, df)) or []
                 same = s[0] if len(s) == 1 else None
@@ -150,6 +169,8 @@ def main():
                 if same != cid:
                     pre_map[same] = cid   # アプリのデータでは別の仮の番号：効果の処理はこちらの番号のスクリプトを使う
                 continue
+            if not ja and lua_ja:
+                name = lua_ja   # 日本語の名前はスクリプトの1行目から（効果文は英語のまま）
             cards.append([cid, typ, lv, race, attr, atk, df, name, ja["ruby"] if ja else "", en,
                           ja["text"] if ja else desc, code.upper(), 0 if ja else 1])
     cards.sort()

@@ -77,11 +77,32 @@ async function loadSystemStrings() {
 }
 
 // エンジン本体と共通スクリプトを読み込む（2回目以降は何もしない）
+// エンジン（ocgcore-wasm）を読み込む。
+// 「伏せたカードを混ぜる」メッセージ（MSG_SHUFFLE_SET_CARD＝36）の読み方がエンジン本体と合っておらず、
+// さまようミイラ・砂塵の大ハリケーンなどで止まってしまうので、その部分だけ直してから読み込む
+async function importEngine() {
+  try {
+    const src = await (await fetch(ENGINE_URL)).text();
+    const base = ENGINE_URL.replace(/[^/]*$/, '');
+    const bad = 'case 36:return{type:t,location:e.u8(),cards:Array.from({length:e.u32()},()=>({from:p(e),to:p(e)}))};';
+    if (!src.includes(bad)) return await import(ENGINE_URL);
+    // 場所（1バイト）・枚数（1バイト）のあとに、カードの位置（10バイトずつ）が残りの長さの分だけ並ぶ
+    const good = 'case 36:{let l=e.u8(),n=e.u8(),a=[];for(;e.avail>=10;)a.push(p(e));return{type:t,location:l,count:n,cards:a.slice(0,n).map(x=>({from:x,to:x}))}}';
+    // 同じフォルダのファイルの読み込み（import … from "./…"・import("./…")）は、元の場所を指すように書き換える
+    const fixed = src.split(bad).join(good).replace(/(from\s*|import\s*\(\s*|import\s*)(["'])\.\//g, `$1$2${base}`);
+    const url = URL.createObjectURL(new Blob([fixed], { type: 'text/javascript' }));
+    return await import(url);
+  } catch (e) {
+    console.warn('エンジンの修正版を読み込めませんでした', e);
+    return import(ENGINE_URL);
+  }
+}
+
 function engineLoad(onStatus) {
   if (Engine.loading) return Engine.loading;
   Engine.loading = (async () => {
     onStatus && onStatus('自動処理の準備中…（ルール処理を読み込んでいます）');
-    Engine.ocg = await import(ENGINE_URL);
+    Engine.ocg = await importEngine();
     Engine.lib = await Engine.ocg.default({ sync: true });
     // EDOPro のカードデータ（カテゴリ番号が YGOPro と違うので、エンジンにはこちらを渡す。毎日作り直されるので日付を付けて読む）
     if (typeof EDO_CARDS === 'undefined') {
@@ -1013,8 +1034,9 @@ function autoAnswer(m) {
     case MSG.SELECT_SUM: { const ok = sumAnswers(m, 1)[0]; return { type: RES.SELECT_SUM, indicies: ok || [...Array(Math.max(m.min, 1)).keys()] }; }
     case MSG.ANNOUNCE_RACE: case MSG.ANNOUNCE_ATTRIB: return altAnswers(m)[0] || null;
     case MSG.SORT_CARD: case MSG.SORT_CHAIN: return { type: RES.SORT_CARD, order: null };
-    case MSG.SELECT_COUNTER: return { type: RES.SELECT_COUNTER, counters: m.cards.map((c, i) => (i === 0 ? m.count : 0)) };
-    case MSG.ANNOUNCE_NUMBER: return { type: RES.ANNOUNCE_NUMBER, value: 0 };
+    case MSG.SELECT_COUNTER: return counterGreedy(m);
+    case MSG.ANNOUNCE_NUMBER: return { type: RES.ANNOUNCE_NUMBER, value: 0 };   // 答えは「何番目の数か」：1つ目
+    case MSG.ANNOUNCE_CARD: return altAnswers(m)[0] || null;   // 宣言できるカード名の1つ目
     default: return skippable(m);
   }
 }
@@ -1053,6 +1075,11 @@ function sumAnswers(m, cap = 300) {
   }
   return out;
 }
+// カウンターを取り除く：前のカードから順に、乗っている数だけ取る（1枚に足りないときも合計が合うように）
+function counterGreedy(m) {
+  let left = m.count;
+  return { type: RES.SELECT_COUNTER, counters: (m.cards || []).map(c => { const k = Math.min(left, c.count != null ? c.count : left); left -= k; return k; }) };
+}
 // 自動の答えが通らなかったときに、順に試す別の答え
 function altAnswers(m) {
   const list = [];
@@ -1065,6 +1092,8 @@ function altAnswers(m) {
     case MSG.SELECT_BATTLECMD:
       if (m.to_ep) push({ type: RES.SELECT_BATTLECMD, action: BATTLE.TO_EP, index: null });
       if (m.to_m2) push({ type: RES.SELECT_BATTLECMD, action: BATTLE.TO_M2, index: null });
+      // 「攻撃可能な場合は攻撃しなければならない」モンスター（カラクリなど）がいると、フェイズを進められない：攻撃する
+      (m.attacks || []).forEach((_, i) => push({ type: RES.SELECT_BATTLECMD, action: BATTLE.ATTACK, index: i }));
       break;
     case MSG.SELECT_CHAIN:
       if (!m.forced) push({ type: RES.SELECT_CHAIN, index: null });
@@ -1090,7 +1119,7 @@ function altAnswers(m) {
       for (const idx of idxCombos(free.length, m.count || 1, m.count || 1)) push({ type: t, places: idx.map(i => free[i]) });
       break;
     }
-    case MSG.ANNOUNCE_NUMBER: (m.options || []).forEach(o => push({ type: RES.ANNOUNCE_NUMBER, value: Number(o) })); break;
+    case MSG.ANNOUNCE_NUMBER: (m.options || []).forEach((_, i) => push({ type: RES.ANNOUNCE_NUMBER, value: i })); break;   // 何番目の数か
     case MSG.ANNOUNCE_RACE: case MSG.ANNOUNCE_ATTRIB: {
       const avail = BigInt(m.available || 0), bits = [];
       for (let i = 0; i < 40; i++) if (avail & (1n << BigInt(i))) bits.push(1n << BigInt(i));
@@ -1109,6 +1138,11 @@ function altAnswers(m) {
       break;
     }
     case MSG.SORT_CARD: case MSG.SORT_CHAIN: push({ type: RES.SORT_CARD, order: null }); break;
+    case MSG.SELECT_COUNTER:
+      // カウンターを取り除くカードの組み合わせ：1枚から全部取る → 前から順に取れるだけ取る
+      (m.cards || []).forEach((_, i) => push({ type: RES.SELECT_COUNTER, counters: m.cards.map((c, j) => (j === i ? m.count : 0)) }));
+      push(counterGreedy(m));
+      break;
     case MSG.ROCK_PAPER_SCISSORS: [1, 2, 3].forEach(v => push({ type: RES.ROCK_PAPER_SCISSORS, value: v })); break;
   }
   return list;

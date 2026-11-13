@@ -1148,8 +1148,9 @@ function openPrompt() {
         [{ label: 'この順番でよい', primary: true, onClick: () => { answer({ type: RES.SORT_CARD, order: null }); return false; } }]);
       break;
     case MSG.ANNOUNCE_NUMBER:
-      promptModal(el('div', { class: 'row wrap' }, p.options.map(o =>
-        el('button', { class: 'btn', text: String(Number(o)), onclick: () => answer({ type: RES.ANNOUNCE_NUMBER, value: Number(o) }) }))));
+      // エンジンへの答えは「何番目の数か」（数そのものではない）
+      promptModal(el('div', { class: 'row wrap' }, p.options.map((o, i) =>
+        el('button', { class: 'btn', text: String(Number(o)), onclick: () => answer({ type: RES.ANNOUNCE_NUMBER, value: i }) }))));
       break;
     case MSG.ANNOUNCE_RACE: case MSG.ANNOUNCE_ATTRIB: {
       const isRace = p.type === MSG.ANNOUNCE_RACE;
