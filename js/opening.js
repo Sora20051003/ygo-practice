@@ -160,15 +160,28 @@ async function opLoadUsage(fmt, oppHand) {
   if (opUsageCache[fmt]) return opUsageCache[fmt];
   // 0ターン展開のカードを見分けるのに効果の文を使う（まだ読んでいなければ読む）
   if (!DB.textMeta && typeof loadJaTexts === 'function') { try { await loadJaTexts(() => {}); } catch (e) { /* 文が無くても手札誘発は数えられる */ } }
-  const data = await loadSamples(fmt);
-  const periods = data && data.periods ? Object.keys(data.periods).filter(k => data.periods[k].length).sort() : [];
-  if (!periods.length) return null;
-  // 一番新しいリストの期間のデッキ（40個より少なければ1つ前の期間も足す）
-  let decks = data.periods[periods[periods.length - 1]], from = periods[periods.length - 1];
-  if (decks.length < 40 && periods.length > 1) { decks = [...data.periods[periods[periods.length - 2]], ...decks]; from = periods[periods.length - 2]; }
   // マルチャミー（相手の行動でドローする）も、増殖するGと同じ手札誘発として数える（止める誘発ではない）
   const isTrap = c => c && !OP_NOT_TRAP.includes(c.name) && (/^マルチャミー/.test(c.name) || (typeof isHandTrap === 'function' && isHandTrap(c.id)) || (typeof HANDTRAP_NAMES !== 'undefined' && HANDTRAP_NAMES.includes(c.name)));
-  const list = decks.map(d => (d.m || []).map(([v, n, en]) => ({ card: sampleCard(v) || (en ? sampleCard(en) : null), n: n | 0 })).filter(x => x.card && x.n > 0));
+  let list = null, from = '', src = 'samples';
+  // マスターデュエル：今の期間の大会・ランク戦のデッキ全部（data/md-usage.js。毎日自動で更新）
+  if (fmt === 'md') {
+    if (typeof MD_USAGE === 'undefined') { try { await loadScript('data/md-usage.js?d=' + new Date().toISOString().slice(0, 10)); } catch (e) { /* 無ければサンプルデッキで数える */ } }
+    if (typeof MD_USAGE !== 'undefined' && MD_USAGE.n >= 40) {
+      const table = MD_USAGE.cards.map(v => sampleCard(v));
+      list = MD_USAGE.decks.map(d => { const a = []; for (let i = 2; i + 1 < d.length; i += 2) if (table[d[i]]) a.push({ card: table[d[i]], n: d[i + 1] | 0 }); return a; });
+      from = MD_USAGE.from; src = 'all';
+    }
+  }
+  if (!list) {
+    const data = await loadSamples(fmt);
+    const periods = data && data.periods ? Object.keys(data.periods).filter(k => data.periods[k].length).sort() : [];
+    if (!periods.length) return null;
+    // 一番新しいリストの期間のデッキ（40個より少なければ1つ前の期間も足す）
+    let decks = data.periods[periods[periods.length - 1]];
+    from = periods[periods.length - 1];
+    if (decks.length < 40 && periods.length > 1) { decks = [...data.periods[periods[periods.length - 2]], ...decks]; from = periods[periods.length - 2]; }
+    list = decks.map(d => (d.m || []).map(([v, n, en]) => ({ card: sampleCard(v) || (en ? sampleCard(en) : null), n: n | 0 })).filter(x => x.card && x.n > 0));
+  }
   const stat = new Map();
   for (const dl of list) for (const { card, n } of dl) {
     if (!isTrap(card)) continue;
@@ -198,7 +211,7 @@ async function opLoadUsage(fmt, oppHand) {
     for (const id of z.cards) idx.set(id, i);
   });
   const oppDecks = list.map(dl => { const a = []; for (const { card, n } of dl) for (let k = 0; k < n; k++) a.push(idx.has(card.id) ? idx.get(card.id) : -1); return a; }).filter(a => a.length >= 20);
-  return (opUsageCache[fmt] = { fmt, from, nDecks: oppDecks.length, traps, oppDecks });
+  return (opUsageCache[fmt] = { fmt, from, src, nDecks: oppDecks.length, traps, oppDecks });
 }
 // 相手のターンに手札から動き出せるカードか（効果の文から判断。手札誘発は別に数える）
 const OP_ZERO_RE = /(相手メインフェイズ|相手ターン|自分・相手ターン|お互いのメインフェイズ|相手の(メインフェイズ|ターン))[^①②③④⑤]{0,120}?(手札から|手札の|このカードを特殊召喚)|(手札に存在する(場合|限り))[^①②③④⑤]{0,60}?(相手メインフェイズ|相手ターン|自分・相手ターン|お互いのメインフェイズ)/;
@@ -624,7 +637,7 @@ function openOpeningRate() {
       const num = el('input', { type: 'number', class: 'op-prio', value: H, min: 0, max: 10 });
       num.onchange = () => { st.opp.handSize = Math.max(0, parseInt(num.value, 10) || 0); save(); renderOpp(); };
       oppBox.replaceChildren(modeBar,
-        el('p', { class: 'muted small-note', text: `${OP_SRC_NOTE[u.fmt]} ${u.nDecks}個（${u.from} からのリスト）で数えた採用率です。計算では毎回このデッキの中から1つを相手に選び、そこから初手を配ります（その誘発を入れていないデッキや、入れていても引かない場合も確率に入ります）。` }),
+        el('p', { class: 'muted small-note', text: `${u.src === 'all' ? 'Master Duel Meta に載った大会・ランク戦（マスター）のデッキ全部' : OP_SRC_NOTE[u.fmt]} ${u.nDecks}個（${u.from} からのリスト）で数えた採用率です。計算では毎回このデッキの中から1つを相手に選び、そこから初手を配ります（その誘発を入れていないデッキや、入れていても引かない場合も確率に入ります）。` }),
         el('div', { class: 'op-row' },
           el('label', {}, '相手の手札 ', num, ' 枚'),
           el('span', { class: 'muted', text: `相手の初手に下の誘発・0ターン展開が1枚以上ある確率 ${pct(opUsageOpen(u, H, -1))}` })),

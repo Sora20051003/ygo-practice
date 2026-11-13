@@ -41,6 +41,8 @@ jobs:
         env:
           FULL: ${{ inputs.full }}
         run: python3 .github/scripts/build_md_samples.py || echo "サンプルデッキの更新に失敗"
+      - name: マスターデュエルの使用率（今の期間の大会・ランク戦のデッキ全部）を作り直す（失敗しても、ほかの更新は続ける）
+        run: python3 .github/scripts/build_md_usage.py || echo "使用率の更新に失敗"
       - name: OCG のサンプルデッキを作り直す・海外（TCG）のサンプルデッキも作る（失敗しても、ほかの更新は続ける）
         env:
           FULL: ${{ inputs.full }}
