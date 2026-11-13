@@ -68,6 +68,32 @@ const OpSim = (() => {
     }
     return false;
   }
+  // 貫通：相手が「止める誘発」を n 枚持っていて、止められる初動には必ず撃つとしたとき、それでも展開を続けられるか。
+  // 誘発ケアは、その初動を止める誘発のどれかをケアできれば無効にできる（相手の誘発も1枚使ったことになる）
+  function pierce(m, hc0, n, nsInit, s) {
+    const hc = s.hc2, used = s.used;
+    hc.set(hc0);
+    let ns = nsInit, left = n;
+    for (let i = 0; i < m.routes.length; i++) {
+      const nsUsed = tryAssign(m, m.routes[i], hc, ns, used);
+      if (nsUsed < 0) continue;
+      let vm = 0;
+      for (let k = 0; k < (used.main ?? used.length); k++) vm |= m.cards[used[k]].vuln;
+      let stopped = false;
+      while (left > 0 && vm) {
+        let care = -1;
+        for (const c of m.careIdx) if (hc[c] > 0 && (m.cards[c].counter & vm)) { care = c; break; }
+        left--;
+        if (care >= 0) { hc[care]--; continue; }   // ケア札で無効にした
+        stopped = true; break;
+      }
+      if (!stopped) return true;
+      for (const c of used) hc[c]--;
+      ns -= nsUsed;
+      i--;
+    }
+    return false;
+  }
   function simulate(m, handSize, iters) {
     const C = m.cards.length, T = m.T;
     const deck = Int32Array.from(m.deck), N = deck.length, H = Math.min(handSize, N);
@@ -77,7 +103,7 @@ const OpSim = (() => {
     const oppDecks = m.oppDecks ? m.oppDecks.map(d => Int32Array.from(d)) : null;
     const hc = new Int32Array(C), opp = new Int32Array(T), single = new Int32Array(T);
     const s = { hc2: new Int32Array(C), opp2: new Int32Array(T), used: [] }, used = [];
-    const res = { iters, raw: 0, nsok: 0, real: 0, realInfNs: 0, withHT: 0, perTrap: new Array(T).fill(0) };
+    const res = { iters, raw: 0, nsok: 0, real: 0, realInfNs: 0, withHT: 0, pierce1: 0, pierce2: 0, perTrap: new Array(T).fill(0) };
     for (let it = 0; it < iters; it++) {
       hc.fill(0);
       for (let i = 0; i < H; i++) {
@@ -99,6 +125,8 @@ const OpSim = (() => {
       res.nsok++;
       if (resolve(m, hc, opp, 99, s)) res.realInfNs++;
       if (resolve(m, hc, opp, 1, s)) res.real++;
+      if (pierce(m, hc, 1, 1, s)) res.pierce1++;
+      if (pierce(m, hc, 2, 1, s)) res.pierce2++;
       for (let t = 0; t < T; t++) { single.fill(0); single[t] = 1; if (resolve(m, hc, single, 1, s)) res.perTrap[t]++; }
       let ht = 0;
       for (const k of m.handtrapIdx) ht += hc[k];
@@ -592,6 +620,11 @@ function openOpeningRate() {
         el('h4', { text: title }),
         el('div', { class: 'muted', text: '実質初動率' }), el('div', { class: 'op-big', text: pct(real) }), el('div', { class: 'muted small-note', text: `誤差 ±${pct(1.96 * se, 2)}` }),
         bar('初動率', raw, 'f1'), bar('召喚権を考慮', nsok, 'f2'), bar('実質初動率', real, 'f3'),
+        // 貫通率：初動がある手札の中で、相手が止める誘発を必ず撃ってきても展開を続けられる率
+        el('div', { class: 'op-pierce' },
+          el('div', { class: 'op-pierce-head' }, el('b', { text: '貫通率' }), el('span', { class: 'muted', text: '（初動を止められても、ほかの初動で展開を続けられる率）' })),
+          ...[[1, r.pierce1], [2, r.pierce2]].map(([k, v]) => bar(`誘発${k}枚を受けても`, r.nsok ? v / r.nsok : 0, 'f4')),
+          el('div', { class: 'muted small-note', text: `初動がある手札の中での率です（相手は止められる初動に必ず撃つ。誘発ケアで無効にできるときは使う）。全部の手札の中では 誘発1枚 ${pct(r.pierce1 / n)}・2枚 ${pct(r.pierce2 / n)}。` })),
         el('ul', { class: 'op-loss' },
           el('li', {}, '事故（初動なし）：', el('b', { text: pct(1 - raw) })),
           el('li', {}, '召喚権が足りない組み合わせしかない：', el('b', { text: pct(raw - nsok) })),
@@ -643,6 +676,7 @@ function openOpeningRate() {
         el('li', { text: '初動率：初動のカード、または組み合わせ初動がそろっている手札の割合（召喚権は考えない）。' }),
         el('li', { text: '召喚権を考慮：通常召喚1回で始められる初動がある割合。' }),
         el('li', { text: '実質初動率：相手にもデッキから手札を配り、止められずに展開できた割合（「環境の使用率から」では、毎回大会のデッキを1つ選んで相手のデッキにします）。初動を優先度の順に使い、相手は止められる誘発があれば撃ち（ケアされないものから）、自分はケア札があれば無効にします。止められた初動のカードと召喚権は失い、残りで次の初動を試します。' }),
+        el('li', { text: '貫通率：初動がある手札で、相手が「止める誘発」を1枚（2枚）持っていて、止められる初動には必ず撃ってくるとしたときに、展開を続けられる割合。止められた初動のカードと召喚権は失い、残りの初動で動きます。誘発ケアは、その初動を止める誘発のどれかをケアできるカードなら使います。' }),
         el('li', { text: '分かりやすさ優先の近似です。止まった初動から一部のリソースが残る場合や、召喚権を増やすカード、増殖するGを受けて展開をやめる判断などは考えていません。' }))));
   renderCount(); renderCards(); renderCombos(); renderOpp();
   // 初動の自動判別（まだ判別していないカードだけ。終わったら役割を入れ直す）

@@ -1882,3 +1882,7 @@ details.multi.has-ex > summary { color: var(--danger); }
 .op-combo-sum ul { margin: 4px 0 0; padding-left: 18px; }
 .op-results .op-starters { margin-top: 10px; }
 .op-ns-mark.cost { background: #c98a1b; }
+.op-pierce { margin: 8px 0; padding: 6px 8px; border: 1px dashed var(--line); border-radius: 8px; }
+.op-pierce-head { font-size: 13px; margin-bottom: 2px; }
+.op-pierce .op-bar { grid-template-columns: 9.5em 1fr 4em; }
+.op-fill.f4 { background: #8a5cc9; }
