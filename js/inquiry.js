@@ -77,7 +77,7 @@ function openInquiry() {
     toast('GitHubの画面で「Submit new issue」を押すと送られます');
     return false;
   };
-  // そのまま送る（GitHub のアカウント不要）：中継サーバーに置き、GitHub の自動処理が1分くらいで Issue にする
+  // そのまま送る（GitHub のアカウント不要）：中継サーバーに置き、GitHub の自動処理が数秒〜1分で Issue にする
   const direct = async () => {
     if (!body.value.trim() && !title.value.trim()) { toast('内容を書いてください'); return false; }
     let b = text();
@@ -112,7 +112,7 @@ function openInquiry() {
 }
 
 // 中継サーバー（対戦と同じ MQTT の公開サーバー）に、問い合わせを「残すメッセージ」として置く。
-// GitHub Actions（.github/workflows/inquiries.yml）がつないだまま待っていて、届いたら1分くらいで Issue にし、中継サーバーから消す。
+// GitHub Actions（.github/workflows/inquiries.yml）がつないだまま待っていて、届いたら数秒〜1分で Issue にし、中継サーバーから消す。
 // 2つのサーバーのどちらかに置ければ成功
 async function inqSendDirect({ title, body }) {
   if (typeof mqtt === 'undefined') await loadScript(MQTT_URL);

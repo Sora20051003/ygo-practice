@@ -1,14 +1,14 @@
 # アプリの「問い合わせ」で送られたものを、GitHub の Issue にする（GitHub Actions で5分ごとに実行）。
 # アプリは問い合わせを中継サーバー（対戦と同じ MQTT の公開サーバー）に「残すメッセージ（retain）」として置く。
-# ここではつないだまま約4分半待ち、届いたもの（前から残っていたもの・新しく届いたもの）をすぐ Issue にして、中継サーバーから消す。
-# 5分ごとの実行とつなげて、送ってから1分くらいで Issue になる。送る人は GitHub のアカウントが要らない。
-import json, queue, subprocess, time
+# ここではつないだまま約55分待ち、届いたもの（前から残っていたもの・新しく届いたもの）をすぐ Issue にして、中継サーバーから消す。
+# 終わったら次の回がすぐ始まる（いつもだれかが待っている）ので、送ってから数秒〜1分で Issue になる。送る人は GitHub のアカウントが要らない。
+import json, os, queue, subprocess, time
 import paho.mqtt.client as mqtt
 
 BASE = 'ygo-practice-sora20051003/v1'
 TOPIC = BASE + '/inq/+'
 BROKERS = [('broker.emqx.io', 1883), ('broker.hivemq.com', 1883)]
-RUN_SECONDS = 270   # 1回の実行でつないでおく時間（次の実行の前に終わるように）
+RUN_SECONDS = int(os.environ.get('RUN_SECONDS', '3300'))   # 1回の実行でつないでおく時間（55分。終わったら次の回がすぐ始まる）
 
 inbox = queue.Queue()
 done_ids = set()
