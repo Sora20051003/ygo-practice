@@ -210,7 +210,8 @@ async function opLoadUsage(fmt, oppHand) {
     }
     for (const [th, n] of seen) { const z = zero.get(th); z.decks++; z.copies += n; }
   }
-  [...zero].sort((a, b) => b[1].decks - a[1].decks).slice(0, 30 - traps.length).forEach(([th, z]) => {
+  // 妨害になる効果が見つからないテーマは出さない（数えない）
+  [...zero].filter(([th]) => opThemeStops(th)).sort((a, b) => b[1].decks - a[1].decks).slice(0, 30 - traps.length).forEach(([th, z]) => {
     const i = traps.length;
     traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, stopBy: opThemeStops(th), cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
     for (const id of z.cards) idx.set(id, i);
@@ -694,7 +695,7 @@ function openOpeningRate() {
         el('div', { class: 'op-row' },
           el('label', {}, '相手の手札 ', num, ' 枚'),
           el('span', { class: 'muted', text: `相手の初手に下の誘発・0ターン展開が1枚以上ある確率 ${pct(opUsageOpen(u, H, -1))}` })),
-        el('p', { class: 'muted small-note', text: '「0ターン展開」は、エルフェンノーツ・キラーチューンなどの、相手のターン（こちらの先攻1ターン目）に手札から動き出せるカード（効果の文から見分けています）。そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回あるとみなします。チェックを外した行は数えません。' }),
+        el('p', { class: 'muted small-note', text: '「0ターン展開」は、エルフェンノーツ・キラーチューンなどの、相手のターン（こちらの先攻1ターン目）に手札から動き出せるカード（効果の文から見分けています）。相手のターンに使える妨害（無効・破壊・除外など）があるテーマだけ出しています。そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回あるとみなします。チェックを外した行は数えません。' }),
         el('table', { class: 'op-trap-table' },
           el('tr', {}, el('th', { text: '数える' }), el('th', { text: '誘発' }), el('th', { text: '採用率' }), el('th', { text: '採用時の枚数' }), el('th', { text: '相手の初手にある' })),
           u.traps.map((t, i) => {
@@ -706,7 +707,7 @@ function openOpeningRate() {
             };
             return el('tr', { class: t.zero ? 'op-zero' : null },
               el('td', {}, cb),
-              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '（妨害になる効果が見つからないので、最初は数えません）') }) : null),
+              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '') }) : null),
               el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', { text: pct(opUsageOpen(u, H, i)) }));
           })));
       return;
