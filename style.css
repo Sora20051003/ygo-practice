@@ -1881,3 +1881,4 @@ details.multi.has-ex > summary { color: var(--danger); }
 .op-ns-mark { font-size: 10px; padding: 0 4px; border-radius: 4px; background: var(--accent); color: var(--accent-text); }
 .op-combo-sum ul { margin: 4px 0 0; padding-left: 18px; }
 .op-results .op-starters { margin-top: 10px; }
+.op-ns-mark.cost { background: #c98a1b; }

@@ -20,6 +20,15 @@ const OpSim = (() => {
         hc[pick]--; used.push(pick); ns += m.cards[pick].ns;
       }
     }
+    used.main = used.length;   // ここまでが展開に使うカード（このあとは手札コストで捨てるカード）
+    if (ok && r.cost) {
+      for (let k = 0; k < r.cost; k++) {
+        let pick = -1;
+        for (const j of m.costOrder) if (hc[j] > 0) { pick = j; break; }
+        if (pick < 0) { ok = false; break; }
+        hc[pick]--; used.push(pick);
+      }
+    }
     for (const c of used) hc[c]++;
     if (ok && r.fixedNs != null) ns = r.fixedNs;   // 自動で見つけた組み合わせは、試したときに使った召喚権の数
     return !ok || ns > nsAvail ? -1 : ns;
@@ -38,7 +47,7 @@ const OpSim = (() => {
       const nsUsed = tryAssign(m, m.routes[i], hc, ns, used);
       if (nsUsed < 0) continue;
       let vm = 0;
-      for (const c of used) vm |= m.cards[c].vuln;
+      for (let k = 0; k < (used.main ?? used.length); k++) vm |= m.cards[used[k]].vuln;   // 手札コストのカードは止められる理由にならない
       let stopped = false;
       for (;;) {
         let tAny = -1, tPick = -1;
@@ -212,7 +221,8 @@ function opCardSetting(st, id) {
 // そのカード1枚だけを手札にした対戦を作り、発動・通常召喚・特殊召喚を3手先まで試す。
 // デッキのカードが手札・フィールド・墓地へ動いたら（サーチ・デッキからの特殊召喚・墓地へ送るなど）初動とみなす。
 // 通常召喚を使わずに動ければ召喚権なし、通常召喚が必要なら召喚権ありにする
-const OP_JUDGE_V = 2;   // 判別のしかたを変えたら上げる（前の結果を使わない）
+const OP_JUDGE_V = 3;   // 判別のしかたを変えたら上げる（前の結果を使わない）
+const OP_COST_FILLER = 4206964;   // 落とし穴（自分のメインフェイズには使えず、素材にもならない。手札コスト用の1枚）
 const OP_DEPTH = 3, OP_BRANCH = 6, OP_NODES = 60;
 // 試している間の選択の答え：自分の効果はできるだけ使う
 function opProbeAnswer(m, me) {
@@ -303,32 +313,34 @@ async function opAutoJudge(deck, st, onProgress) {
   if (!todo.length) return false;
   const errata = errataOfDecks(errataMode(), deck);
   await engineLoad(() => {});
-  await loadCardScripts([...deck.main, ...(deck.extra || []), OPP_FILLER], () => {}, errata, true);
-  const base = { main: deck.main.filter(id => DB.byId.has(id)), extra: (deck.extra || []).filter(id => DB.byId.has(id)), rule: masterRule(), errata };
+  await loadCardScripts([...deck.main, ...(deck.extra || []), OPP_FILLER, OP_COST_FILLER], () => {}, errata, true);
+  const base = { main: [...deck.main.filter(id => DB.byId.has(id)), OP_COST_FILLER], extra: (deck.extra || []).filter(id => DB.byId.has(id)), rule: masterRule(), errata };
   let i = 0;
   for (const { id } of todo) {
     onProgress && onProgress(++i, todo.length, (DB.byId.get(id) || {}).name);
     const s = opCardSetting(st, id);
     // 手札誘発・誘発ケアは試さない（相手の行動が無いと使えない）
     const r = s.role === 'handtrap' || s.role === 'care' ? { v: OP_JUDGE_V, starter: false, ns: false, gain: 0, skip: true } : await opJudgeHand(base, [id]);
+    // 1枚では動けないときは、何でもない1枚（落とし穴）を手札に足して試す（「手札を1枚捨てて特殊召喚」などの手札コスト）
+    if (!r.skip && !r.starter) { const r2 = await opJudgeHand(base, [id, OP_COST_FILLER]); if (r2.starter) { Object.assign(r, r2); r.cost = 1; } }
     st.auto[id] = r;
     if (!s.manual && !r.skip) {
       s.role = r.starter ? 'starter' : s.role === 'starter' ? 'other' : s.role;
-      if (r.starter) s.ns = r.ns;
+      if (r.starter) { s.ns = r.ns; s.cost = r.cost || 0; }
     }
   }
   return true;
 }
 // 2枚そろうと動けるカード（1枚では初動にならないカード同士）を試して、組み合わせ初動に入れる。
 // 例：ヤミーの「リンク1＋レベル1の非チューナー」のように、手札の2枚から EXデッキを使って展開が始まるもの
-const OP_PAIR_V = 2, OP_PAIR_CARDS = 18, OP_PAIR_NODES = 40, OP_PAIR_MAX = 60;
+const OP_PAIR_V = 3, OP_PAIR_CARDS = 18, OP_PAIR_NODES = 40, OP_PAIR_MAX = 60;
 async function opAutoPairs(deck, st, onProgress) {
   const sig = deck.main.slice().sort().join(',') + '|' + (deck.extra || []).slice().sort().join(',');
   if (st.autoPairs && st.autoPairs.v === OP_PAIR_V && st.autoPairs.sig === sig) return false;
   const errata = errataOfDecks(errataMode(), deck);
   await engineLoad(() => {});
-  await loadCardScripts([...deck.main, ...(deck.extra || []), OPP_FILLER], () => {}, errata, true);
-  const base = { main: deck.main.filter(id => DB.byId.has(id)), extra: (deck.extra || []).filter(id => DB.byId.has(id)), rule: masterRule(), errata };
+  await loadCardScripts([...deck.main, ...(deck.extra || []), OPP_FILLER, OP_COST_FILLER], () => {}, errata, true);
+  const base = { main: [...deck.main.filter(id => DB.byId.has(id)), OP_COST_FILLER], extra: (deck.extra || []).filter(id => DB.byId.has(id)), rule: masterRule(), errata };
   // 試すカード：初動・手札誘発・誘発ケアではないもの（枚数の多い順）
   const cand = opDeckCards(deck).filter(x => { const s = opCardSetting(st, x.id); return s.role !== 'starter' && s.role !== 'handtrap' && s.role !== 'care'; })
     .sort((a, b) => b.n - a.n).slice(0, OP_PAIR_CARDS);
@@ -378,7 +390,7 @@ function opBuildModel(deck, st) {
       vuln: s.role === 'starter' || s.role === 'extender' ? maskOf(s[opF(st, "vuln")]) : 0,
       counter: s.role === 'care' ? maskOf(s[opF(st, "counters")]) : 0,
       tags: String(s.tags || '').split(/[,、，\s]+/).map(opNorm).filter(Boolean),
-      priority: Number(s.priority) || 0,
+      priority: Number(s.priority) || 0, cost: s.role === 'starter' ? s.cost | 0 : 0,
     };
   });
   const nameIdx = new Map();
@@ -388,7 +400,10 @@ function opBuildModel(deck, st) {
   cards.forEach((c, i) => c.tags.forEach(t => (tagCards[t] = tagCards[t] || []).push(i)));
   for (const t in tagCards) tagCards[t].sort((a, b) => (cards[a].ns - cards[b].ns) || ((cards[a].role === 'starter') - (cards[b].role === 'starter')));
   const routes = [];
-  cards.forEach((c, i) => { if (c.role === 'starter') routes.push({ named: [i], tags: [], priority: c.priority, single: true }); });
+  cards.forEach((c, i) => { if (c.role === 'starter') routes.push({ named: [i], tags: [], priority: c.priority, single: true, cost: c.cost }); });
+  // 手札コストで捨てるカードの順番：事故札 → その他 → 展開札 → 手札誘発 → 誘発ケア → 初動（初動はできるだけ残す）
+  const costRank = { brick: 0, other: 1, extender: 2, handtrap: 3, care: 4, starter: 5 };
+  const costOrder = cards.map((c, i) => i).sort((a, b) => costRank[cards[a].role] - costRank[cards[b].role]);
   const comboErrors = {};
   for (const cb of st.combos) {
     if (!String(cb.text || '').trim()) continue;
@@ -413,7 +428,7 @@ function opBuildModel(deck, st) {
   const oppDeck = [];
   if (!usage) traps.forEach((t, i) => { for (let k = 0; k < (t.count | 0); k++) oppDeck.push(i); });
   while (oppDeck.length < oppDeckSize) oppDeck.push(-1);
-  return { cards, routes, deck: deckArr, careIdx, handtrapIdx, tagCards, comboErrors, traps, T: traps.length, oppDeck, oppDecks: usage ? usage.oppDecks : null, oppHand: usage ? st.opp.handSize | 0 : Math.min(st.opp.handSize | 0, oppDeck.length) };
+  return { cards, routes, costOrder, deck: deckArr, careIdx, handtrapIdx, tagCards, comboErrors, traps, T: traps.length, oppDeck, oppDecks: usage ? usage.oppDecks : null, oppHand: usage ? st.opp.handSize | 0 : Math.min(st.opp.handSize | 0, oppDeck.length) };
 }
 
 function openOpeningRate() {
@@ -458,7 +473,7 @@ function openOpeningRate() {
       el('div', {}, el('b', { text: `初動のカード ${list.length}種類・${total}枚` }), el('span', { class: 'muted', text: `（デッキの${deck.main.length ? Math.round(total / deck.main.length * 100) : 0}%）` })),
       list.length ? el('div', { class: 'op-chips' }, list.map(x => {
         const s = opCardSetting(st, x.id);
-        return el('span', { class: 'op-starter-chip', title: s.ns ? '通常召喚権を使う' : '通常召喚権を使わない' }, `${x.card.name} ×${x.n}`, s.ns ? el('span', { class: 'op-ns-mark', text: '召' }) : null);
+        return el('span', { class: 'op-starter-chip', title: s.ns ? '通常召喚権を使う' : '通常召喚権を使わない' }, `${x.card.name} ×${x.n}`, s.ns ? el('span', { class: 'op-ns-mark', text: '召' }) : null, s.cost ? el('span', { class: 'op-ns-mark cost', text: '手札+1', title: 'ほかに手札が1枚いる' }) : null);
       })) : el('div', { class: 'muted', text: '（まだありません。下の一覧で「初動」にしてください）' }),
       combos.length ? el('details', { class: 'op-combo-sum' }, el('summary', { text: `組み合わせ初動 ${combos.length}通り` }),
         el('ul', {}, combos.map(c => el('li', { text: c.text + (c.auto && c.ns ? '（召喚権を使う）' : '') })))) : null);
@@ -483,6 +498,7 @@ function openOpeningRate() {
           el('b', { class: 'op-name', text: card.name, title: card.name }), el('span', { class: 'muted', text: `×${n}` }), opBadge(st, id, s), role,
           uses ? el('label', { class: 'op-ns', title: 'このカードを使うと通常召喚権を使う' }, ns, '召喚権を使う') : null,
           s.role === 'starter' ? el('label', { class: 'op-ns', title: '小さいほど先に使う' }, '優先度', prio) : null,
+          s.role === 'starter' ? (() => { const cb = el('input', { type: 'checkbox', checked: !!s.cost }); cb.onchange = () => { s.cost = cb.checked ? 1 : 0; s.manual = true; save(); renderCount(); }; return el('label', { class: 'op-ns', title: '「手札を1枚捨てて特殊召喚」など、ほかに手札が1枚いる（初動ではないカードから先に使う）' }, cb, '手札を1枚使う'); })() : null,
           tags),
         uses ? el('div', { class: 'op-sub' }, el('span', { class: 'muted', text: '受けると止まる誘発：' }), trapChips(s, 'vuln')) : null,
         s.role === 'care' ? el('div', { class: 'op-sub' }, el('span', { class: 'muted', text: 'ケアできる誘発：' }), trapChips(s, 'counters')) : null);
