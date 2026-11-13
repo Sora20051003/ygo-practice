@@ -66,6 +66,8 @@ function autoState() {
 function autoActions(inst) {
   const d = Auto.duel, p = d && d.pending;
   if (!p || !inst.ref) return [];
+  // 自分が選ぶ番の行動選択だけ（相手の番・記録の再生中の相手の選択では、自分のカードを光らせない）
+  if ((p.type === MSG.SELECT_IDLECMD || p.type === MSG.SELECT_BATTLECMD) && (p.player !== d.me || d.turnPlayer !== d.me)) return [];
   const { con, loc, seq } = inst.ref;
   const same = c => c.controller === con && c.location === loc && c.sequence === seq;
   const out = [];
@@ -79,7 +81,8 @@ function autoActions(inst) {
     // 発動時に強制で行う処理ができないとき（例：ドロール＆ロックバードの適用中のサーチ）は、エンジンが発動できないものとして扱う）
     p.activates.forEach((c, index) => {
       if (!same(c)) return;
-      if (Auto.noEffect && Auto.noEffect.has(index)) return;   // 発動しても何も起きない表側の魔法・罠の効果
+      // 試しに発動して何も起きなかった表側の魔法・罠の効果：光らせないが、ボタンは出す（判断が外れることもあるので使えるようにしておく）
+      if (Auto.noEffect && Auto.noEffect.has(index)) { out.push({ label: '効果を発動（今は何も起きないかもしれません）', title: descText(c.description), kind: '', res: { type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index } }); return; }
       const place = Auto.useless && Auto.useless.has(index);
       out.push({ label: place ? '発動する（表側で置く）' : actLabel(), title: place ? '今は発動しても効果は起きませんが、表側で置いておけます' : descText(c.description), kind: 'y', res: { type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index } });
     });

@@ -655,7 +655,10 @@ class AutoDuel {
       case MSG.DRAW:
         if (m.player === this.me) this.addLog(`ドロー：${m.drawn.map(d => cardName(d.code & 0x7fffffff)).join('、')}`);
         this.events.push({ t: 'draw', player: m.player, n: m.drawn.length });   // ドローの演出用
-        if (m.player !== this.me) this.oppAdded = (this.oppAdded || 0) + 1;   // 相手がデッキから手札に加えた（ドロール＆ロックバードなどを使える）
+        // ドローしたカードも「動いたばかり」として覚える（「このカードをドローした時」の効果を聞くため。レイズ・ムーンなど）
+        if (m.player === this.me) for (const x of m.drawn) this.justMoved.add(`${this.me}-${LOC.HAND}-c${x.code & 0x7fffffff}`);
+        // 相手がドローフェイズ以外でドローした（ドロール＆ロックバードなどを使える）。最初の手札・ドローフェイズのドローは数えない
+        if (m.player !== this.me && this.turn > 0 && this.phase !== 1) this.oppAdded = (this.oppAdded || 0) + 1;
         break;
       case MSG.SUMMONING: this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を通常召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
       case MSG.SPSUMMONING: if (this.procCode === m.code && !this.chain.length) { this.markUsed(m.code, 'proc'); this.procCode = 0; } this.justSummoned.add(locKey(m.controller, m.location, m.sequence)); this.addLog(`${this.who(m.controller)}${cardName(m.code)} を特殊召喚`); this.events.push({ t: 'summon', code: m.code, con: m.controller, loc: m.location, seq: m.sequence }); break;
@@ -701,7 +704,7 @@ class AutoDuel {
           this.knownSets.delete(locKey(m.from.controller, m.from.location, m.from.sequence));
           if (code && (m.to.location & (LOC.SZONE | LOC.MZONE)) && !(m.to.position & 5) && m.from.location && m.from.location !== LOC.HAND) this.knownSets.set(locKey(m.to.controller, m.to.location, m.to.sequence), code);
         }
-        if (m.from.location === LOC.DECK && m.to.location === LOC.HAND && m.to.controller !== this.me) this.oppAdded = (this.oppAdded || 0) + 1;
+        if (m.from.location === LOC.DECK && m.to.location === LOC.HAND && m.to.controller !== this.me && this.turn > 0 && this.phase !== 1) this.oppAdded = (this.oppAdded || 0) + 1;
         if (!code || m.from.location === m.to.location && m.from.controller === m.to.controller) break;
         if (m.from.controller !== this.me && m.to.controller !== this.me && !(m.from.location & LOC.ONFIELD_ALL) && !(m.to.location & LOC.ONFIELD_ALL)) break;   // 相手の手札・デッキ・墓地の間の移動（手札調整など）は省く
         if (m.to.location === LOC.HAND && m.from.location === LOC.DECK && m.from.controller === this.me && this.drawing) break;
