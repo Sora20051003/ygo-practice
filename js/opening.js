@@ -94,7 +94,7 @@ const OpSim = (() => {
     }
     return false;
   }
-  function simulate(m, handSize, iters) {
+  function simulate(m, handSize, iters, second) {
     const C = m.cards.length, T = m.T;
     const deck = Int32Array.from(m.deck), N = deck.length, H = Math.min(handSize, N);
     let oppDeck = Int32Array.from(m.oppDeck), OD = oppDeck.length;
@@ -121,14 +121,15 @@ const OpSim = (() => {
         const tmp = oppDeck[i]; oppDeck[i] = oppDeck[j]; oppDeck[j] = tmp;
         if (oppDeck[i] >= 0) opp[oppDeck[i]]++;
       }
-      for (const t of m.zeroIdx || []) if (opp[t] > 1) opp[t] = 1;   // 0ターン展開は、そのテーマのカードが何枚あっても妨害1回
+      // 0ターン展開（相手が後攻のとき、こちらの先攻1ターン目に展開する）：そのテーマのカードが何枚あっても妨害1回。こちらが後攻なら無い
+      for (const t of m.zeroIdx || []) opp[t] = second ? 0 : Math.min(opp[t], 1);
       if (!nsok) continue;
       res.nsok++;
       if (resolve(m, hc, opp, 99, s)) res.realInfNs++;
       if (resolve(m, hc, opp, 1, s)) res.real++;
       if (pierce(m, hc, 1, 1, s)) res.pierce1++;
       if (pierce(m, hc, 2, 1, s)) res.pierce2++;
-      for (let t = 0; t < T; t++) { single.fill(0); single[t] = 1; if (resolve(m, hc, single, 1, s)) res.perTrap[t]++; }
+      for (let t = 0; t < T; t++) { if (second && (m.zeroIdx || []).includes(t)) continue; single.fill(0); single[t] = 1; if (resolve(m, hc, single, 1, s)) res.perTrap[t]++; }
       let ht = 0;
       for (const k of m.handtrapIdx) ht += hc[k];
       if (ht > 0) res.withHT++;
@@ -695,7 +696,7 @@ function openOpeningRate() {
         el('div', { class: 'op-row' },
           el('label', {}, '相手の手札 ', num, ' 枚'),
           el('span', { class: 'muted', text: `相手の初手に下の誘発・0ターン展開が1枚以上ある確率 ${pct(opUsageOpen(u, H, -1))}` })),
-        el('p', { class: 'muted small-note', text: '「0ターン展開」は、エルフェンノーツ・キラーチューンなどの、相手のターン（こちらの先攻1ターン目）に手札から動き出せるカード（効果の文から見分けています）。相手のターンに使える妨害（無効・破壊・除外など）があるテーマだけ出しています。そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回あるとみなします。チェックを外した行は数えません。' }),
+        el('p', { class: 'muted small-note', text: '「0ターン展開」は、相手が後攻のときに、こちらの先攻1ターン目に手札から展開して妨害してくること（エルフェンノーツ・キラーチューンなど。動き出せるカードは効果の文から見分けています）。こちらが先攻の計算だけに入り、後攻の計算には入りません。相手のターンに使える妨害（無効・破壊・除外など）があるテーマだけ出しています。そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回あるとみなします。チェックを外した行は数えません。' }),
         el('table', { class: 'op-trap-table' },
           el('tr', {}, el('th', { text: '数える' }), el('th', { text: '誘発' }), el('th', { text: '採用率' }), el('th', { text: '採用時の枚数' }), el('th', { text: '相手の初手にある' })),
           u.traps.map((t, i) => {
@@ -761,7 +762,7 @@ function openOpeningRate() {
         el('div', { class: 'muted small-note', text: `参考：1枚初動のカードだけの理論値 ${pct(exact)}` }),
         R.model.traps.length ? el('table', { class: 'op-trap-table' },
           el('tr', {}, el('th', { text: '相手が1枚だけ持っていた誘発' }), el('th', { text: '展開できる率' })),
-          R.model.traps.map((t, i) => el('tr', {}, el('td', { text: t.name }), el('td', { text: pct(r.perTrap[i] / n) })))) : null);
+          R.model.traps.map((t, i) => el('tr', {}, el('td', { text: t.name }), el('td', { text: r === R.second && t.zero ? '—（後攻では無い）' : pct(r.perTrap[i] / n) })))) : null);
     };
     resBox.replaceChildren(starterSummary(), el('div', { class: 'op-res-grid' }, col('先攻（手札5枚）', R.first, R.exact5), col('後攻（手札6枚）', R.second, R.exact6)));
   }
@@ -778,7 +779,7 @@ function openOpeningRate() {
     runMsg.textContent = '計算中…'; run.disabled = true;
     setTimeout(() => {
       const n = st.iters || 100000, t0 = performance.now();
-      const R = { model, first: OpSim.simulate(model, 5, n), second: OpSim.simulate(model, 6, n), exact5: OpSim.exactSingle(model, 5), exact6: OpSim.exactSingle(model, 6) };
+      const R = { model, first: OpSim.simulate(model, 5, n), second: OpSim.simulate(model, 6, n, true), exact5: OpSim.exactSingle(model, 5), exact6: OpSim.exactSingle(model, 6) };
       renderResults(R);
       const errs = Object.keys(model.comboErrors).length;
       runMsg.textContent = `完了（${((performance.now() - t0) / 1000).toFixed(1)}秒）` + (errs ? `　※書き方に誤りのある組み合わせ ${errs}件は数えていません` : '');
