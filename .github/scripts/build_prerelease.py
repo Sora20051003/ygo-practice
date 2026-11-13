@@ -173,6 +173,21 @@ def main():
                 name = lua_ja   # 日本語の名前はスクリプトの1行目から（効果文は英語のまま）
             cards.append([cid, typ, lv, race, attr, atk, df, name, ja["ruby"] if ja else "", en,
                           ja["text"] if ja else desc, code.upper(), 0 if ja else 1])
+    # 発売前のデータ（cdb）に入っていないが、スクリプトだけあるカード（発売済みで正式な番号になったカードなど）：
+    # スクリプトの1行目の日本語の名前で、アプリのカードデータのカードに対応させる
+    try:
+        listing = json.loads(fetch("https://api.github.com/repos/ProjectIgnis/CardScripts/contents/pre-release"))
+        for x in listing:
+            m = re.fullmatch(r"c(\d+)\.lua", x.get("name", ""))
+            if not m or int(m.group(1)) in done:
+                continue
+            cid = int(m.group(1))
+            ja_name = script_name(cid)
+            same = have.get(re.sub(r"\s", "", ja_name)) if ja_name else None
+            if same and same != cid and same not in pre_map:
+                pre_map[same] = cid
+    except Exception as e:
+        print(f"スクリプトの一覧を読めませんでした：{e}")
     cards.sort()
     if not cards and not pre_map:
         print("発売前のカードがありませんでした")

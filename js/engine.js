@@ -566,7 +566,8 @@ class AutoDuel {
       for (const m of msgs) {
         // 答えが通らなかった（RETRY）：エンジンは同じ選択を送り直さないので、直前の選択をもう一度聞く
         if (m.type === MSG.RETRY) { if (!this.retry && ++this.retries > 400) throw new Error('処理が先に進めなくなりました'); this.retry = true; ask = this.lastAsk; continue; }
-        if (isSelectMsg(m)) ask = m; else this.onInfo(m);
+        // 新しい選択が来たら、答えが通らなかった回数を数え直す（対戦全体で数えると、長い対戦で止まってしまう）
+        if (isSelectMsg(m)) { ask = m; this.retries = 0; } else this.onInfo(m);
         // 自分のドローフェイズになったら、画面をタッチするまでドローしない（drawTap：一人回し・対戦の画面の対戦だけ。記録の流し直し中は止めない）
         if (this.drawTap && m.type === MSG.NEW_PHASE && m.phase === 1 && this.turnPlayer === this.me && (this.turn > 1 || this.firstDraw) && !(replay && replay.length)) this.drawWait = true;
       }
@@ -971,8 +972,12 @@ function cpuAnswer(m, duel) {
       return { type: RES.SELECT_CHAIN, index: null };
     case MSG.SELECT_BATTLECMD: if (duel.opp && duel.opp.plays) return cpuPlayBattle(m, duel); return autoAnswer(m);
     // 「〜する？」・選択肢・1枚だけ選ぶ選択は、それぞれ試して良いほうを選ぶ（先読みの中では簡単に決める）
-    case MSG.SELECT_EFFECTYN: return cpuChoiceThink(m, duel, [{ type: RES.SELECT_EFFECTYN, yes: true }, { type: RES.SELECT_EFFECTYN, yes: false }]) || { type: RES.SELECT_EFFECTYN, yes: true };
-    case MSG.SELECT_YESNO: return cpuChoiceThink(m, duel, [{ type: RES.SELECT_YESNO, yes: true }, { type: RES.SELECT_YESNO, yes: false }]) || { type: RES.SELECT_YESNO, yes: true };
+    case MSG.SELECT_EFFECTYN: case MSG.SELECT_YESNO: {
+      const R = m.type === MSG.SELECT_EFFECTYN ? RES.SELECT_EFFECTYN : RES.SELECT_YESNO;
+      // 同じフェイズで同じ「〜する？」を何度も聞かれる（はいと答えても同じ確認に戻ってくる）ときは、いいえにして先へ進める
+      if (cpuRepeated(m, duel) > 6) return { type: R, yes: false };
+      return cpuChoiceThink(m, duel, [{ type: R, yes: true }, { type: R, yes: false }]) || { type: R, yes: true };
+    }
     case MSG.SELECT_CARD: {
       // 調和ノ天救竜の処理中か（見せるのは発動のコストなので、まだチェーンに乗っていないこともある：手札にあるかでも見る）
       const fromExtra = m.selects.length && m.selects.every(c => c.location === LOC.EXTRA && c.controller !== me);
@@ -1398,6 +1403,14 @@ function cpuChainThink(m, duel) {
 // ---------- 効果の処理の途中の選択（サーチするカード・選択肢・「〜する？」・攻撃の対象など） ----------
 // それぞれの答えを複製の中で試し、CPU が次に行動を選ぶところ（メイン・バトル）まで進めて点数を比べる。いちばん良い答えを返す（試せなければ null）
 const CPU_CHOICE_TIME = 2500, CPU_CHOICE_MAX = 10;
+// 同じターン・同じフェイズで、同じカードの同じ確認を聞かれた回数
+function cpuRepeated(m, duel) {
+  const key = `${duel.turn}:${duel.phase}:${m.type}:${m.code || 0}:${m.description || 0}`;
+  if (!duel.askSeen || duel.askSeenTurn !== duel.turn) { duel.askSeen = new Map(); duel.askSeenTurn = duel.turn; }
+  const n = (duel.askSeen.get(key) || 0) + 1;
+  duel.askSeen.set(key, n);
+  return n;
+}
 function cpuChoiceThink(m, duel, answers) {
   if (duel.noThink || duel.probing || answers.length < 2) return null;
   const cpu = 1 - duel.me, hist = duel.history(), t0 = performance.now();
