@@ -64,7 +64,7 @@ const OpSim = (() => {
         vm &= ~(s.fieldBits | s.handBits) | allowed;
       }
       // もっと強い初動が残っているなら、相手はこの初動には撃たない（通るが、展開しきったとはみなさず、カードと召喚権は使う）
-      if (vm) {
+      if (vm && !m.routes[i].full) {
         for (const c of used) hc[c]--;
         const hold = strongerLeft(m, hc, ns - nsUsed, i, s);
         if (hold) { ns -= nsUsed; i--; continue; }
@@ -101,7 +101,7 @@ const OpSim = (() => {
       if (nsUsed < 0) continue;
       let vm = 0;
       for (let k = 0; k < (used.main ?? used.length); k++) vm |= m.cards[used[k]].vuln;
-      if (vm && left > 0) {   // マストカウンター：もっと強い初動が残っているなら温存
+      if (vm && left > 0 && !m.routes[i].full) {   // マストカウンター：展開しきれない初動で、もっと強い初動が残っているなら温存
         for (const c of used) hc[c]--;
         if (strongerLeft(m, hc, ns - nsUsed, i, s)) { ns -= nsUsed; i--; continue; }
         for (const c of used) hc[c]++;
@@ -623,6 +623,8 @@ function opBuildModel(deck, st, noDraw) {
       priority: Number(s.priority) || 0, cost: s.role === 'starter' ? s.cost | 0 : 0, field: s.noField ? 0 : 1, hand: s.noHand ? 0 : 1,
       // 初動の強さ（自動判別で、そのカードからデッキのカードを何枚動かせたか）。マストカウンターの判断に使う
       gain: st.auto && st.auto[id] && st.auto[id].starter ? st.auto[id].gain || 1 : 1,
+      // このカードだけで展開しきれるか（自分で決めていなければ、デッキから2枚以上動かせた初動）
+      full: s.full != null ? !!s.full : !!(st.auto && st.auto[id] && st.auto[id].starter && (st.auto[id].gain || 0) >= 2),
     };
   });
   const nameIdx = new Map();
@@ -632,7 +634,7 @@ function opBuildModel(deck, st, noDraw) {
   cards.forEach((c, i) => c.tags.forEach(t => (tagCards[t] = tagCards[t] || []).push(i)));
   for (const t in tagCards) tagCards[t].sort((a, b) => (cards[a].ns - cards[b].ns) || ((cards[a].role === 'starter') - (cards[b].role === 'starter')));
   const routes = [];
-  cards.forEach((c, i) => { if (c.role === 'starter') routes.push({ named: [i], tags: [], priority: c.priority, single: true, cost: c.cost, strength: c.gain }); });
+  cards.forEach((c, i) => { if (c.role === 'starter') routes.push({ named: [i], tags: [], priority: c.priority, single: true, cost: c.cost, strength: c.gain, full: c.full }); });
   // 手札コストで捨てるカードの順番：事故札 → その他 → 展開札 → 手札誘発 → 誘発ケア → 初動（初動はできるだけ残す）
   const costRank = { brick: 0, other: 1, extender: 2, handtrap: 3, care: 4, starter: 5 };
   const costOrder = cards.map((c, i) => i).sort((a, b) => costRank[cards[a].role] - costRank[cards[b].role]);
@@ -648,7 +650,7 @@ function opBuildModel(deck, st, noDraw) {
       else { const idx = nameIdx.get(opNorm(p)); if (idx === undefined) errors.push(p); else for (let k = 0; k < n; k++) named.push(idx); }
     }
     if (errors.length) { comboErrors[cb.id] = errors; continue; }
-    if (named.length + tags.length) routes.push({ named, tags, priority: Number(cb.priority) || 0, single: false, strength: Number(cb.gain) || 1, fixedNs: cb.auto && cb.ns != null ? cb.ns : null });
+    if (named.length + tags.length) routes.push({ named, tags, priority: Number(cb.priority) || 0, single: false, strength: Number(cb.gain) || 1, full: true, fixedNs: cb.auto && cb.ns != null ? cb.ns : null });
   }
   routes.sort((a, b) => (a.priority - b.priority) || (b.single - a.single));
   const deckArr = [];
@@ -733,6 +735,7 @@ function openOpeningRate() {
           uses ? (() => { const cb = el('input', { type: 'checkbox', checked: !s.noHand }); cb.onchange = () => { s.noHand = !cb.checked; save(); }; return el('label', { class: 'op-ns', title: 'このカードの展開で、手札・墓地のモンスター効果を発動するか（K9－17号 イヅナなど「相手が手札・墓地のモンスター効果を発動した」ときに動くカードに関係する）' }, cb, '手札・墓地でモンスター効果を使う'); })() : null,
           s.role === 'starter' ? el('label', { class: 'op-ns', title: '小さいほど先に使う' }, '優先度', prio) : null,
           s.role === 'starter' ? (() => { const cb = el('input', { type: 'checkbox', checked: !!s.cost }); cb.onchange = () => { s.cost = cb.checked ? 1 : 0; s.manual = true; save(); renderCount(); }; return el('label', { class: 'op-ns', title: '「手札を1枚捨てて特殊召喚」など、ほかに手札が1枚いる（初動ではないカードから先に使う）' }, cb, '手札を1枚使う'); })() : null,
+          s.role === 'starter' ? (() => { const a = st.auto && st.auto[id]; const def = !!(a && a.starter && (a.gain || 0) >= 2); const cb = el('input', { type: 'checkbox', checked: s.full != null ? !!s.full : def }); cb.onchange = () => { s.full = cb.checked; save(); }; return el('label', { class: 'op-ns', title: 'このカードが通れば、それだけで展開しきれるか。外すと、相手はもっと強い初動が手札に残っているあいだ、このカードには誘発を使わず温存する（マストカウンター）' }, cb, '単独で展開しきれる'); })() : null,
           tags),
         uses ? el('div', { class: 'op-sub' }, el('span', { class: 'muted', text: '受けると止まる誘発：' }), trapChips(s, 'vuln')) : null,
         s.role === 'care' ? el('div', { class: 'op-sub' }, el('span', { class: 'muted', text: 'ケアできる誘発：' }), trapChips(s, 'counters')) : null);
@@ -909,7 +912,7 @@ function openOpeningRate() {
         el('li', { text: '初動率：初動のカード、または組み合わせ初動がそろっている手札の割合（召喚権は考えない）。' }),
         el('li', { text: '召喚権を考慮：通常召喚1回で始められる初動がある割合。' }),
         el('li', { text: '実質初動率：相手にもデッキから手札を配り、止められずに展開できた割合（「環境の使用率から」では、毎回ランクマッチなどのデッキを1つ選んで相手のデッキにします）。初動を優先度の順に使い、相手は止められる誘発があれば撃ち（ケアされないものから）、自分はケア札があれば無効にします。止められた初動のカードと召喚権は失い、残りで次の初動を試します。' }),
-        el('li', { text: 'マストカウンター：相手は手札誘発を、手札の中で一番展開が伸びる初動（自動判別で、デッキからいちばん多くカードを動かせた初動）に使います。もっと強い初動が手札に残っているあいだは、弱い初動には使わずに温存します（弱い初動は通りますが、そのカードと召喚権は使ったものとして、強い初動を止めに来ます）。' }),
+        el('li', { text: 'マストカウンター：相手は手札誘発を、手札の中で一番展開が伸びる初動（自動判別で、デッキからいちばん多くカードを動かせた初動）に使います。「単独で展開しきれる」初動には必ず使います。展開しきれない初動（チェックを外したもの。最初はデッキから1枚しか動かせない初動）には、もっと強い初動が手札に残っているあいだは使わずに温存します（その初動は通りますが展開しきったとは数えず、カードと召喚権は使ったものとして、強い初動を止めに来ます）。' }),
         el('li', { text: '貫通率：初動がある手札で、相手が「止める誘発」を1枚（2枚）持っていて、止められる初動には必ず撃ってくるとしたときに、展開を続けられる割合。止められた初動のカードと召喚権は失い、残りの初動で動きます。誘発ケアは、その初動を止める誘発のどれかをケアできるカードなら使います。' }),
         el('li', { text: '分かりやすさ優先の近似です。止まった初動から一部のリソースが残る場合や、召喚権を増やすカード、増殖するGを受けて展開をやめる判断などは考えていません。' }))));
   renderCount(); renderCards(); renderCombos(); renderOpp();

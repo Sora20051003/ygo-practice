@@ -1274,7 +1274,7 @@ function cpuChainThink(m, duel) {
   const cpu = 1 - duel.me, hist = duel.history(), t0 = performance.now();
   const opts = [...(m.forced ? [] : [-1]), ...m.selects.map((_, i) => i)];
   if (opts.length < 2 && !m.forced) return null;
-  let best = null, bestS = -Infinity, passS = null;
+  let best = null, bestS = -Infinity, passS = null, passGain = null;
   for (const o of opts) {
     if (performance.now() - t0 > 3500) break;   // 考えすぎない
     let t = null;
@@ -1296,6 +1296,8 @@ function cpuChainThink(m, duel) {
         t.respond(q.player === cpu ? cpuAnswer(q, t) : autoAnswer(q));
       }
       const denied = t.events.filter(e => e.t === 'negate' && e.con === duel.me).length;
+      // 発動しなかったとき、練習する人の展開がどれだけ伸びるか（デッキから手札・場・墓地へ動いたカード、EXデッキからの特殊召喚）
+      if (o < 0) passGain = t.events.filter(e => e.t === 'move' && e.code && e.from && e.from.con === duel.me && ((e.from.loc === LOC.DECK && (e.to.loc & (LOC.HAND | LOC.MZONE | LOC.SZONE | LOC.GRAVE))) || (e.from.loc === LOC.EXTRA && e.to.loc === LOC.MZONE))).length;
       // 増殖するG のように、効果がそのターンの間あとから効くカード：相手のメインフェイズに使う価値を足す
       const lasting = o >= 0 && LASTING_TRAPS.has(cardName(m.selects[o].code)) && duel.turnPlayer === duel.me && (duel.phase === 4 || duel.phase === 256);
       const s = cpuScore(t, cpu, true) + denied * 4 + (lasting ? 6 : 0);
@@ -1307,6 +1309,12 @@ function cpuChainThink(m, duel) {
   if (best === null) return null;
   // 発動しても大して得にならないなら、温存する
   if (best >= 0 && passS != null && bestS < passS + 0.8) best = -1;
+  // マストカウンター：手札誘発は、そのまま通すと相手（練習する人）の展開が伸びる効果（サーチ・デッキからの特殊召喚・EXデッキからの特殊召喚など）にだけ使い、それ以外は温存する
+  // （増殖するGなど、あとから効くカードは別）
+  if (best >= 0 && passGain === 0) {
+    const c = m.selects[best];
+    if (c && c.location === LOC.HAND && isHandTrap(c.code) && !LASTING_TRAPS.has(cardName(c.code))) best = -1;
+  }
   return { type: RES.SELECT_CHAIN, index: best < 0 ? null : best };
 }
 
