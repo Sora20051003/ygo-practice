@@ -160,7 +160,7 @@ const opUsageCache = {};
 async function opLoadUsage(fmt, oppHand) {
   if (opUsageCache[fmt]) return opUsageCache[fmt];
   // 0ターン展開のカードを見分けるのに効果の文を使う（まだ読んでいなければ読む）
-  if (!DB.textMeta && typeof loadJaTexts === 'function') { try { await loadJaTexts(() => {}); } catch (e) { /* 文が無くても手札誘発は数えられる */ } }
+  if (DB.cards.filter(c => c.jaText).length < 5000 && typeof loadJaTexts === 'function') { try { await loadJaTexts(() => {}); } catch (e) { /* 文が無くても手札誘発は数えられる */ } }
   // マルチャミー（相手の行動でドローする）も、増殖するGと同じ手札誘発として数える（止める誘発ではない）
   const isTrap = c => c && !OP_NOT_TRAP.includes(c.name) && (/^マルチャミー/.test(c.name) || (typeof isHandTrap === 'function' && isHandTrap(c.id)) || (typeof HANDTRAP_NAMES !== 'undefined' && HANDTRAP_NAMES.includes(c.name)));
   let list = null, from = '', src = 'samples';
@@ -214,16 +214,22 @@ async function opLoadUsage(fmt, oppHand) {
   // 妨害になる効果が見つからないテーマは出さない（数えない）
   [...zero].filter(([th]) => opThemeStops(th)).sort((a, b) => b[1].decks - a[1].decks).slice(0, 30 - traps.length).forEach(([th, z]) => {
     const i = traps.length;
-    traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, stopBy: opThemeStops(th), cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
+    traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, stopBy: opThemeStops(th), why: opZeroWhy(DB.byId.get([...z.cards][0])), cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
     for (const id of z.cards) idx.set(id, i);
   });
   const oppDecks = list.map(dl => { const a = []; for (const { card, n } of dl) for (let k = 0; k < n; k++) a.push(idx.has(card.id) ? idx.get(card.id) : -1); return a; }).filter(a => a.length >= 20);
   return (opUsageCache[fmt] = { fmt, from, src, nDecks: oppDecks.length, traps, oppDecks });
 }
 // 相手のターンに手札から動き出せるカードか（効果の文から判断。手札誘発は別に数える）
-const OP_ZERO_RE = /(相手メインフェイズ|相手ターン|自分・相手ターン|お互いのメインフェイズ|相手の(メインフェイズ|ターン))[^①②③④⑤]{0,120}?(手札から|手札の|このカードを特殊召喚)|(手札に存在する(場合|限り))[^①②③④⑤]{0,60}?(相手メインフェイズ|相手ターン|自分・相手ターン|お互いのメインフェイズ)/;
+// 1つの効果（①②③…）の中に、相手のターンに使える・手札にあるこのカードから・特殊召喚する、の3つがそろっているか
+// （永続罠扱いで置かれているときだけ動けるカードや、手札から捨てて守るだけのカードは数えない）
+const OP_ZERO_TIMING = /相手メインフェイズ|相手ターン|自分・相手ターン|お互いのメインフェイズ|お互いのターン|相手の(メインフェイズ|ターン)|自分・相手のメインフェイズ/;
+const OP_ZERO_HAND = /このカードを手札から|手札のこのカード|このカードが手札に存在する|このカードは手札から/;
+// 自分の場にカードが必要な条件（0ターン目の相手の場には何も無いので満たせない）
+const opNeedsOwnField = s => /自分フィールドの/.test(s) || /(^|[^手])(自分)?フィールドに[^。]{0,30}存在する場合/.test(s.replace(/相手フィールドに[^。]{0,30}存在する場合/g, ''));
 function opIsZeroTurn(c) {
-  return !!(c && (c.type & T.MONSTER) && !(c.type & EXTRA_MASK) && OP_ZERO_RE.test(c.jaText || ''));
+  if (!c || !(c.type & T.MONSTER) || (c.type & EXTRA_MASK)) return false;
+  return String(c.jaText || '').split(/[①②③④⑤⑥]/).some(s => OP_ZERO_TIMING.test(s) && OP_ZERO_HAND.test(s) && /特殊召喚/.test(s) && !opNeedsOwnField(s));
 }
 // そのテーマに、相手のターンに使える妨害（無効・破壊・除外・バウンスなど）があるか（効果の文から判断）。
 // 無いテーマの0ターン展開は、最初から「数えない」にする
@@ -708,7 +714,7 @@ function openOpeningRate() {
             };
             return el('tr', { class: t.zero ? 'op-zero' : null },
               el('td', {}, cb),
-              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '') }) : null),
+              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '') }) : null, t.zero && t.why ? el('div', { class: 'muted small-note op-why', text: '動き出し：' + t.why }) : null),
               el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', { text: pct(opUsageOpen(u, H, i)) }));
           })));
       return;
@@ -847,4 +853,10 @@ function opStopKinds(stop) {
   const k = new Set(stop.kinds);
   if (k.has('neg') || k.has('any')) return 'すべての初動';
   return [k.has('mon') ? 'モンスターの初動' : null, k.has('st') ? '永続・フィールドなどの残る魔法・罠' : null].filter(Boolean).join('・');
+}
+// 0ターン展開の動き出し（判断に使った効果の文）
+function opZeroWhy(c) {
+  const segs = String(c.jaText || '').split(/(?=[①②③④⑤⑥])/);
+  const s = segs.find(x => OP_ZERO_TIMING.test(x) && OP_ZERO_HAND.test(x) && /特殊召喚/.test(x) && !opNeedsOwnField(x));
+  return s ? `${c.name} ${s.replace(/\s+/g, '').slice(0, 90)}` : '';
 }
