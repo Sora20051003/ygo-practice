@@ -225,16 +225,39 @@ const OP_DISRUPT = /無効に|(相手|フィールド)[^。]{0,40}(破壊|除外
 const opStopCache = new Map();
 function opThemeStops(th) {
   if (opStopCache.has(th)) return opStopCache.get(th);
-  let hit = null;
+  // kinds：neg＝発動・効果を無効にする／mon＝モンスターを除く（破壊・除外・バウンスなど）／st＝魔法・罠を除く／any＝カードの種類を問わず除く
+  const kinds = new Set(), by = [];
   for (const c of DB.cards) {
     if (!c.jaText || c.anime || !(c.cid || c.pre)) continue;
     if (!(typeof decThemesOf === 'function' ? decThemesOf(c) : []).includes(th) && c.name !== th) continue;
     // 効果ごと（①②③…）に、相手のターンに使えて妨害になるものを探す
-    const seg = c.jaText.split(/[①②③④⑤⑥]/).find(s => OP_OPP_TIMING.test(s) && OP_DISRUPT.test(s));
-    if (seg) { hit = c.name; break; }
+    for (const s of c.jaText.split(/[①②③④⑤⑥]/)) {
+      if (!OP_OPP_TIMING.test(s) || !OP_DISRUPT.test(s)) continue;
+      const before = kinds.size;
+      if (/無効に/.test(s)) kinds.add('neg');
+      const rm = s.match(/[^。]{0,40}(破壊|除外|手札に戻|デッキに戻|裏側守備表示|コントロールを得)/g) || [];
+      for (const r of rm) {
+        if (/魔法・罠/.test(r) && !/モンスター/.test(r)) kinds.add('st');
+        else if (/モンスター|裏側守備表示|コントロール/.test(r)) kinds.add('mon');
+        else if (/カード/.test(r)) kinds.add('any');
+      }
+      if (kinds.size > before && by.length < 3 && !by.includes(c.name)) by.push(c.name);
+    }
   }
-  opStopCache.set(th, hit);
-  return hit;
+  const res = kinds.size ? { by, kinds: [...kinds] } : null;
+  opStopCache.set(th, res);
+  return res;
+}
+// その0ターン展開の妨害で、このカード（初動・展開札）が止まるか。
+// 無効は何でも止まる。モンスターを除く妨害はモンスター、魔法・罠を除く妨害は永続・フィールド・装備などの残る魔法・罠だけ止まる
+const OP_ZERO_V = 1;
+function opZeroHits(stop, c) {
+  if (!stop) return false;
+  const k = new Set(stop.kinds);
+  if (k.has('neg') || k.has('any')) return true;
+  if (c.type & T.MONSTER) return k.has('mon');
+  const stays = c.type & (T.CONTINUOUS | T.FIELD | T.EQUIP) || (c.type & T.TRAP && !(c.type & T.COUNTER));
+  return k.has('st') && !!stays;
 }
 // カードのテーマ名（無ければカード名）
 function opThemeOf(c) {
@@ -278,9 +301,10 @@ function opLoad(deck) {
 // 誘発の一覧が変わったとき用：止まる誘発・ケアできる誘発の初めの値（名前から推測）
 function opDefaultVuln(st, c) {
   const traps = opTraps(st);
-  const stop = traps.filter(t => OP_STOP_RE.test(t.name)).map(t => t.id);
+  // 0ターン展開は、その妨害でこのカードが止まるときだけ
+  const stop = traps.filter(t => (t.zero ? opZeroHits(t.stopBy, c) : OP_STOP_RE.test(t.name))).map(t => t.id);
   return {
-    vuln: stop.length ? stop : traps.map(t => t.id),
+    vuln: stop.length ? stop : traps.filter(t => !t.zero || opZeroHits(t.stopBy, c)).map(t => t.id),
     // 墓穴の指名者は、墓地へ行く誘発だけケアできる（泡影・ドロールなどは無理）
     // 0ターン展開は誘発ケアでは止められない扱い
     counters: traps.filter(t => !t.zero && !(c.name === '墓穴の指名者' && /泡影|γ/.test(t.name))).map(t => t.id),
@@ -291,7 +315,7 @@ function opCardSetting(st, id) {
   const s0 = st.cards[id];
   if (s0) {
     // 使用率の誘発の一覧で、まだ決めていなければ推測で入れる
-    if (opUsing(st) && !s0.vulnU) { const d = opDefaultVuln(st, DB.byId.get(id) || {}); s0.vulnU = d.vuln; s0.countersU = d.counters; s0.seenU = opTraps(st).map(t => t.id); }
+    if (opUsing(st) && !s0.vulnU) { const d = opDefaultVuln(st, DB.byId.get(id) || {}); s0.vulnU = d.vuln; s0.countersU = d.counters; s0.seenU = opTraps(st).map(t => t.id); s0.zeroV = OP_ZERO_V; }
     else if (opUsing(st)) {
       // あとから増えた誘発（0ターン展開など）は、推測した値を足す
       const seen = new Set(s0.seenU || opTraps(st).filter(t => !t.zero).map(t => t.id));
@@ -300,6 +324,12 @@ function opCardSetting(st, id) {
         const d = opDefaultVuln(st, DB.byId.get(id) || {});
         for (const t of fresh) { if (d.vuln.includes(t.id)) s0.vulnU = [...(s0.vulnU || []), t.id]; if (d.counters.includes(t.id)) s0.countersU = [...(s0.countersU || []), t.id]; }
         s0.seenU = [...seen, ...fresh.map(t => t.id)];
+      }
+      // 0ターン展開の「止まる」を、妨害の種類とカードの種類から決め直す（判断のしかたを変えたとき）
+      if (s0.zeroV !== OP_ZERO_V) {
+        const c = DB.byId.get(id) || {}, zs = opTraps(st).filter(t => t.zero), zid = new Set(zs.map(t => t.id));
+        s0.vulnU = (s0.vulnU || []).filter(x => !zid.has(x)).concat(zs.filter(t => opZeroHits(t.stopBy, c)).map(t => t.id));
+        s0.zeroV = OP_ZERO_V;
       }
     }
     return s0;
@@ -317,7 +347,7 @@ function opCardSetting(st, id) {
     ns: monster && !ht && (c.level || 0) <= 4 && !(c.type & (T.LINK | T.SPSUMMON)),
     tags: '', vuln: stop.length ? stop : traps.map(t => t.id), counters, priority: 10,
   };
-  if (opUsing(st)) { const d = opDefaultVuln(st, c); s.vulnU = d.vuln; s.countersU = d.counters; s.seenU = opTraps(st).map(t => t.id); }
+  if (opUsing(st)) { const d = opDefaultVuln(st, c); s.vulnU = d.vuln; s.countersU = d.counters; s.seenU = opTraps(st).map(t => t.id); s.zeroV = OP_ZERO_V; }
   return s;
 }
 // ---------- 初動の自動判別 ----------
@@ -671,7 +701,7 @@ function openOpeningRate() {
             };
             return el('tr', { class: t.zero ? 'op-zero' : null },
               el('td', {}, cb),
-              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') + (t.stopBy ? `（妨害：${t.stopBy}など）` : '（妨害になる効果が見つからないので、最初は数えません）') }) : null),
+              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '（妨害になる効果が見つからないので、最初は数えません）') }) : null),
               el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', { text: pct(opUsageOpen(u, H, i)) }));
           })));
       return;
@@ -804,4 +834,10 @@ function opIgnored(st) {
   const ig = new Set(st.opp.ignore || []), keep = new Set(st.opp.keep || []);
   if (u) for (const t of u.traps) if (t.zero && !t.stopBy && !keep.has(t.id)) ig.add(t.id);
   return ig;
+}
+// 妨害の種類の説明
+function opStopKinds(stop) {
+  const k = new Set(stop.kinds);
+  if (k.has('neg') || k.has('any')) return 'すべての初動';
+  return [k.has('mon') ? 'モンスターの初動' : null, k.has('st') ? '永続・フィールドなどの残る魔法・罠' : null].filter(Boolean).join('・');
 }
