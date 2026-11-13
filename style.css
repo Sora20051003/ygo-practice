@@ -1887,3 +1887,4 @@ details.multi.has-ex > summary { color: var(--danger); }
 .op-pierce .op-bar { grid-template-columns: 9.5em 1fr 4em; }
 .op-fill.f4 { background: #8a5cc9; }
 .op-zero td { background: color-mix(in srgb, #8a5cc9 10%, transparent); }
+.op-nodraw { font-size: 13px; color: var(--muted); } .op-nodraw b { color: var(--text); font-size: 15px; } .op-nodraw-table td:not(:first-child), .op-nodraw-table th { text-align: right; }

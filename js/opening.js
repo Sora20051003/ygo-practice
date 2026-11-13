@@ -223,7 +223,7 @@ async function opLoadUsage(fmt, oppHand) {
   }
   // 採用率が低くても出す（1つのデッキでも入っていれば）。誘発は20種類まで、0ターン展開と合わせて30まで（計算の都合）
   const traps = [...stat.values()].sort((a, b) => b.decks - a.decks).slice(0, 20)
-    .map(s => ({ id: 'c' + s.card.id, cardId: s.card.id, name: s.card.name, rate: s.decks / list.length, avg: s.copies / s.decks }));
+    .map(s => ({ id: 'c' + s.card.id, cardId: s.card.id, name: s.card.name, rate: s.decks / list.length, avg: s.copies / s.decks, draw: opIsDrawTrap(s.card) }));
   const idx = new Map(traps.map((t, i) => [t.cardId, i]));
   // 0ターン展開（エルフェンノーツ・キラーチューンなど）：相手のターン（こちらの先攻1ターン目）に手札から動き出せるカード。
   // テーマごとに1つの「誘発」として数え、そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回できるとみなす
@@ -332,7 +332,8 @@ function opAtLeastOne(n, k, hand) { let p = 1; for (let i = 0; i < hand; i++) p 
 // 使用率のデッキ全体での、初手にある確率（採用していないデッキも含めた平均）
 function opUsageOpen(u, hand, which) {
   let sum = 0;
-  for (const d of u.oppDecks) { const k = d.filter(x => (which < 0 ? x >= 0 : x === which)).length; sum += opAtLeastOne(d.length, k, hand); }
+  // which：-1＝全部、-2＝ドロー誘発を除いた全部、0以上＝その誘発だけ
+  for (const d of u.oppDecks) { const k = d.filter(x => (which === -2 ? x >= 0 && !u.traps[x].draw : which < 0 ? x >= 0 : x === which)).length; sum += opAtLeastOne(d.length, k, hand); }
   return u.oppDecks.length ? sum / u.oppDecks.length : 0;
 }
 const opUsing = st => st.opp.mode === 'usage' && opUsageCache[st.opp.src];
@@ -575,10 +576,12 @@ function opDeckCards(deck) {
 }
 
 // 計算用のデータを作る
-function opBuildModel(deck, st) {
+function opBuildModel(deck, st, noDraw) {
   const usage = opUsing(st);
   // 使用率：「数えない」にした誘発は外す（相手のデッキでは何でもないカードとして扱う）
+  // noDraw：ドロー誘発（増殖するG・マルチャミーなど）も外す（ドロー誘発を除いた確率を出すとき）
   const ignore = usage ? opIgnored(st) : new Set();
+  if (noDraw) for (const t of opTraps(st)) if (t.draw || (!usage && opIsDrawTrap(DB.cards.find(c => c.name === t.name)))) ignore.add(t.id);
   const all = opTraps(st), traps = all.filter(t => !ignore.has(t.id));
   const remap = all.map(t => traps.indexOf(t));
   const oppDecksU = usage ? (ignore.size ? usage.oppDecks.map(d => d.map(x => (x >= 0 ? remap[x] : -1))) : usage.oppDecks) : null;
@@ -759,7 +762,7 @@ function openOpeningRate() {
         el('p', { class: 'muted small-note', text: `${u.src === 'ranked' ? 'Master Duel Meta に載ったランクマッチ（マスター）のデッキ全部' : u.src === 'all' ? 'Master Duel Meta に載った大会・ランクマッチのデッキ全部' : OP_SRC_NOTE[u.fmt]} ${u.nDecks}個（${u.from} からのリスト）で数えた採用率です。計算では毎回このデッキの中から1つを相手に選び、そこから初手を配ります（その誘発を入れていないデッキや、入れていても引かない場合も確率に入ります）。` }),
         el('div', { class: 'op-row' },
           el('label', {}, '相手の手札 ', num, ' 枚'),
-          el('span', { class: 'muted', text: `相手の初手に下の誘発・0ターン展開が1枚以上ある確率 ${pct(opUsageOpen(u, H, -1))}` })),
+          el('span', { class: 'muted', text: `相手の初手に下の誘発・0ターン展開が1枚以上ある確率 ${pct(opUsageOpen(u, H, -1))}（ドロー誘発を除くと ${pct(opUsageOpen(u, H, -2))}）` })),
         el('p', { class: 'muted small-note', text: '「0ターン展開」は、相手が後攻のときに、こちらの先攻1ターン目に手札から展開して妨害してくること（エルフェンノーツ・キラーチューンなど。動き出せるカードは効果の文から見分けています）。こちらが先攻の計算だけに入り、後攻の計算には入りません。相手のターンに使える妨害（無効・破壊・除外など）があるテーマだけ出しています。そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回あるとみなします。チェックを外した行は数えません。' }),
         el('table', { class: 'op-trap-table' },
           el('tr', {}, el('th', { text: '数える' }), el('th', { text: '誘発' }), el('th', { text: '採用率' }), el('th', { text: '採用時の枚数' }), el('th', { text: '相手の初手にある' })),
@@ -805,19 +808,26 @@ function openOpeningRate() {
       } }) : null);
   }
   function renderResults(R) {
-    const col = (title, r, exact) => {
+    const col = (title, r, exact, rn) => {
       const n = r.iters, raw = r.raw / n, nsok = r.nsok / n, real = r.real / n, inf = r.realInfNs / n;
       const se = Math.sqrt(real * (1 - real) / n);
       const bar = (label, v, cls) => el('div', { class: 'op-bar' }, el('span', { text: label }), el('div', { class: 'op-track' }, el('div', { class: 'op-fill ' + cls, style: `width:${(v * 100).toFixed(2)}%` })), el('b', { text: pct(v) }));
       return el('div', { class: 'op-res-col' },
         el('h4', { text: title }),
-        el('div', { class: 'muted', text: '実質初動率' }), el('div', { class: 'op-big', text: pct(real) }), el('div', { class: 'muted small-note', text: `誤差 ±${pct(1.96 * se, 2)}` }),
+        el('div', { class: 'muted', text: '実質初動率' }), el('div', { class: 'op-big', text: pct(real) }),
+        rn && R.hasDraw ? el('div', { class: 'op-nodraw' }, 'ドロー誘発を除くと ', el('b', { text: pct(rn.real / rn.iters) })) : null, el('div', { class: 'muted small-note', text: `誤差 ±${pct(1.96 * se, 2)}` }),
         bar('初動率', raw, 'f1'), bar('召喚権を考慮', nsok, 'f2'), bar('実質初動率', real, 'f3'),
         // 貫通率：初動がある手札の中で、相手が止める誘発を必ず撃ってきても展開を続けられる率
         el('div', { class: 'op-pierce' },
           el('div', { class: 'op-pierce-head' }, el('b', { text: '貫通率' }), el('span', { class: 'muted', text: '（初動を止められても、ほかの初動で展開を続けられる率）' })),
           ...[[1, r.pierce1], [2, r.pierce2]].map(([k, v]) => bar(`誘発${k}枚を受けても`, r.nsok ? v / r.nsok : 0, 'f4')),
           el('div', { class: 'muted small-note', text: `初動がある手札の中での率です（相手は止められる初動に必ず撃つ。誘発ケアで無効にできるときは使う）。全部の手札の中では 誘発1枚 ${pct(r.pierce1 / n)}・2枚 ${pct(r.pierce2 / n)}。` })),
+        // ドロー誘発（増殖するG・マルチャミーなど）を除いたときとの比べ
+        rn && R.hasDraw ? el('table', { class: 'op-trap-table op-nodraw-table' },
+          el('tr', {}, el('th', { text: '' }), el('th', { text: '全部の誘発' }), el('th', { text: 'ドロー誘発を除く' })),
+          [['実質初動率', x => x.real / x.iters], ['相手の誘発で止まる', x => (x.nsok - x.real) / x.iters],
+           ['貫通率（誘発1枚）', x => (x.nsok ? x.pierce1 / x.nsok : 0)], ['貫通率（誘発2枚）', x => (x.nsok ? x.pierce2 / x.nsok : 0)]]
+            .map(([l, f]) => el('tr', {}, el('td', { text: l }), el('td', { text: pct(f(r)) }), el('td', { text: pct(f(rn)) })))) : null,
         el('ul', { class: 'op-loss' },
           el('li', {}, '事故（初動なし）：', el('b', { text: pct(1 - raw) })),
           el('li', {}, '召喚権が足りない組み合わせしかない：', el('b', { text: pct(raw - nsok) })),
@@ -828,7 +838,7 @@ function openOpeningRate() {
           el('tr', {}, el('th', { text: '相手が1枚だけ持っていた誘発' }), el('th', { text: '展開できる率' })),
           R.model.traps.map((t, i) => el('tr', {}, el('td', { text: t.name }), el('td', { text: r === R.second && t.zero ? '—（後攻では無い）' : pct(r.perTrap[i] / n) })))) : null);
     };
-    resBox.replaceChildren(starterSummary(), el('div', { class: 'op-res-grid' }, col('先攻（手札5枚）', R.first, R.exact5), col('後攻（手札6枚）', R.second, R.exact6)));
+    resBox.replaceChildren(starterSummary(), el('div', { class: 'op-res-grid' }, col('先攻（手札5枚）', R.first, R.exact5, R.firstND), col('後攻（手札6枚）', R.second, R.exact6, R.secondND)));
   }
 
   const iters = el('select', {}, [[20000, '2万回（速い）'], [100000, '10万回'], [300000, '30万回（精密）']].map(([v, l]) => el('option', { value: v, text: l, selected: (st.iters || 100000) === v })));
@@ -843,7 +853,9 @@ function openOpeningRate() {
     runMsg.textContent = '計算中…'; run.disabled = true;
     setTimeout(() => {
       const n = st.iters || 100000, t0 = performance.now();
-      const R = { model, first: OpSim.simulate(model, 5, n), second: OpSim.simulate(model, 6, n, true), exact5: OpSim.exactSingle(model, 5), exact6: OpSim.exactSingle(model, 6) };
+      // ドロー誘発を除いた確率も同時に出す
+      const nd = opBuildModel(deck, st, true);
+      const R = { model, first: OpSim.simulate(model, 5, n), second: OpSim.simulate(model, 6, n, true), firstND: OpSim.simulate(nd, 5, n), secondND: OpSim.simulate(nd, 6, n, true), hasDraw: nd.T < model.T, exact5: OpSim.exactSingle(model, 5), exact6: OpSim.exactSingle(model, 6) };
       renderResults(R);
       const errs = Object.keys(model.comboErrors).length;
       runMsg.textContent = `完了（${((performance.now() - t0) / 1000).toFixed(1)}秒）` + (errs ? `　※書き方に誤りのある組み合わせ ${errs}件は数えていません` : '');
@@ -1068,3 +1080,5 @@ function opNameOpt(c, no) {
   }
   return false;
 }
+// ドロー誘発（相手の行動に合わせてドローする手札誘発：増殖するG・マルチャミーなど）か
+function opIsDrawTrap(c) { return !!c && /ドローする/.test(opText(c)); }
