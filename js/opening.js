@@ -143,6 +143,8 @@ const OpSim = (() => {
         opp[t] = r ? 1 + (r >> 4) : 0;
         if (r && !(r & 1)) { if (r & 2) fieldBits |= 1 << t; if (r & 4) handBits |= 1 << t; }
       }
+      // 「相手フィールドのモンスターが効果を発動した時」の手札誘発（調和ノ天救竜など）：こちらが場でモンスター効果を使う初動だけ止める
+      for (let t = 0; t < T; t++) if (opp[t] > 0 && m.traps[t].fieldCond) fieldBits |= 1 << t;
       s.fieldBits = fieldBits; s.handBits = handBits;
       // 0ターン展開（相手が後攻のとき、こちらの先攻1ターン目に展開する）：こちらが後攻なら無い。
       // 試していないもの（相手のデッキの中身が無いとき）は、そのテーマのカードが何枚あっても妨害1回
@@ -174,7 +176,7 @@ const OpSim = (() => {
 
 const OP_ROLES = [['starter', '初動'], ['extender', '展開札'], ['handtrap', '手札誘発'], ['care', '誘発ケア'], ['brick', '事故札'], ['other', 'その他']];
 const OP_CARE_NAMES = ['抹殺の指名者', '墓穴の指名者', '三戦の才', '禁じられた一滴'];
-const OP_STOP_RE = /0ターン展開|うらら|泡影|ヴェーラー|わらし|しぐれ|うさぎ|ドロール|γ/;   // 初動を止める誘発（増殖するGなどは止めない扱い）
+const OP_STOP_RE = /0ターン展開|調和ノ天救竜|うらら|泡影|ヴェーラー|わらし|しぐれ|うさぎ|ドロール|γ/;   // 初動を止める誘発（増殖するGなどは止めない扱い）
 // 手札誘発として数えないカード（自分の展開を助けるカード・永続罠など）
 const OP_NOT_TRAP = ['墓穴の指名者', '抹殺の指名者', '三戦の才', 'センサー万別'];
 const OP_SRC = { md: 'マスターデュエル', ocg: 'OCG', tcg: 'TCG（海外）' };
@@ -223,7 +225,7 @@ async function opLoadUsage(fmt, oppHand) {
   }
   // 採用率が低くても出す（1つのデッキでも入っていれば）。誘発は20種類まで、0ターン展開と合わせて30まで（計算の都合）
   const traps = [...stat.values()].sort((a, b) => b.decks - a.decks).slice(0, 20)
-    .map(s => ({ id: 'c' + s.card.id, cardId: s.card.id, name: s.card.name, rate: s.decks / list.length, avg: s.copies / s.decks, draw: opIsDrawTrap(s.card) }));
+    .map(s => ({ id: 'c' + s.card.id, cardId: s.card.id, name: s.card.name, rate: s.decks / list.length, avg: s.copies / s.decks, draw: opIsDrawTrap(s.card), fieldCond: opIsFieldCondTrap(s.card) }));
   const idx = new Map(traps.map((t, i) => [t.cardId, i]));
   // 0ターン展開（エルフェンノーツ・キラーチューンなど）：相手のターン（こちらの先攻1ターン目）に手札から動き出せるカード。
   // テーマごとに1つの「誘発」として数え、そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回できるとみなす
@@ -582,7 +584,9 @@ function opBuildModel(deck, st, noDraw) {
   // noDraw：ドロー誘発（増殖するG・マルチャミーなど）も外す（ドロー誘発を除いた確率を出すとき）
   const ignore = usage ? opIgnored(st) : new Set();
   if (noDraw) for (const t of opTraps(st)) if (t.draw || (!usage && opIsDrawTrap(DB.cards.find(c => c.name === t.name)))) ignore.add(t.id);
-  const all = opTraps(st), traps = all.filter(t => !ignore.has(t.id));
+  // 自分で決めた誘発も、カード名から「相手フィールドのモンスターが効果を発動した時」の誘発かを見る
+  const all = usage ? opTraps(st) : opTraps(st).map(t => ({ ...t, fieldCond: opIsFieldCondTrap(DB.cards.find(c => c.name === t.name)) }));
+  const traps = all.filter(t => !ignore.has(t.id));
   const remap = all.map(t => traps.indexOf(t));
   const oppDecksU = usage ? (ignore.size ? usage.oppDecks.map(d => d.map(x => (x >= 0 ? remap[x] : -1))) : usage.oppDecks) : null;
   const trapIndex = new Map(traps.map((t, i) => [t.id, i]));
@@ -1082,3 +1086,5 @@ function opNameOpt(c, no) {
 }
 // ドロー誘発（相手の行動に合わせてドローする手札誘発：増殖するG・マルチャミーなど）か
 function opIsDrawTrap(c) { return !!c && /ドローする/.test(opText(c)); }
+// 「相手フィールドのモンスターが効果を発動した時」に使う手札誘発か（調和ノ天救竜など）
+function opIsFieldCondTrap(c) { return !!c && /相手フィールドのモンスターが効果を発動した時/.test(opText(c)); }
