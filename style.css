@@ -1873,3 +1873,6 @@ details.multi.has-ex > summary { color: var(--danger); }
 .op-trap-table { width: 100%; margin-top: 8px; font-size: 13px; border-collapse: collapse; }
 .op-trap-table th, .op-trap-table td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: left; }
 .op-about { margin-top: 14px; font-size: 13px; }
+.op-badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); white-space: nowrap; }
+.op-badge.manual { border-color: var(--muted); color: var(--muted); }
+.op-auto-msg { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

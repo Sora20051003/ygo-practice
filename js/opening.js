@@ -207,6 +207,93 @@ function opCardSetting(st, id) {
   if (opUsing(st)) { const d = opDefaultVuln(st, c); s.vulnU = d.vuln; s.countersU = d.counters; }
   return s;
 }
+// ---------- 初動の自動判別 ----------
+// そのカード1枚だけを手札にした対戦を作り、発動・通常召喚・特殊召喚を3手先まで試す。
+// デッキのカードが手札・フィールド・墓地へ動いたら（サーチ・デッキからの特殊召喚・墓地へ送るなど）初動とみなす。
+// 通常召喚を使わずに動ければ召喚権なし、通常召喚が必要なら召喚権ありにする
+const OP_JUDGE_V = 1;   // 判別のしかたを変えたら上げる（前の結果を使わない）
+const OP_DEPTH = 3, OP_BRANCH = 6, OP_NODES = 36;
+// 試している間の選択の答え：自分の効果はできるだけ使う
+function opProbeAnswer(m, me) {
+  switch (m.type) {
+    case MSG.SELECT_CHAIN: {
+      if (m.forced) return { type: RES.SELECT_CHAIN, index: 0 };
+      const i = (m.selects || []).findIndex(c => c.controller === me);
+      return { type: RES.SELECT_CHAIN, index: i >= 0 ? i : null };
+    }
+    case MSG.SELECT_CARD: { const k = Math.min(Math.max(m.min, 1), m.max || 1, m.selects.length); return { type: RES.SELECT_CARD, indicies: [...Array(k).keys()] }; }
+    default: return probeAnswer(m, me);
+  }
+}
+// 選択に答えながら、自分のメインフェイズの行動選択まで進める
+function opAdvance(t) {
+  let alt = null, k = 0;
+  for (let guard = 0; guard < 80 && t.pending && t.pending.type !== MSG.SELECT_IDLECMD && !t.ended; guard++) {
+    const p = t.pending;
+    let res;
+    if (t.retry) { if (!alt) alt = altAnswers(p); res = alt[k++]; if (!res) return false; }
+    else { alt = null; k = 0; res = opProbeAnswer(p, t.me); }
+    t.respond(res, false);
+  }
+  return !!(t.pending && t.pending.type === MSG.SELECT_IDLECMD);
+}
+// デッキから手札・フィールド・墓地へ動いたカードの数（ドローや、デッキから除外するコストは数えない）
+const opGain = t => t.events.filter(e => e.t === 'move' && e.from.loc === LOC.DECK && e.from.con === t.me && (e.to.loc & (LOC.HAND | LOC.MZONE | LOC.SZONE | LOC.GRAVE))).length;
+async function opJudgeCard(base, id) {
+  const best = { free: 0, ns: 0 };
+  let nodes = 0;
+  const mk = () => new AutoDuel({ main: base.main, extra: base.extra, handIds: [id], handSize: 5, seed: [1n, 2n, 3n, 4n], opp: null, chainMode: 'off', autoTrigger: true, tools: false, rule: base.rule, speed: '', errata: base.errata, sv: 2 });
+  const actionsOf = p => {
+    const out = [], seen = new Set();
+    const add = (list, action) => (list || []).forEach((c, i) => { const key = action + ':' + c.code + ':' + (c.description || ''); if (!seen.has(key)) { seen.add(key); out.push({ type: RES.SELECT_IDLECMD, action, index: i }); } });
+    add(p.activates, IDLE.ACTIVATE); add(p.special_summons, IDLE.SPSUMMON); add(p.summons, IDLE.SUMMON);
+    return out.slice(0, OP_BRANCH);
+  };
+  // hist まで流し直し、行動 act をして、選択に答えて次の行動選択まで進める（act が無ければ最初の状態）
+  const visit = async (hist, act, depth, usedNS) => {
+    if (nodes >= OP_NODES || best.free > 0) return;
+    nodes++;
+    if (nodes % 3 === 0) await new Promise(r => setTimeout(r, 0));   // 画面が固まらないように
+    const t = mk();
+    let next = null;
+    try {
+      t.create();
+      t.run(hist.slice());
+      if (act) { if (!t.pending || t.pending.type !== MSG.SELECT_IDLECMD) return; t.respond(act, false); }
+      if (!opAdvance(t)) return;
+      const g = opGain(t);
+      if (usedNS) best.ns = Math.max(best.ns, g); else best.free = Math.max(best.free, g);
+      if (depth < OP_DEPTH) next = { hist: t.history(), acts: actionsOf(t.pending) };
+    } catch (e) { return; } finally { if (t.h) Engine.lib.destroyDuel(t.h); }
+    if (next) for (const a of next.acts) await visit(next.hist, a, depth + 1, usedNS || a.action === IDLE.SUMMON);
+  };
+  await visit([], null, 0, false);
+  return { v: OP_JUDGE_V, starter: best.free > 0 || best.ns > 0, ns: best.free === 0 && best.ns > 0, gain: Math.max(best.free, best.ns) };
+}
+// まだ判別していないカードを判別して、役割（初動／その他）と召喚権を入れる。自分で役割を変えたカードはそのまま
+async function opAutoJudge(deck, st, onProgress) {
+  st.auto = st.auto || {};
+  const todo = opDeckCards(deck).filter(x => !(st.auto[x.id] && st.auto[x.id].v === OP_JUDGE_V));
+  if (!todo.length) return false;
+  const errata = errataOfDecks(errataMode(), deck);
+  await engineLoad(() => {});
+  await loadCardScripts([...deck.main, ...(deck.extra || []), OPP_FILLER], () => {}, errata, true);
+  const base = { main: deck.main.filter(id => DB.byId.has(id)), extra: (deck.extra || []).filter(id => DB.byId.has(id)), rule: masterRule(), errata };
+  let i = 0;
+  for (const { id } of todo) {
+    onProgress && onProgress(++i, todo.length, (DB.byId.get(id) || {}).name);
+    const s = opCardSetting(st, id);
+    // 手札誘発・誘発ケアは試さない（相手の行動が無いと使えない）
+    const r = s.role === 'handtrap' || s.role === 'care' ? { v: OP_JUDGE_V, starter: false, ns: false, gain: 0, skip: true } : await opJudgeCard(base, id);
+    st.auto[id] = r;
+    if (!s.manual && !r.skip) {
+      s.role = r.starter ? 'starter' : s.role === 'starter' ? 'other' : s.role;
+      if (r.starter) s.ns = r.ns;
+    }
+  }
+  return true;
+}
+
 function opDeckCards(deck) {
   const count = new Map();
   for (const id of deck.main) count.set(id, (count.get(id) || 0) + 1);
@@ -274,6 +361,7 @@ function openOpeningRate() {
   const cardsBox = el('div', { class: 'op-cards' }), countBox = el('div', { class: 'op-count muted' });
   const combosBox = el('div', { class: 'op-combos' }), oppBox = el('div', { class: 'op-opp' }), resBox = el('div', { class: 'op-results' });
   const runMsg = el('span', { class: 'muted' });
+  const autoMsg = el('div', { class: 'op-auto-msg muted small-note' });
   const names = el('datalist', { id: 'op-names' });
 
   const trapChips = (s, field0) => {
@@ -300,17 +388,17 @@ function openOpeningRate() {
     cardsBox.replaceChildren(...list.map(({ id, n, card }) => {
       const s = opCardSetting(st, id);
       const role = el('select', {}, OP_ROLES.map(([v, l]) => el('option', { value: v, text: l, selected: s.role === v })));
-      role.onchange = () => { s.role = role.value; save(); renderCards(); renderCount(); };
+      role.onchange = () => { s.role = role.value; s.manual = true; save(); renderCards(); renderCount(); };
       const uses = s.role === 'starter' || s.role === 'extender';
       const ns = el('input', { type: 'checkbox', checked: !!s.ns });
-      ns.onchange = () => { s.ns = ns.checked; save(); };
+      ns.onchange = () => { s.ns = ns.checked; s.manual = true; save(); };
       const prio = el('input', { type: 'number', class: 'op-prio', value: s.priority });
       prio.oninput = () => { s.priority = Number(prio.value) || 0; save(); };
       const tags = el('input', { type: 'text', class: 'op-tags', value: s.tags || '', placeholder: 'タグ（例：素材）' });
       tags.onchange = () => { s.tags = tags.value; save(); renderCombos(); };
       return el('div', { class: 'op-card role-' + s.role },
         el('div', { class: 'op-card-head' },
-          el('b', { class: 'op-name', text: card.name, title: card.name }), el('span', { class: 'muted', text: `×${n}` }), role,
+          el('b', { class: 'op-name', text: card.name, title: card.name }), el('span', { class: 'muted', text: `×${n}` }), opBadge(st, id, s), role,
           uses ? el('label', { class: 'op-ns', title: 'このカードを使うと通常召喚権を使う' }, ns, '召喚権を使う') : null,
           s.role === 'starter' ? el('label', { class: 'op-ns', title: '小さいほど先に使う' }, '優先度', prio) : null,
           tags),
@@ -442,7 +530,7 @@ function openOpeningRate() {
     el('p', { class: 'muted small-note', text: '手札をたくさん配って数えます。「初動」にするカードを選び、2枚そろって初動になるものは「組み合わせ初動」に書いてください。設定はデッキごとに保存されます。' }),
     el('h3', { text: '1. カードの役割' }),
     el('p', { class: 'muted small-note', text: '初動＝1枚で展開が始まるカード ／ 展開札＝1枚では初動にならないカード（組み合わせで使う） ／ 誘発ケア＝抹殺の指名者など。「召喚権を使う」はそのカードで通常召喚する場合にチェック（推測で入れてあります）。' }),
-    countBox, cardsBox,
+    autoMsg, countBox, cardsBox,
     el('h3', { text: '2. 組み合わせ初動' }),
     el('p', { class: 'muted small-note', text: '例：「カードA + カードB」「#素材 + #素材」「2x #レベル4」。#タグ はカードのタグ欄に書いた名前で、そのタグのカードどれか1枚です。' }),
     combosBox,
@@ -458,5 +546,26 @@ function openOpeningRate() {
         el('li', { text: '実質初動率：相手にもデッキから手札を配り、止められずに展開できた割合（「環境の使用率から」では、毎回大会のデッキを1つ選んで相手のデッキにします）。初動を優先度の順に使い、相手は止められる誘発があれば撃ち（ケアされないものから）、自分はケア札があれば無効にします。止められた初動のカードと召喚権は失い、残りで次の初動を試します。' }),
         el('li', { text: '分かりやすさ優先の近似です。止まった初動から一部のリソースが残る場合や、召喚権を増やすカード、増殖するGを受けて展開をやめる判断などは考えていません。' }))));
   renderCount(); renderCards(); renderCombos(); renderOpp();
+  // 初動の自動判別（まだ判別していないカードだけ。終わったら役割を入れ直す）
+  const judge = async (redo) => {
+    if (redo) { st.auto = {}; for (const s of Object.values(st.cards)) delete s.manual; }
+    autoMsg.textContent = '初動を自動で判別しています…';
+    try {
+      const changed = await opAutoJudge(deck, st, (i, n, name) => { autoMsg.textContent = `初動を自動で判別しています… ${i}/${n}（${name}）`; });
+      if (changed) { save(); renderCards(); renderCount(); }
+      const list = opDeckCards(deck), auto = st.auto || {};
+      autoMsg.replaceChildren(`自動で判別しました：初動 ${list.filter(x => auto[x.id] && auto[x.id].starter).length}種類（そのカード1枚だけの手札から、デッキのカードを手札・フィールド・墓地へ動かせるもの）。違っていたら役割を直してください。`,
+        el('button', { class: 'btn small', text: '判別をやり直す（手で変えた役割も戻す）', onclick: () => judge(true) }));
+    } catch (e) { console.error(e); autoMsg.textContent = '初動を自動で判別できませんでした：' + e.message; }
+  };
+  judge(false);
   showModal({ title: `📊 初動率：${deck.name}`, body: root, wide: true, onClose: () => { clearTimeout(saveTimer); store.set(opKey(deck.id), st); } });
+}
+
+// カードの横の小さな印（自動で初動と判別した／自分で変えた）
+function opBadge(st, id, s) {
+  const a = st.auto && st.auto[id];
+  if (s.manual) return el('span', { class: 'op-badge manual', text: '手動', title: '自分で役割・召喚権を変えたカード（自動の判別では変えません）' });
+  if (a && a.starter) return el('span', { class: 'op-badge', text: `自動：初動${a.ns ? '（召喚）' : ''}`, title: `このカード1枚から、デッキのカードを${a.gain}枚以上動かせました${a.ns ? '（通常召喚が必要）' : ''}` });
+  return null;
 }
