@@ -143,6 +143,8 @@ const OpSim = (() => {
         opp[t] = r ? 1 + (r >> 4) : 0;
         if (r && !(r & 1)) { if (r & 2) fieldBits |= 1 << t; if (r & 4) handBits |= 1 << t; }
       }
+      // 手札誘発の回数：名称ターン1のものは何枚引いても1回。1回で妨害が2回になるもの（調和ノ天救竜：破壊＋墓地へ送ったシンクロの効果）はその分
+      for (let t = 0; t < T; t++) { const tr = m.traps[t]; if (tr.zero || !opp[t]) continue; if (tr.opt) opp[t] = 1; if (tr.mult > 1) opp[t] *= tr.mult; }
       // 「相手フィールドのモンスターが効果を発動した時」の手札誘発（調和ノ天救竜など）：こちらが場でモンスター効果を使う初動だけ止める
       for (let t = 0; t < T; t++) if (opp[t] > 0 && m.traps[t].fieldCond) fieldBits |= 1 << t;
       s.fieldBits = fieldBits; s.handBits = handBits;
@@ -156,7 +158,7 @@ const OpSim = (() => {
       if (pierce(m, hc, 1, 1, s)) res.pierce1++;
       if (pierce(m, hc, 2, 1, s)) res.pierce2++;
       s.fieldBits = 0; s.handBits = 0;   // 1枚だけ持っていたとき：動けたものとして数える
-      for (let t = 0; t < T; t++) { if (second && (m.zeroIdx || []).includes(t)) continue; single.fill(0); single[t] = 1; if (resolve(m, hc, single, 1, s)) res.perTrap[t]++; }
+      for (let t = 0; t < T; t++) { if (second && (m.zeroIdx || []).includes(t)) continue; single.fill(0); single[t] = m.traps[t].mult > 1 ? m.traps[t].mult : 1; if (resolve(m, hc, single, 1, s)) res.perTrap[t]++; }
       let ht = 0;
       for (const k of m.handtrapIdx) ht += hc[k];
       if (ht > 0) res.withHT++;
@@ -225,7 +227,7 @@ async function opLoadUsage(fmt, oppHand) {
   }
   // 採用率が低くても出す（1つのデッキでも入っていれば）。誘発は20種類まで、0ターン展開と合わせて30まで（計算の都合）
   const traps = [...stat.values()].sort((a, b) => b.decks - a.decks).slice(0, 20)
-    .map(s => ({ id: 'c' + s.card.id, cardId: s.card.id, name: s.card.name, rate: s.decks / list.length, avg: s.copies / s.decks, draw: opIsDrawTrap(s.card), fieldCond: opIsFieldCondTrap(s.card) }));
+    .map(s => ({ id: 'c' + s.card.id, cardId: s.card.id, name: s.card.name, rate: s.decks / list.length, avg: s.copies / s.decks, draw: opIsDrawTrap(s.card), fieldCond: opIsFieldCondTrap(s.card), opt: opNameOpt(s.card, 1), mult: opTrapMult(s.card) }));
   const idx = new Map(traps.map((t, i) => [t.cardId, i]));
   // 0ターン展開（エルフェンノーツ・キラーチューンなど）：相手のターン（こちらの先攻1ターン目）に手札から動き出せるカード。
   // テーマごとに1つの「誘発」として数え、そのテーマのカードが相手の初手に1枚以上あれば、妨害が1回できるとみなす
@@ -585,7 +587,7 @@ function opBuildModel(deck, st, noDraw) {
   const ignore = usage ? opIgnored(st) : new Set();
   if (noDraw) for (const t of opTraps(st)) if (t.draw || (!usage && opIsDrawTrap(DB.cards.find(c => c.name === t.name)))) ignore.add(t.id);
   // 自分で決めた誘発も、カード名から「相手フィールドのモンスターが効果を発動した時」の誘発かを見る
-  const all = usage ? opTraps(st) : opTraps(st).map(t => ({ ...t, fieldCond: opIsFieldCondTrap(DB.cards.find(c => c.name === t.name)) }));
+  const all = usage ? opTraps(st) : opTraps(st).map(t => { const c = DB.cards.find(x => x.name === t.name); return { ...t, fieldCond: opIsFieldCondTrap(c), opt: !!c && opNameOpt(c, 1), mult: opTrapMult(c) }; });
   const traps = all.filter(t => !ignore.has(t.id));
   const remap = all.map(t => traps.indexOf(t));
   const oppDecksU = usage ? (ignore.size ? usage.oppDecks.map(d => d.map(x => (x >= 0 ? remap[x] : -1))) : usage.oppDecks) : null;
@@ -779,7 +781,7 @@ function openOpeningRate() {
             };
             return el('tr', { class: t.zero ? 'op-zero' : null },
               el('td', {}, cb),
-              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: (t.cardIds ? t.cardIds.map(id => opZeroCondLabel(id)).join('、') : t.cardNames.join('、')) + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '') }) : null, t.zero && t.why ? el('div', { class: 'muted small-note op-why', text: '動き出し：' + t.why }) : null),
+              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.mult > 1 ? el('div', { class: 'muted small-note', text: '1回で妨害2回（モンスターの破壊＋墓地へ送るシンクロの効果。こちらの場に破壊できるカードが2枚以上なら金雲獣－馬龍・エニグマスター・パックビット、1枚しかないならウィンドペガサス＠イグニスターなど）' }) : null, !t.zero && t.opt ? el('div', { class: 'muted small-note', text: '名称ターン1（何枚引いても1回）' }) : null, t.zero ? el('div', { class: 'muted small-note', text: (t.cardIds ? t.cardIds.map(id => opZeroCondLabel(id)).join('、') : t.cardNames.join('、')) + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '') }) : null, t.zero && t.why ? el('div', { class: 'muted small-note op-why', text: '動き出し：' + t.why }) : null),
               el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', {}, pct(opUsageOpen(u, H, i)), t.sim ? el('div', { class: 'muted small-note', text: `ルルカロスまで出せる：${pct(opSimRate(u, t, H), opSimRate(u, t, H) < 0.01 ? 2 : 1)}` }) : null));
           })));
       return;
@@ -1088,3 +1090,7 @@ function opNameOpt(c, no) {
 function opIsDrawTrap(c) { return !!c && /ドローする/.test(opText(c)); }
 // 「相手フィールドのモンスターが効果を発動した時」に使う手札誘発か（調和ノ天救竜など）
 function opIsFieldCondTrap(c) { return !!c && /相手フィールドのモンスターが効果を発動した時/.test(opText(c)); }
+// 1回使うと妨害が何回になるか。調和ノ天救竜（ハルモニア）は、EXデッキのSモンスターを見せて墓地へ送る分
+// （こちらの場に破壊できるカードが2枚以上：金雲獣－馬龍で表側のカードを手札に戻す／エニグマスター・パックビットでモンスターを永続罠扱いで置く。
+//  1枚しかない：ウィンドペガサス＠イグニスターを落として、あとで相手のカードが破壊されたときにこちらのカードをデッキに戻す）も妨害になるので2回
+function opTrapMult(c) { return c && c.name === '調和ノ天救竜' ? 2 : 1; }
