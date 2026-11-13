@@ -360,7 +360,19 @@ function decStartTimers() {
   clearInterval(Dec.tick);
   Dec.tick = setInterval(() => { decHostTick(); decRenderTurn(); }, 500);
 }
+// 部屋を作っている途中・入っている途中か（ボタンを2回押して部屋が2つできないように）
+let decOpening = false;
+// 前の部屋の接続を閉じる（新しく部屋を作る・入る前に）
+function decCloseOld() { clearInterval(Dec.tick); if (Dec.net) { try { Dec.net.close(); } catch { /* もう閉じている */ } } Dec.net = null; }
+
 async function decCreate(solo) {
+  if (decOpening) return;
+  if (Dec.G && (Dec.net || Dec.solo)) return;   // もう部屋にいる
+  decOpening = true;
+  try { await decCreateInner(solo); } finally { decOpening = false; }
+}
+async function decCreateInner(solo) {
+  decCloseOld();
   Dec.me = duelMe();
   Dec.solo = !!solo; Dec.isHost = true; Dec.secret = null; Dec.judged = 0;
   Dec.G = decNewState(solo);
@@ -379,8 +391,15 @@ async function decCreate(solo) {
   renderDecoder(true);
 }
 async function decJoin(code) {
+  if (decOpening) return;
+  decOpening = true;
+  try { await decJoinInner(code); } finally { decOpening = false; }
+}
+async function decJoinInner(code) {
   code = String(code || '').trim().toUpperCase();
   if (!/^[A-Z0-9]{4,8}$/.test(code)) { toast('部屋コードを入れてください'); return; }
+  if (Dec.net && Dec.code === code) return;   // もうその部屋にいる
+  decCloseOld();
   Dec.me = duelMe();
   const net = new DecoderNet(Dec.me);
   showLoading('部屋をさがしています…');
