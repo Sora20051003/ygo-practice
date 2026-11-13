@@ -49,7 +49,13 @@ const OpSim = (() => {
       let vm = 0;
       for (let k = 0; k < (used.main ?? used.length); k++) vm |= m.cards[used[k]].vuln;   // 手札コストのカードは止められる理由にならない
       // 場でモンスター効果を使わない初動（チェーン隠しできるものなど）は、「場でモンスター効果を使った時」の妨害を受けない
-      if (s.fieldBits) { let field = false; for (let k = 0; k < (used.main ?? used.length); k++) if (m.cards[used[k]].field) field = true; if (!field) vm &= ~s.fieldBits; }
+      // 条件付きの0ターン展開：場（手札・墓地）でモンスター効果を使う初動にだけ動ける
+      if (s.fieldBits || s.handBits) {
+        let field = false, hand = false;
+        for (let k = 0; k < (used.main ?? used.length); k++) { if (m.cards[used[k]].field) field = true; if (m.cards[used[k]].hand) hand = true; }
+        const allowed = (field ? s.fieldBits : 0) | (hand ? s.handBits : 0);
+        vm &= ~(s.fieldBits | s.handBits) | allowed;
+      }
       let stopped = false;
       for (;;) {
         let tAny = -1, tPick = -1;
@@ -131,10 +137,13 @@ const OpSim = (() => {
       }
       // 0ターン展開が妨害まで届くか（ティアラメンツ：ルルカロスを出せるか など）
       // fieldBits：こちらが場でモンスター効果を使ったときだけ使える妨害（ハゥフニス・クラックなど）
-      let fieldBits = 0;
-      if (!second) for (const t of m.zeroIdx || []) if (opp[t] > 0 && m.traps[t].fieldOnly) fieldBits |= 1 << t;
-      if (ids && m.zeroSim && !second) for (const [t, fn] of m.zeroSim) { const r = fn(ids, OH, OD); opp[t] = r ? 1 : 0; fieldBits &= ~(1 << t); if (r === 2) fieldBits |= 1 << t; }
-      s.fieldBits = fieldBits;
+      let fieldBits = 0, handBits = 0;
+      if (ids && m.zeroSim && !second) for (const [t, fn] of m.zeroSim) {
+        const r = fn(ids, OH, OD);   // 1＝条件なしで動ける／2＝こちらが場でモンスター効果を使えば／4＝手札・墓地でモンスター効果を使えば
+        opp[t] = r ? 1 : 0;
+        if (r && !(r & 1)) { if (r & 2) fieldBits |= 1 << t; if (r & 4) handBits |= 1 << t; }
+      }
+      s.fieldBits = fieldBits; s.handBits = handBits;
       // 0ターン展開（相手が後攻のとき、こちらの先攻1ターン目に展開する）：そのテーマのカードが何枚あっても妨害1回。こちらが後攻なら無い
       for (const t of m.zeroIdx || []) opp[t] = second ? 0 : Math.min(opp[t], 1);
       if (!nsok) continue;
@@ -143,7 +152,7 @@ const OpSim = (() => {
       if (resolve(m, hc, opp, 1, s)) res.real++;
       if (pierce(m, hc, 1, 1, s)) res.pierce1++;
       if (pierce(m, hc, 2, 1, s)) res.pierce2++;
-      s.fieldBits = m.staticField || 0;   // 1枚だけ持っていたとき：条件付きの0ターン展開は、場でモンスター効果を使った初動だけ止める
+      s.fieldBits = 0; s.handBits = 0;   // 1枚だけ持っていたとき：動けたものとして数える
       for (let t = 0; t < T; t++) { if (second && (m.zeroIdx || []).includes(t)) continue; single.fill(0); single[t] = 1; if (resolve(m, hc, single, 1, s)) res.perTrap[t]++; }
       let ht = 0;
       for (const k of m.handtrapIdx) ht += hc[k];
@@ -232,13 +241,14 @@ async function opLoadUsage(fmt, oppHand) {
   // 妨害になる効果が見つからないテーマは出さない（数えない）
   [...zero].filter(([th]) => opThemeStops(th)).sort((a, b) => b[1].decks - a[1].decks).slice(0, 30 - traps.length).forEach(([th, z]) => {
     const i = traps.length;
-    traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, fieldOnly: z.allField, stopBy: opThemeStops(th), why: opZeroWhy(DB.byId.get([...z.cards][0])), cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
+    traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, cardIds: [...z.cards], stopBy: opThemeStops(th), why: opZeroWhy(DB.byId.get([...z.cards][0])), cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
     for (const id of z.cards) idx.set(id, i);
   });
   const both = list.map(dl => { const a = [], b = []; for (const { card, n } of dl) for (let k = 0; k < n; k++) { a.push(idx.has(card.id) ? idx.get(card.id) : -1); b.push(card.id); } return [a, b]; }).filter(([a]) => a.length >= 20);
   const oppDecks = both.map(x => x[0]), oppIds = both.map(x => x[1]);
   // ティアラメンツ：ルルカロスまで出せるかを、配った手札とデッキの上のカードで試す
-  traps.forEach(t => { if (t.zero && /ティアラメンツ/.test(t.name)) t.sim = opTearSim(); });
+  // 0ターン展開：配った手札で、どのカードから・どんな条件で動き出せるかを試す（ティアラメンツはルルカロスまで）
+  traps.forEach(t => { if (t.zero) t.sim = /ティアラメンツ/.test(t.name) ? opTearSim() : opZeroSim(t.cardIds); });
   const res = { fmt, from, src, nDecks: oppDecks.length, traps, oppDecks, oppIds };
   res.partial = !textReady();   // 文が無いまま数えたものは、次に開いたときに数え直す
   if (res.partial) opStopCache.clear();
@@ -580,7 +590,7 @@ function opBuildModel(deck, st) {
       vuln: s.role === 'starter' || s.role === 'extender' ? maskOf(s[opF(st, "vuln")]) : 0,
       counter: s.role === 'care' ? maskOf(s[opF(st, "counters")]) : 0,
       tags: String(s.tags || '').split(/[,、，\s]+/).map(opNorm).filter(Boolean),
-      priority: Number(s.priority) || 0, cost: s.role === 'starter' ? s.cost | 0 : 0, field: s.noField ? 0 : 1,
+      priority: Number(s.priority) || 0, cost: s.role === 'starter' ? s.cost | 0 : 0, field: s.noField ? 0 : 1, hand: s.noHand ? 0 : 1,
     };
   });
   const nameIdx = new Map();
@@ -688,6 +698,7 @@ function openOpeningRate() {
           el('b', { class: 'op-name', text: card.name, title: card.name }), el('span', { class: 'muted', text: `×${n}` }), opBadge(st, id, s), role,
           uses ? el('label', { class: 'op-ns', title: 'このカードを使うと通常召喚権を使う' }, ns, '召喚権を使う') : null,
           uses ? (() => { const cb = el('input', { type: 'checkbox', checked: !s.noField }); cb.onchange = () => { s.noField = !cb.checked; save(); }; return el('label', { class: 'op-ns', title: 'このカードの展開で、場のモンスター効果を発動するか。チェーン隠しなどで、場のモンスター効果に合わせて動かれない（ハゥフニス・クラック・ブリッツクリークなど）なら外す' }, cb, '場でモンスター効果を使う'); })() : null,
+          uses ? (() => { const cb = el('input', { type: 'checkbox', checked: !s.noHand }); cb.onchange = () => { s.noHand = !cb.checked; save(); }; return el('label', { class: 'op-ns', title: 'このカードの展開で、手札・墓地のモンスター効果を発動するか（K9－17号 イヅナなど「相手が手札・墓地のモンスター効果を発動した」ときに動くカードに関係する）' }, cb, '手札・墓地でモンスター効果を使う'); })() : null,
           s.role === 'starter' ? el('label', { class: 'op-ns', title: '小さいほど先に使う' }, '優先度', prio) : null,
           s.role === 'starter' ? (() => { const cb = el('input', { type: 'checkbox', checked: !!s.cost }); cb.onchange = () => { s.cost = cb.checked ? 1 : 0; s.manual = true; save(); renderCount(); }; return el('label', { class: 'op-ns', title: '「手札を1枚捨てて特殊召喚」など、ほかに手札が1枚いる（初動ではないカードから先に使う）' }, cb, '手札を1枚使う'); })() : null,
           tags),
@@ -760,7 +771,7 @@ function openOpeningRate() {
             };
             return el('tr', { class: t.zero ? 'op-zero' : null },
               el('td', {}, cb),
-              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '') }) : null, t.zero && t.why ? el('div', { class: 'muted small-note op-why', text: '動き出し：' + t.why }) : null),
+              el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: (t.cardIds ? t.cardIds.map(id => opZeroCondLabel(id)).join('、') : t.cardNames.join('、')) + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '') }) : null, t.zero && t.why ? el('div', { class: 'muted small-note op-why', text: '動き出し：' + t.why }) : null),
               el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', {}, pct(opUsageOpen(u, H, i)), t.sim ? el('div', { class: 'muted small-note', text: `ルルカロスまで出せる：${pct(opSimRate(u, t, H), opSimRate(u, t, H) < 0.01 ? 2 : 1)}` }) : null));
           })));
       return;
@@ -968,4 +979,60 @@ function opSimRate(u, t, hand) {
   }
   opSimRateCache.set(key, ok / N);
   return ok / N;
+}
+
+// 0ターン展開のカードの動き出しの条件（効果の文から）
+//  kind：1＝条件なし／2＝こちらが場でモンスター効果を使った時／4＝こちらが手札・墓地でモンスター効果を使った時／0＝単独では動けない
+//  need：手札にほかに要るカード（「このカード以外の「○○」カード」「手札の他の「○○」モンスター」など）
+function opZeroCond(c) {
+  const segs = opText(c).split(/[①②③④⑤⑥]/).filter(s => OP_ZERO_TIMING.test(s) && OP_ZERO_HAND.test(s) && /特殊召喚/.test(s) && !opNeedsOwnField(s));
+  let best = null;
+  for (const s of segs) {
+    if (/自分の「[^」]+」(カード|モンスター)の効果で/.test(s)) continue;   // 自分のテーマの効果のあとでしか動けない（ウィスカ・ブリッツクリークなど）
+    const kind = /相手がフィールドのモンスターの効果を発動した/.test(s) ? 2 : /相手が手札・墓地のモンスターの効果を発動した/.test(s) ? 4 : 1;
+    // 手札にほかに要るカード（0ターン目は墓地が空なので、「手札・墓地から○○を除外」なども手札に要る）
+    const m = s.match(/(このカード以外の|他の|このカード以外の自分の)「([^」]+)」/) || s.match(/手札・墓地から()「([^」]+)」/);
+    const cond = { kind, need: m ? m[2] : null };
+    if (!best || (cond.kind === 1 && best.kind !== 1) || (cond.kind === best.kind && !cond.need && best.need)) best = cond;
+  }
+  return best || { kind: 0, need: null };
+}
+// テーマの0ターン展開：配った相手の手札で、どのカードから・どの条件で動き出せるか（返り値は条件のビット。0＝動けない）
+function opZeroSim(cardIds) {
+  const themeOf = c => (typeof decThemesOf === 'function' ? decThemesOf(c) : []);
+  const info = new Map(), needSets = new Map();
+  for (const id of cardIds) {
+    const c = DB.byId.get(id);
+    if (!c) continue;
+    const cond = opZeroCond(c);
+    if (!cond.kind) continue;
+    if (cond.need && !needSets.has(cond.need)) {
+      const key = normalizeText(cond.need);
+      needSets.set(cond.need, new Set(DB.cards.filter(x => normalizeText(x.name).includes(key) || themeOf(x).some(t => normalizeText(t) === key)).map(x => x.id)));
+    }
+    info.set(id, cond);
+  }
+  return (ids, OH) => {
+    let bits = 0;
+    for (let i = 0; i < OH; i++) {
+      const cond = info.get(ids[i]);
+      if (!cond) continue;
+      if (cond.need) {
+        const set = needSets.get(cond.need);
+        let ok = false;
+        for (let j = 0; j < OH; j++) if (j !== i && set.has(ids[j])) { ok = true; break; }
+        if (!ok) continue;
+      }
+      bits |= cond.kind;
+    }
+    return bits & 1 ? 1 : bits;
+  };
+}
+// 0ターン展開のカードの名前と、動き出しの条件
+function opZeroCondLabel(id) {
+  const c = DB.byId.get(id);
+  if (!c) return '';
+  const k = opZeroCond(c);
+  const what = k.kind === 0 ? '単独では動けない' : k.kind === 2 ? 'こちらが場でモンスター効果を使った時' : k.kind === 4 ? 'こちらが手札・墓地でモンスター効果を使った時' : '条件なし';
+  return `${c.name}（${what}${k.kind && k.need ? `・手札にほかの「${k.need}」が要る` : ''}）`;
 }
