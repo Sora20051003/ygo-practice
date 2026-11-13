@@ -101,6 +101,9 @@ const OpSim = (() => {
     const OH = m.oppHand;
     // 使用率から：毎回、大会のデッキを1つ選んで相手のデッキにする（その誘発を入れているか・何枚か、も確率に入る）
     const oppDecks = m.oppDecks ? m.oppDecks.map(d => Int32Array.from(d)) : null;
+    // 相手のデッキのカードの番号（0ターン展開が最後まで届くかを試すのに使う。oppDecks と同じ順に並べ替える）
+    const oppIds = m.oppIds ? m.oppIds.map(d => Int32Array.from(d)) : null;
+    let ids = null;
     const hc = new Int32Array(C), opp = new Int32Array(T), single = new Int32Array(T);
     const s = { hc2: new Int32Array(C), opp2: new Int32Array(T), used: [] }, used = [];
     const res = { iters, raw: 0, nsok: 0, real: 0, realInfNs: 0, withHT: 0, pierce1: 0, pierce2: 0, perTrap: new Array(T).fill(0) };
@@ -115,12 +118,17 @@ const OpSim = (() => {
       res.raw++;
       const nsok = anyRoute(m, hc, 1, used);
       opp.fill(0);
-      if (oppDecks) { oppDeck = oppDecks[Math.floor(Math.random() * oppDecks.length)]; OD = oppDeck.length; }
-      for (let i = 0; i < Math.min(OH, OD); i++) {
+      if (oppDecks) { const k = Math.floor(Math.random() * oppDecks.length); oppDeck = oppDecks[k]; OD = oppDeck.length; ids = oppIds ? oppIds[k] : null; }
+      // 手札（OH 枚）と、その次の数枚（0ターン展開でデッキの上から墓地へ送るカード）まで混ぜる
+      const MIX = Math.min(OD, OH + (ids ? 5 : 0));
+      for (let i = 0; i < MIX; i++) {
         const j = i + Math.floor(Math.random() * (OD - i));
         const tmp = oppDeck[i]; oppDeck[i] = oppDeck[j]; oppDeck[j] = tmp;
-        if (oppDeck[i] >= 0) opp[oppDeck[i]]++;
+        if (ids) { const t2 = ids[i]; ids[i] = ids[j]; ids[j] = t2; }
+        if (i < OH && oppDeck[i] >= 0) opp[oppDeck[i]]++;
       }
+      // 0ターン展開が妨害まで届くか（ティアラメンツ：ルルカロスを出せるか など）
+      if (ids && m.zeroSim && !second) for (const [t, fn] of m.zeroSim) if (opp[t] > 0 && !fn(ids, OH, OD)) opp[t] = 0;
       // 0ターン展開（相手が後攻のとき、こちらの先攻1ターン目に展開する）：そのテーマのカードが何枚あっても妨害1回。こちらが後攻なら無い
       for (const t of m.zeroIdx || []) opp[t] = second ? 0 : Math.min(opp[t], 1);
       if (!nsok) continue;
@@ -220,8 +228,11 @@ async function opLoadUsage(fmt, oppHand) {
     traps.push({ id: 'z' + th, name: `${th}の0ターン展開`, zero: true, stopBy: opThemeStops(th), why: opZeroWhy(DB.byId.get([...z.cards][0])), cardNames: [...z.cards].map(id => DB.byId.get(id).name), rate: z.decks / list.length, avg: z.copies / z.decks });
     for (const id of z.cards) idx.set(id, i);
   });
-  const oppDecks = list.map(dl => { const a = []; for (const { card, n } of dl) for (let k = 0; k < n; k++) a.push(idx.has(card.id) ? idx.get(card.id) : -1); return a; }).filter(a => a.length >= 20);
-  const res = { fmt, from, src, nDecks: oppDecks.length, traps, oppDecks };
+  const both = list.map(dl => { const a = [], b = []; for (const { card, n } of dl) for (let k = 0; k < n; k++) { a.push(idx.has(card.id) ? idx.get(card.id) : -1); b.push(card.id); } return [a, b]; }).filter(([a]) => a.length >= 20);
+  const oppDecks = both.map(x => x[0]), oppIds = both.map(x => x[1]);
+  // ティアラメンツ：ルルカロスまで出せるかを、配った手札とデッキの上のカードで試す
+  traps.forEach(t => { if (t.zero && /ティアラメンツ/.test(t.name)) t.sim = opTearSim(); });
+  const res = { fmt, from, src, nDecks: oppDecks.length, traps, oppDecks, oppIds };
   res.partial = !textReady();   // 文が無いまま数えたものは、次に開いたときに数え直す
   if (res.partial) opStopCache.clear();
   opUsageCache[fmt] = res;
@@ -600,7 +611,7 @@ function opBuildModel(deck, st) {
   const oppDeck = [];
   if (!usage) traps.forEach((t, i) => { for (let k = 0; k < (t.count | 0); k++) oppDeck.push(i); });
   while (oppDeck.length < oppDeckSize) oppDeck.push(-1);
-  return { cards, routes, costOrder, deck: deckArr, careIdx, handtrapIdx, tagCards, comboErrors, traps, T: traps.length, oppDeck, oppDecks: oppDecksU, zeroIdx: traps.map((t, i) => (t.zero ? i : -1)).filter(i => i >= 0), oppHand: usage ? st.opp.handSize | 0 : Math.min(st.opp.handSize | 0, oppDeck.length) };
+  return { cards, routes, costOrder, deck: deckArr, careIdx, handtrapIdx, tagCards, comboErrors, traps, T: traps.length, oppDeck, oppDecks: oppDecksU, oppIds: usage ? usage.oppIds : null, zeroSim: traps.map((t, i) => (t.sim ? [i, t.sim] : null)).filter(Boolean), zeroIdx: traps.map((t, i) => (t.zero ? i : -1)).filter(i => i >= 0), oppHand: usage ? st.opp.handSize | 0 : Math.min(st.opp.handSize | 0, oppDeck.length) };
 }
 
 function openOpeningRate() {
@@ -742,7 +753,7 @@ function openOpeningRate() {
             return el('tr', { class: t.zero ? 'op-zero' : null },
               el('td', {}, cb),
               el('td', { title: t.zero ? '数えるカード：' + t.cardNames.join('、') : null }, t.name, t.zero ? el('div', { class: 'muted small-note', text: t.cardNames.join('、') + (t.stopBy ? `（妨害：${t.stopBy.by.join('、')}など。止められるもの：${opStopKinds(t.stopBy)}）` : '') }) : null, t.zero && t.why ? el('div', { class: 'muted small-note op-why', text: '動き出し：' + t.why }) : null),
-              el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', { text: pct(opUsageOpen(u, H, i)) }));
+              el('td', { text: pct(t.rate) }), el('td', { text: t.avg.toFixed(1) + '枚' }), el('td', {}, pct(opUsageOpen(u, H, i)), t.sim ? el('div', { class: 'muted small-note', text: `ルルカロスまで出せる：${pct(opSimRate(u, t, H), opSimRate(u, t, H) < 0.01 ? 2 : 1)}` }) : null));
           })));
       return;
     }
@@ -891,3 +902,46 @@ function opZeroWhy(c) {
 function opText(c) { return String(((DB.byId.get(c.id) || {}).jaText) || c.jaText || ''); }
 // 公式カードの日本語の文が付いているか（アニメのカードは最初から文があるので数えない）
 function opTextReady() { let n = 0; for (const c of DB.cards) if (c.cid && c.jaText && ++n > 8000) return true; return false; }
+
+// ティアラメンツの0ターン展開がルルカロスまで届くか。
+// ①クシャトリラを相手メインフェイズに手札から特殊召喚（コストで、手札のほかの「クシャトリラ」「ティアラメンツ」カードを1枚除外。0ターン目は墓地が空）
+// ②デッキの上から3枚を墓地へ → その中に融合できるティアラメンツ（メイルゥ・ハゥフニス・シェイレーン）があれば、クシャトリラと融合してキトカロス
+// ③キトカロスの効果でデッキから名前の違う融合できるティアラメンツを墓地へ → キトカロスと融合してルルカロス
+function opTearSim() {
+  const themeOf = c => (typeof decThemesOf === 'function' ? decThemesOf(c) : []);
+  const kash = new Set(DB.cards.filter(c => c.name === 'ティアラメンツ・クシャトリラ').map(c => c.id));
+  const cost = new Set(DB.cards.filter(c => themeOf(c).some(t => /ティアラメンツ|クシャトリラ/.test(t)) || /ティアラメンツ|クシャトリラ/.test(c.name)).map(c => c.id));
+  // 融合できるティアラメンツ：効果で墓地へ送られた場合に、自分の手札・フィールド・墓地のモンスターで融合召喚するもの
+  const trig = new Map(DB.cards.filter(c => (c.type & T.MONSTER) && !(c.type & EXTRA_MASK) && /ティアラメンツ/.test(c.name) && /融合素材として好きな順番でデッキの下に戻し/.test(opText(c))).map(c => [c.id, c.name]));
+  return (ids, OH, OD) => {
+    let k = -1, other = false;
+    for (let i = 0; i < OH; i++) if (kash.has(ids[i])) { k = i; break; }
+    if (k < 0) return false;
+    for (let i = 0; i < OH; i++) if (i !== k && cost.has(ids[i])) { other = true; break; }
+    if (!other) return false;
+    const milled = [];
+    for (let i = OH; i < Math.min(OH + 3, OD); i++) if (trig.has(ids[i])) milled.push(trig.get(ids[i]));
+    if (!milled.length) return false;
+    // ルルカロス用の2体目：名前の違う融合できるティアラメンツ（落ちたカードか、まだデッキにあるもの）
+    const first = milled[0];
+    if (milled.some(n => n !== first)) return true;
+    for (let i = OH + 3; i < OD; i++) if (trig.has(ids[i]) && trig.get(ids[i]) !== first) return true;
+    return false;
+  };
+}
+// 0ターン展開が最後まで届く確率（相手の手札とデッキの上を配って試す。全部のデッキの中での率）
+const opSimRateCache = new Map();
+function opSimRate(u, t, hand) {
+  const key = t.id + ':' + hand + ':' + u.nDecks;
+  if (opSimRateCache.has(key)) return opSimRateCache.get(key);
+  const N = 20000;
+  let ok = 0;
+  for (let it = 0; it < N; it++) {
+    const ids = Int32Array.from(u.oppIds[Math.floor(Math.random() * u.oppIds.length)]);
+    const OD = ids.length, MIX = Math.min(OD, hand + 5);
+    for (let i = 0; i < MIX; i++) { const j = i + Math.floor(Math.random() * (OD - i)); const x = ids[i]; ids[i] = ids[j]; ids[j] = x; }
+    if (t.sim(ids, hand, OD)) ok++;
+  }
+  opSimRateCache.set(key, ok / N);
+  return ok / N;
+}
