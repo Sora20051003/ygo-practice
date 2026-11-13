@@ -990,11 +990,13 @@ function opZeroCond(c) {
   let best = null;
   for (const s of segs) {
     // 自分のテーマの効果のあとでしか動けない（ウィスカ・ブリッツクリークなど）：ほかの動き出せるカードと重ねて引いたときだけ動ける
-    if (/自分の「[^」]+」(カード|モンスター)の効果で/.test(s)) { if (!best) best = { kind: 0, dep: true, need: null }; continue; }
+    //  depVerb：先に動くカードの効果でしていないといけないこと（破壊・除外など）。disrupt：このカード自身に妨害の効果があるか
+    const dm = s.match(/自分の「[^」]+」(カード|モンスター)の効果で[^。]{0,12}?(破壊|除外|墓地へ送|手札に戻|特殊召喚)/);
+    if (dm || /自分の「[^」]+」(カード|モンスター)の効果で/.test(s)) { if (!best) best = { kind: 0, dep: true, need: null, depVerb: dm ? dm[2] : null, disrupt: opCardDisrupts(c) }; continue; }
     const kind = /相手がフィールドのモンスターの効果を発動した/.test(s) ? 2 : /相手が手札・墓地のモンスターの効果を発動した/.test(s) ? 4 : 1;
     // 手札にほかに要るカード（0ターン目は墓地が空なので、「手札・墓地から○○を除外」なども手札に要る）
     const m = s.match(/(このカード以外の|他の|このカード以外の自分の)「([^」]+)」/) || s.match(/手札・墓地から()「([^」]+)」/);
-    const cond = { kind, need: m ? m[2] : null };
+    const cond = { kind, need: m ? m[2] : null, text: opText(c) };
     if (!best || best.dep || (cond.kind === 1 && best.kind !== 1) || (cond.kind === best.kind && !cond.need && best.need)) best = cond;
   }
   return best || { kind: 0, need: null };
@@ -1015,11 +1017,12 @@ function opZeroSim(cardIds) {
     info.set(id, cond);
   }
   return (ids, OH) => {
-    let bits = 0, dep = 0;
+    let bits = 0;
+    const deps = [], active = [];
     for (let i = 0; i < OH; i++) {
       const cond = info.get(ids[i]);
       if (!cond) continue;
-      if (cond.dep) { dep++; continue; }
+      if (cond.dep) { deps.push(cond); continue; }
       if (cond.need) {
         const set = needSets.get(cond.need);
         let ok = false;
@@ -1027,9 +1030,12 @@ function opZeroSim(cardIds) {
         if (!ok) continue;
       }
       bits |= cond.kind;
+      active.push(cond);
     }
-    // 重ねて引いた「あとから動けるカード」は、ほかのカードが動き出せたときに妨害をもう1回（16の位に回数）
-    return bits ? (bits & 1 ? 1 : bits) | (Math.min(dep, 3) << 4) : 0;
+    // 重ねて引いた「あとから動けるカード」：そのカードに妨害の効果があり、先に動いたカードの効果で条件（破壊など）を満たせるときだけ、妨害をもう1回（16の位に回数）
+    let extra = 0;
+    if (bits) for (const d of deps) if (d.disrupt && (!d.depVerb || active.some(a => a.text.includes(d.depVerb)))) extra++;
+    return bits ? (bits & 1 ? 1 : bits) | (Math.min(extra, 3) << 4) : 0;
   };
 }
 // 0ターン展開のカードの名前と、動き出しの条件
@@ -1037,6 +1043,10 @@ function opZeroCondLabel(id) {
   const c = DB.byId.get(id);
   if (!c) return '';
   const k = opZeroCond(c);
-  const what = k.dep ? 'ほかのカードが動いたあとに重ねて動ける' : k.kind === 0 ? '単独では動けない' : k.kind === 2 ? 'こちらが場でモンスター効果を使った時' : k.kind === 4 ? 'こちらが手札・墓地でモンスター効果を使った時' : '条件なし';
+  const what = k.dep ? (k.disrupt ? `ほかのカードが動いたあとに重ねて動ける${k.depVerb ? '（先に動くカードの効果で' + k.depVerb + 'が要る）' : ''}・妨害あり` : 'ほかのカードが動いたあとに動けるが、妨害の効果は無い') : k.kind === 0 ? '単独では動けない' : k.kind === 2 ? 'こちらが場でモンスター効果を使った時' : k.kind === 4 ? 'こちらが手札・墓地でモンスター効果を使った時' : '条件なし';
   return `${c.name}（${what}${k.kind && k.need ? `・手札にほかの「${k.need}」が要る` : ''}）`;
+}
+// そのカード自身に、相手のターンに使える妨害（無効・破壊・除外・バウンスなど）の効果があるか
+function opCardDisrupts(c) {
+  return opText(c).split(/[①②③④⑤⑥]/).some(s => OP_OPP_TIMING.test(s) && OP_DISRUPT.test(s));
 }
