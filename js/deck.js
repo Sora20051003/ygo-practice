@@ -1820,6 +1820,7 @@ function setupDeckView() {
     openFilePicker(input);
   };
   $('#deck-restore').onclick = restoreBackup;
+  $('#deck-opening').onclick = () => openOpeningRate();
   $('#deck-play').onclick = () => {
     if (Decks.current().main.length === 0) { toast('メインデッキが空です'); return; }
     confirmErrataGo(Decks.current(), () => {

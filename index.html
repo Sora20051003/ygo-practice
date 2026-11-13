@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="遊戯王練習">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Egyptian+Hieroglyphs&display=swap">
-<link rel="stylesheet" href="style.css?v=20261031-234140">
+<link rel="stylesheet" href="style.css?v=20261113-095842">
 </head>
 <body>
 <header class="topbar">
@@ -138,6 +138,7 @@
           <div id="deck-warn" class="deck-warn" hidden></div>
           <div class="deck-actions">
             <button class="btn primary" id="deck-play">▶ このデッキで一人回し</button>
+            <button class="btn accent" id="deck-opening" title="初動率と、召喚権のかぶりや相手の手札誘発まで考えた実質初動率を計算">📊 初動率</button>
             <span class="action-group">
               <button class="btn small" id="deck-rename">✎ 名前を変える</button>
               <button class="btn small" id="deck-copy">⧉ コピーを作る</button>
@@ -438,30 +439,31 @@
 <div id="toast" class="toast" hidden></div>
 <div id="loading" class="loading" hidden><div class="loading-box"><div class="spinner"></div><p id="loading-text">カードデータをダウンロード中…</p></div></div>
 
-<script src="js/version.js?v=20261031-234140"></script>
-<script src="js/consts.js?v=20261031-234140"></script>
-<script src="js/ui.js?v=20261031-234140"></script>
-<script src="data/errata-texts.js?v=20261031-234140"></script>
-<script src="data/alt-arts.js?v=20261031-234140"></script>
-<script src="data/prerelease-cards.js?v=20261031-234140"></script>
-<script src="data/md-rarity.js?v=20261031-234140"></script>
-<script src="js/data.js?v=20261031-234140"></script>
-<script src="data/setnames.js?v=20261031-234140"></script>
-<script src="js/custom.js?v=20261031-234140"></script>
-<script src="js/cloud-config.js?v=20261031-234140"></script>
-<script src="js/auth.js?v=20261031-234140"></script>
-<script src="js/admin.js?v=20261031-234140"></script>
-<script src="js/deck.js?v=20261031-234140"></script>
-<script src="js/board.js?v=20261031-234140"></script>
-<script src="js/engine.js?v=20261031-234140"></script>
-<script src="js/autoplay.js?v=20261031-234140"></script>
-<script src="js/glow.js?v=20261031-234140"></script>
-<script src="js/duel.js?v=20261031-234140"></script>
-<script src="js/friends.js?v=20261031-234140"></script>
-<script src="js/decoder.js?v=20261031-234140"></script>
-<script src="js/replay.js?v=20261031-234140"></script>
-<script src="js/imgdeck.js?v=20261031-234140"></script>
-<script src="js/slots.js?v=20261031-234140"></script>
-<script src="js/app.js?v=20261031-234140"></script>
+<script src="js/version.js?v=20261113-095842"></script>
+<script src="js/consts.js?v=20261113-095842"></script>
+<script src="js/ui.js?v=20261113-095842"></script>
+<script src="data/errata-texts.js?v=20261113-095842"></script>
+<script src="data/alt-arts.js?v=20261113-095842"></script>
+<script src="data/prerelease-cards.js?v=20261113-095842"></script>
+<script src="data/md-rarity.js?v=20261113-095842"></script>
+<script src="js/data.js?v=20261113-095842"></script>
+<script src="data/setnames.js?v=20261113-095842"></script>
+<script src="js/custom.js?v=20261113-095842"></script>
+<script src="js/cloud-config.js?v=20261113-095842"></script>
+<script src="js/auth.js?v=20261113-095842"></script>
+<script src="js/admin.js?v=20261113-095842"></script>
+<script src="js/deck.js?v=20261113-095842"></script>
+<script src="js/board.js?v=20261113-095842"></script>
+<script src="js/engine.js?v=20261113-095842"></script>
+<script src="js/autoplay.js?v=20261113-095842"></script>
+<script src="js/glow.js?v=20261113-095842"></script>
+<script src="js/duel.js?v=20261113-095842"></script>
+<script src="js/friends.js?v=20261113-095842"></script>
+<script src="js/decoder.js?v=20261113-095842"></script>
+<script src="js/opening.js?v=20261113-095842"></script>
+<script src="js/replay.js?v=20261113-095842"></script>
+<script src="js/imgdeck.js?v=20261113-095842"></script>
+<script src="js/slots.js?v=20261113-095842"></script>
+<script src="js/app.js?v=20261113-095842"></script>
 </body>
 </html>

@@ -107,7 +107,7 @@ async function prepareTextSearch(task) {
 function checkScriptsLoaded() {
   const missing = [
     ['board.js', typeof renderBoard], ['engine.js', typeof engineLoad], ['autoplay.js', typeof autoStart], ['glow.js', typeof computeGlow],
-    ['duel.js', typeof setupDuel], ['friends.js', typeof startFriends], ['decoder.js', typeof renderDecoder], ['replay.js', typeof startReplay], ['deck.js', typeof openSamples],
+    ['duel.js', typeof setupDuel], ['friends.js', typeof startFriends], ['decoder.js', typeof renderDecoder], ['opening.js', typeof openOpeningRate], ['replay.js', typeof startReplay], ['deck.js', typeof openSamples],
   ].filter(x => x[1] !== 'function').map(x => x[0]);
   if (!missing.length) return;
   console.warn('読み込めなかったファイル', missing);
