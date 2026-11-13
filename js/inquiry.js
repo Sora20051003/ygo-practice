@@ -81,8 +81,7 @@ function openInquiry() {
   const direct = async () => {
     if (!body.value.trim() && !title.value.trim()) { toast('内容を書いてください'); return false; }
     let b = text();
-    if (b.length > 12000) b = b.slice(0, 12000) + '
-…（長いので省略しました）';
+    if (b.length > 12000) b = b.slice(0, 12000) + '\n…（長いので省略しました）';
     try {
       await inqSendDirect({ title: issueTitle(), body: b });
       toast('送りました。ありがとうございます（AIが読んで直します）');
