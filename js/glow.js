@@ -276,6 +276,15 @@ function snapRun(mine, oppCards, S) {
     // 手動で「使用済み」にしたカード名は、発動できないものとして扱う
     const used = new Set(S.used || []);
     for (const [uid, r] of res) { const l = locate(uid); if (l && used.has(cardOf(l.inst).name)) r.activate = false; }
+    // このターンにセットした罠・速攻魔法は発動できない（エンジンには最初から置いたカードとして並べるので、セットしたターンが分からない）
+    for (const [uid, r] of res) {
+      if (!r.activate) continue;
+      const l = locate(uid);
+      if (!l || (l.zone !== 's' && l.zone !== 'f') || l.inst.faceUp) continue;
+      const c = cardOf(l.inst);
+      if (!(has(c, T.TRAP) || has(c, T.QUICKPLAY))) continue;
+      if ((l.inst.setTurn ?? 0) >= (S.turn || 0) && !glowInfo(c).setTurnOk) r.activate = false;
+    }
     return res;
   } finally {
     if (d.h) Engine.lib.destroyDuel(d.h);

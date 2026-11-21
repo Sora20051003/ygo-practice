@@ -84,7 +84,7 @@ function autoActions(inst) {
       // 試しに発動して何も起きなかった表側の魔法・罠の効果：光らせないが、ボタンは出す（判断が外れることもあるので使えるようにしておく）
       if (Auto.noEffect && Auto.noEffect.has(index)) { out.push({ label: '効果を発動（今は何も起きないかもしれません）', title: descText(c.description), kind: '', res: { type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index } }); return; }
       const place = Auto.useless && Auto.useless.has(index);
-      out.push({ label: place ? '発動する（表側で置く）' : actLabel(), title: place ? '今は発動しても効果は起きませんが、表側で置いておけます' : descText(c.description), kind: 'y', res: { type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index } });
+      out.push({ label: place ? '発動する（表側で置く）' : actLabel(), title: place ? '今は発動しても効果は起きませんが、表側で置いておけます' : descText(c.description), kind: place ? '' : 'y', res: { type: RES.SELECT_IDLECMD, action: IDLE.ACTIVATE, index } });
     });
     // 通常召喚とセットは「召喚する」1つにまとめ、押したあとに表示形式を聞く
     const res = (action, list) => { const i = list.findIndex(same); return i < 0 ? null : { type: RES.SELECT_IDLECMD, action, index: i }; };

@@ -1517,7 +1517,7 @@ function quickActionPopup(uid, x, y) {
       if (has(c, T.FIELD)) add('発動する', 'y', () => requestPlace(uid, { zones: ['f'], faceUp: true, verb: '（発動）' }));
       else add('発動する', 'y', () => requestPlace(uid, { zones: ['s'], faceUp: true, verb: '（発動）' }));
     } else if (!isMonster(c) && !inst.faceUp) {
-      add('発動する', 'y', () => changeInst(uid, (S, i) => { i.faceUp = true; }, `${c.name}: 発動`));
+      add('発動する', 'y', () => changeInst(uid, (S, i) => { i.faceUp = true; if (onceOnlyCard(c) && !S.used.includes(c.name)) S.used.push(c.name); }, `${c.name}: 発動`));
     } else {
       add('効果を発動', 'y', () => announceActivation(uid));
     }
@@ -1536,6 +1536,16 @@ function quickActionPopup(uid, x, y) {
   return true;
 }
 
+// 手動モード：発動できる効果がすべて「このカード名の〜は1ターンに1度」のカード（1回発動したら、このターンはもう発動できない）
+function onceOnlyCard(c) {
+  if (typeof optInfo !== 'function' || !c || !c.jaText) return false;
+  const text = has(c, T.PENDULUM) && c.jaText.includes('【モンスター効果】') ? c.jaText.split('【モンスター効果】')[1] : c.jaText;
+  const o = optInfo(text);
+  if (o.all) return true;
+  const acts = o.order.filter(n => n !== o.proc);
+  return acts.length > 0 && acts.every(n => o.once.has(n));
+}
+
 // モンスターなどの効果の発動を記録する（手動なので、効果の中身は自分で処理する）。対戦なら相手にも知らせて、手札のカードは公開する
 function announceActivation(uid) {
   const l = locate(uid);
@@ -1543,6 +1553,7 @@ function announceActivation(uid) {
   const c = cardOf(l.inst);
   commit();
   log(`${c.name} の効果を発動`);
+  if (onceOnlyCard(c) && !Board.S.used.includes(c.name)) Board.S.used.push(c.name);   // もう使えないカードは光らせない
   finishChange();
   if (typeof Duel !== 'undefined' && Duel.active) {
     if (l.zone === 'hand') duelReveal(c, '手札');
