@@ -762,7 +762,7 @@ function onDuelRoom(r) {
       Duel.turnKey = key;
       Board.S.turn = r.turn;
       if (r.turnPlayer === me) {
-        Board.S.ns = false; Board.S.used = [];
+        Board.S.ns = false; Board.S.used = []; Board.S.usedEff = [];
         toast(r.turn === 1 && !r.firstDraw ? 'あなたの先攻です（最初のターンはドローしません）' : 'あなたのターンです。画面をタッチしてドローしてください');
         Duel.drawPending = r.turn > 1 || !!r.firstDraw;   // ドローフェイズ：画面をタッチしたらドロー
       } else Duel.drawPending = false;

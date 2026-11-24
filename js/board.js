@@ -784,8 +784,13 @@ function renderBoard() {
 
   const used = $('#b-used');
   used.innerHTML = '';
-  if (!S.used.length) used.append(el('li', { class: 'muted', text: 'カードのメニューから記録できます' }));
+  if (!S.used.length && !(S.usedEff || []).length) used.append(el('li', { class: 'muted', text: 'カードのメニューから記録できます' }));
   for (const n of S.used) used.append(el('li', null, n, el('button', { class: 'x', title: '外す', text: '×', onclick: () => toggleUsed(n) })));
+  // 効果ごとの使用済み（「②の効果を発動」で自動で記録したもの）
+  for (const k of S.usedEff || []) {
+    const [nm, num] = k.split('|');
+    used.append(el('li', null, `${nm}（${num}）`, el('button', { class: 'x', title: '外す', text: '×', onclick: () => { commit(); Board.S.usedEff = Board.S.usedEff.filter(x => x !== k); log(`${nm}: ${num}の使用済みマークを外す`); finishChange(); } })));
+  }
 
   const logEl = $('#b-log');
   logEl.innerHTML = '';
@@ -873,7 +878,7 @@ function setupBoardView() {
   $('#b-glow').onchange = e => { Glow.on = e.target.checked; store.set('ygo.glow', Glow.on); renderBoard(); };
   $('#b-ns').onclick = () => { if (!Board.S) return; commit(); Board.S.ns = !Board.S.ns; log(Board.S.ns ? '通常召喚を使用済みに' : '通常召喚を未使用に'); finishChange(); };
   $('#b-turn').onclick = endTurn;
-  $('#b-used-clear').onclick = () => { if (!Board.S || !Board.S.used.length) return; commit(); Board.S.used = []; log('使用済みマークをすべて外す'); finishChange(); };
+  $('#b-used-clear').onclick = () => { if (!Board.S || (!Board.S.used.length && !(Board.S.usedEff || []).length)) return; commit(); Board.S.used = []; Board.S.usedEff = []; log('使用済みマークをすべて外す'); finishChange(); };
   $('#b-copylog').onclick = () => {
     if (!Board.S) return;
     navigator.clipboard.writeText(Board.S.log.join('\n')).then(() => toast('ログをコピーしました'));
@@ -1403,7 +1408,7 @@ function endTurn() {
   // 手動：1回押すだけでターンを終える。相手のターンは飛ばして、自分の次のターンのドローフェイズへ（1枚ドロー）
   commit();
   if (S.phase !== 'EP') log('エンドフェイズへ');
-  S.turn += 2; S.ns = false; S.used = []; S.phase = 'DP';
+  S.turn += 2; S.ns = false; S.used = []; S.usedEff = []; S.phase = 'DP';
   log('---- 自分のターン（相手のターンは飛ばします） ----');
   if (S.deck.length) {
     const inst = S.deck.shift(); inst.faceUp = true; S.hand.push(inst);
@@ -1519,7 +1524,10 @@ function quickActionPopup(uid, x, y) {
     } else if (!isMonster(c) && !inst.faceUp) {
       add('発動する', 'y', () => changeInst(uid, (S, i) => { i.faceUp = true; if (onceOnlyCard(c) && !S.used.includes(c.name)) S.used.push(c.name); }, `${c.name}: 発動`));
     } else {
-      add('効果を発動', 'y', () => announceActivation(uid));
+      // 発動できる効果が複数あるとき（①と②など）は効果ごとのボタンにして、どれを使ったか記録する
+      const acts2 = (r.acts || []).filter((a, i, arr) => arr.findIndex(b => b.n === a.n) === i);
+      if (acts2.length > 1 && acts2.every(a => a.n)) for (const a of acts2) add(`${a.n}の効果を発動`, 'y', () => announceActivation(uid, a.n));
+      else add('効果を発動', 'y', () => announceActivation(uid, acts2.length === 1 ? acts2[0].n : ''));
     }
   }
   const box = el('div', { class: 'ap-actions', id: 'ap-actions' },
@@ -1547,13 +1555,19 @@ function onceOnlyCard(c) {
 }
 
 // モンスターなどの効果の発動を記録する（手動なので、効果の中身は自分で処理する）。対戦なら相手にも知らせて、手札のカードは公開する
-function announceActivation(uid) {
+function announceActivation(uid, n) {
   const l = locate(uid);
   if (!l) return;
   const c = cardOf(l.inst);
   commit();
-  log(`${c.name} の効果を発動`);
-  if (onceOnlyCard(c) && !Board.S.used.includes(c.name)) Board.S.used.push(c.name);   // もう使えないカードは光らせない
+  log(`${c.name} の${n ? n + 'の' : ''}効果を発動`);
+  if (onceOnlyCard(c)) { if (!Board.S.used.includes(c.name)) Board.S.used.push(c.name); }   // もう使えないカードは光らせない
+  else if (n && typeof optInfo === 'function' && optInfo(effText(c)).once.has(n)) {
+    // 「このカード名の②の効果は1ターンに1度」：使った効果だけ記録する（ほかの効果はまだ光る）
+    const S = Board.S;
+    S.usedEff = S.usedEff || [];
+    if (!S.usedEff.includes(c.name + '|' + n)) S.usedEff.push(c.name + '|' + n);
+  }
   finishChange();
   if (typeof Duel !== 'undefined' && Duel.active) {
     if (l.zone === 'hand') duelReveal(c, '手札');

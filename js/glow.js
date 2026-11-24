@@ -165,8 +165,20 @@ const Snap = { key: null, result: null, busy: false, failed: false, loadedFor: '
 
 function snapKey(S) {
   const opp = typeof Duel !== 'undefined' && Duel.active ? Duel.opp : null;
-  return JSON.stringify([S.hand, S.m, S.emz, S.s, S.f, S.gy, S.ban, S.extra, S.ns, S.used, opp && [opp.m, opp.emz, opp.s, opp.f, opp.gy, opp.ban]]);
+  return JSON.stringify([S.hand, S.m, S.emz, S.s, S.f, S.gy, S.ban, S.extra, S.ns, S.used, S.usedEff, opp && [opp.m, opp.emz, opp.s, opp.f, opp.gy, opp.ban]]);
 }
+// エンジンの効果の説明（カード番号＋Stringid の番号）→ 効果文の ①② の番号（分からなければ ''）
+function effText(c) {
+  const t = (c && c.jaText) || '';
+  return has(c, T.PENDULUM) && t.includes('【モンスター効果】') ? t.split('【モンスター効果】')[1] : t;
+}
+function effNumOf(c, desc) {
+  if (!c || typeof optInfo !== 'function' || desc == null) return '';
+  const d = BigInt(desc || 0), code = Number(d >> 20n), idx = Number(d & 0xfffffn);
+  if (code !== c.id && code !== c.alias) return '';
+  return optInfo(effText(c)).order[idx] || '';
+}
+
 // 盤面のカード → [{ code, loc, seq, pos, overlay? }]
 function snapCards(S) {
   const out = [];
@@ -268,6 +280,11 @@ function snapRun(mine, oppCards, S) {
       if (!inst) return;
       const r = res.get(inst.uid) || {};
       r[kind] = true;
+      // 発動できる効果を1つずつ覚えておく（効果ごとの「1ターンに1度」の判定と、効果ごとのボタンに使う）
+      if (kind === 'activate') {
+        r.acts = r.acts || [];
+        if (!r.acts.some(a => a.desc === String(c.description))) r.acts.push({ desc: String(c.description), n: effNumOf(cardOf(inst), c.description) });
+      }
       res.set(inst.uid, r);
     });
     if (!S.ns) { mark(p.summons, 'summon'); mark(p.monster_sets, 'summon'); }
@@ -276,6 +293,16 @@ function snapRun(mine, oppCards, S) {
     // 手動で「使用済み」にしたカード名は、発動できないものとして扱う
     const used = new Set(S.used || []);
     for (const [uid, r] of res) { const l = locate(uid); if (l && used.has(cardOf(l.inst).name)) r.activate = false; }
+    // 効果ごとの「このカード名の②の効果は1ターンに1度」：使った効果だけ除き、ほかの効果が残っていれば光らせる
+    const usedEff = new Set(S.usedEff || []);
+    for (const [uid, r] of res) {
+      if (!r.activate || !r.acts) continue;
+      const l = locate(uid);
+      if (!l) continue;
+      const name = cardOf(l.inst).name;
+      r.acts = r.acts.filter(a => !(a.n && usedEff.has(name + '|' + a.n)));
+      if (!r.acts.length) r.activate = false;
+    }
     // このターンにセットした罠・速攻魔法は発動できない（エンジンには最初から置いたカードとして並べるので、セットしたターンが分からない）
     for (const [uid, r] of res) {
       if (!r.activate) continue;
